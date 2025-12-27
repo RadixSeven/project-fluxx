@@ -7,13 +7,23 @@ The primary UI consists of a DAG of tasks or branches. Each task can have subtas
 
 There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each branch. Eventually, I'll also allow drawing the branch probabilities from a Dirichet distribution.
 
+When you select a node on the DAG, a second pane contains an editor.
+
+You can add child nodes. You can delete nodes.
+
 ## Sampling
 
-At any point, the system can generate a simulation of X runs of the project.
+At any point, the system can generate a simulation of X (e.g., 1000) runs of the project starting at "start time". From a simulation, we can generate multiple visualizations.
 
-## Gantt Charts
+When multiple tasks can start at any time, one is randomly selected.
 
-A critical output is Gantt charts that I can give to managers. I can choose a percentile and it creates a timeline that
+### Gantt Charts
+
+A critical output is Gantt charts that I can give to managers. I can choose a percentile P (default 97%) and it creates a timeline that ensures all tasks start and end dates are at or after the P-percentile of the corresponding percentile of runs for that task.
+
+### Probabilistic time line
+
+Choose a percentile (default=90%) Each task is represented by a box showing the minimum start, maximum end, and percentile start and percentile end. Arrows connect tasks with a dependency relation.
 
 ## History
 The history of a project will always be available enabling undo and to see how things developed. If I undo and then do something else, the history of the abandoned branch should still exist and be navigable.
