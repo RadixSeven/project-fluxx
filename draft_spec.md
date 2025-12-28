@@ -7,21 +7,41 @@ The primary UI consists of a DAG of tasks or branches. Each task can have subtas
 
 There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each branch. Eventually, I'll also allow drawing the branch probabilities from a Dirichlet distribution. Branches have only an occurrence point. They can have constraints on that occurrence point like the constraints on tasks - must occur after or at the same time as <endpoint>.
 
+In the UI, a branch looks like a dot (for an endpoint) with an line to a box for each possible world. When the occurrence point occurs at or after an endpoint, then there is an arrow to the dot. When a task endpoint occurs on or after a possible world, then there is an arrow from the right edge of the possible-world box to the left edge of the task box.
+
 When you select a node on the DAG, a second pane contains an editor for that node.
 
 You can add child nodes or nodes with no parent. You can delete nodes. You can mark nodes as done, giving the real start time and the real duration (for tasks) or which possible world occurred for branches.
 
+There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name.
+
 ## Dependencies
 
-Task endpoints can depend on other task endpoints with two constraints: endpoint time must be equal to other endpoint, endpoint time must be greater than or equal to other endpoint. The most common idea of dependency (which I may accidentally treat as the only one in the rest of the document) is that task B end time must greater than or equal to task B start time.
+Task endpoints can depend on other task endpoints with two constraints: endpoint time must be equal to other endpoint, endpoint time must be greater than or equal to other endpoint. The most common idea of dependency (which I may accidentally treat as the only one in the rest of the document) is that task B start time must be greater than or equal to task A end time.
+
+Sub-tasks have the constraint that their start time is at least their parent task's start time and that their parent tasks's end time is at least their end time.
+
+The dependency graph cannot have cycles.
 
 Task start endpoint may also depend on one or more branch possible worlds. That means the task only needs to be done in those possible worlds.
 
-## Sampling
+## Worker restrictions
 
-At any point, the system can generate a simulation of X (e.g., 1000) runs of the project starting at "start time" (e.g., 2024 Jan 12), which defaults to the next day. From a simulation, we can generate multiple visualizations.
+Some tasks (e.g., reviewing an earlier task) can only be done by a different worker than the one assigned to the other task.
 
-When multiple tasks can start at any time, one is randomly selected.
+And some tasks can only be done by particular listed workers.
+
+These restrictions are only needed in simulation.
+
+## Sampling/Simulation
+
+At any point, the system can generate a simulation of X (e.g., 1000) runs of the project starting at "start time" (e.g., 2024 Jan 12), which defaults to the start of the workday following the day the simulation was started. From a simulation, we can generate multiple visualizations.
+
+The simulation treats workers as having a number of hours they can accomplish per workday and a current task. Workers can work on one task at a time. They work on an assigned task until it is finished. When no workers are available, no task can start.
+
+We resolve a branch as soon as all its dependencies are satisfied. All tasks dependent on the worlds that did not happen will not be done.
+
+When multiple tasks can start at the same time (e.g., their dependencies are satisfied and there are available workers who can do the task), one is randomly selected.
 
 We can add more samples to a run (since they are generated independently) after a particular sampling run has finished.
 
@@ -31,7 +51,7 @@ A critical output is Gantt charts that I can give to managers. I can choose a pe
 
 #### Potential algorithm for generating Gantt charts
 
-For each task (treat versions of the task on different paths through branch nodes as different), compute the P-%ile start time and the P-%ile duration. Now solve the optimization problem that assigns a start time and duration to each item that meets the dependencies and is greater than or equal to the 90%-ile start time and 90%-ile duration for that item.
+For each task (treat versions of the task on different paths through branch nodes as different), compute the P-%ile start time and the P-%ile duration. Now solve the optimization problem that assigns a start time and duration to each item that meets the dependencies and is greater than or equal to the P%-ile start time and P%-ile duration for that item. This should be linear programming.
 
 ### Probabilistic timeline
 
@@ -48,7 +68,9 @@ History nodes that included simulation will not require random number generation
 * The tasks will get people who can do them and the simulations will take those into account.
 * Tasks will also include review time and potential reviewers.
 * We'll add holidays and vacations to the schedule.
-
+* We'll add different affinities for a worker on a task (Worker A can do it, but it will take longer)
+* Allow sampling until all possible worlds happen at least K times.
+* Use pymc for sampling (which will enable oversampling rare worlds while still keeping probabilities correct)
 
 ## Code considerations
 The program will be written in Python using PyQt. All code (including GUI code) should be pytest unit tested to 100% code coverage unless I specifically agree to an exception. All code will be static analyzed using ruff and fully type-annotated using mypy. Data schemas will be enforced by pydantic. Static analysis will happen before any commit using pre-commit.
