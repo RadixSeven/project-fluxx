@@ -9,7 +9,7 @@ There are also branch nodes representing uncertain conditions/events. For exampl
 
 Tasks can have constraints on which workers will be assigned in simulations (see *Worker restrictions* below). This consists of a whitelist of workers (which, if absent, allows any worker to be assigned) and a list of tasks (each of which must have a starts-at-or-before constraint so their assignees will be defined in the simulation) whose assignee cannot be assigned to this task. In the UI, the assignee constraint is displayed as a purple line with a 🚫 symbol on the end next to the task whose assignee is not allowed.
 
-In the UI, a branch looks like a dot (for an endpoint) with an line to a box for each possible world. When the occurrence point occurs at or after an endpoint, then there is an arrow to the dot. When a task endpoint occurs on or after a possible world, then there is an arrow from the right edge of the possible-world box to the left edge of the task box.
+In the UI, a branch looks like a dot (for an endpoint) with an line to a box for each possible world. When the occurrence point occurs at or after an endpoint, then there is an arrow to the dot. When a task endpoint occurs on or after a possible world, then there is an arrow from the right edge of the possible-world box to the left edge of the task box. The possible world list and their probabilities are edited in the editor pane. There is a list of possible worlds, descriptions, and weights. As the weights are updated, the probability (weight/total weight) is displayed. The bottom entry in the displayed list is always blank. When you click on one of the Title, Description, or Weight boxes in the blank row, it becomes a new world. Each row has a trashcan 🗑️ icon that the user can click to remove that possible world. The branch edit has the usual apply or revert icons.
 
 When you select a node on the DAG, a second pane contains an editor for that node.
 
@@ -19,7 +19,11 @@ The DAG panel has two modes: DAG display (which shows as a graph with collapsabl
 
 Nodes all have a title and description. You only see the description when you click on it (in the editor pane) or when you hover over the node.
 
-The editor pane displays the fields of the current node with appropriate controls (text boxes, list boxes, etc.) for the individual fields. There is an apply button (which I also refer to as "commit") to apply changes and a revert button to reset to the state at the last apply or when you clicked on the node. If you attempt to navigate away from a node with unapplied changes by clicking on another node, it pops up a modal asking whether to apply the changes, revert them, or undo the navigation.
+The editor pane displays the fields of the current node with appropriate controls (text boxes, list boxes, etc.) for the individual fields. There is an apply button (which I also refer to as "commit") to apply changes and a revert button to reset to the state at the last apply or when you clicked on the node. If you attempt to navigate away from a node with unapplied changes by clicking on another node, it pops up a modal asking whether to apply the changes, revert them, or undo the navigation. The editor is also where you mark a node as done and give when it started and when it finished.
+
+No changes can be applied to a node until it is consistent and has all its required fields. All edit controls with problem values are highlighted and there is a message at the top of the editor pane about one of the problems giving instructions for how to fix it. If the user reverts a new node, then the node is not created and the view switches back to the previously selected node.
+
+The duration distribution is a required field for leaf task nodes.
 
 There is a button to add an endpoint dependency from the current node. It switches the editor pane to edit-dependency mode. It allows changing the source endpoint (start, end), target endpoint (start, end), and the type (>= or =) and selecting a target node.  You cannot apply changes until everything is consistent and defined. The inconsistent edit controls are highlighted and an error message is displayed at the bottom. The target endpoint selection will be ignored (and display as "occurrence point") if a branch is selected as the target. If the current node is a branch, then the start displays as "occurrence point".
 
@@ -34,6 +38,8 @@ You can add child nodes or nodes with no parent. You can delete nodes. You can m
 You add child nodes by clicking an "add" sibling in one of the other child nodes. The added node becomes the focus. (This will be a "navigate away" event asking whether to apply changes if any others have been made.)
 
 There is a button in the editor pane to convert a task to a parent. It adds the first child and navigates to it as the focus.
+
+There is also a button to create a new node that has no parent. There is a button to see the simulations associated with the current DAG. The simulations have buttons to add more samples and buttons to generate their associated visualizations. The visualization buttons bring up a dialog to set the parameters of the visualization. After generating a visualization, it is displayed for the user and they can decide whether to save it (bringing up a dialog to select where) or discard it.
 
 There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button opens a worker list editor.
 
