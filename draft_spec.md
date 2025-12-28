@@ -83,6 +83,10 @@ We resolve a branch as soon as all its dependencies are satisfied. All tasks dep
 
 When multiple tasks can start at the same time (e.g., their dependencies are satisfied and there are available workers who can do the task), one is randomly selected. If a task N cannot have the same worker assigned as another task M, then worker assignment to M is a dependency that must be fulfilled before N can start.
 
+A sampling run runs several simulations in parallel. This is a parameter for starting the simulation. It defaults to twice the number of available processors. Early stopping should stop the child simulation processes.
+
+TODO: failed samples
+
 We can add more samples to a run (since they are generated independently) after a particular sampling run has finished.
 
 ### Gantt Charts
