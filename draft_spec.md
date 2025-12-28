@@ -55,7 +55,7 @@ Sub-tasks have the constraint that their start time is at least their parent tas
 
 The dependency graph cannot have cycles.
 
-Task start endpoint may also depend on one or more branch possible worlds. That means the task only needs to be done in those possible worlds.
+Task start endpoint may also depend on one or more branch possible worlds (these are represented as individual dependencies). That means the task only needs to be done in those possible worlds.
 
 ## Worker restrictions
 
