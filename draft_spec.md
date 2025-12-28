@@ -3,7 +3,7 @@ Project Fluxx is project planning software that incorporates uncertainty for tas
 
 ## Primary UI
 
-The primary UI consists of a DAG of tasks or branches. Each task can have subtasks (that all need to be completed for the super-task to be completed). Any leaf task has a distribution. We'll start with two: shifted lognormal (specified as min, mode and 95th percentile) and triangle (specified as min, mode, and max) but I'll certainly add more over time. Tasks can depend on another task - which means that one task must finish before the dependent task can start. If a task depends on a branch outcome, the task only needs to be done in possible worlds where the particular branch outcome happens.
+The primary UI consists of a DAG of tasks or branches. Each task can have subtasks (that all need to be completed for the super-task to be completed). Any leaf task has a distribution. We'll start with two: shifted lognormal (specified as min, mode and the 95th percentile (this is a fixed percentile)) and triangle (specified as min, mode, and max) but I'll certainly add more over time. Tasks can depend on another task - which means that one task must finish before the dependent task can start. If a task depends on a branch outcome, the task only needs to be done in possible worlds where the particular branch outcome happens.
 
 There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each branch. Eventually, I'll also allow drawing the branch probabilities from a Dirichlet distribution. Branches have only an occurrence point. They can have constraints on that occurrence point like the constraints on tasks - must occur after or at the same time as <endpoint>.
 
@@ -13,9 +13,31 @@ In the UI, a branch looks like a dot (for an endpoint) with an line to a box for
 
 When you select a node on the DAG, a second pane contains an editor for that node.
 
+The DAG is auto-layed-out and the user can pan around and zoom in and out. They can click on a node to select the node being edited in the editor pane. When you commit changes to a node, the UI updates.
+
+The DAG panel has two modes: DAG display (which shows as a graph with collapsable nodes) and the list display. A "tab" at the top switches between the two modes. The list mode displays list entries with the node title and has a search bar to narrow the list by substrings. When you've clicked on a node in the list view, it switches back to the DAG view with the new node panned to the center. 
+
+Nodes all have a title and description. You only see the description when you click on it (in the editor pane) or when you hover over the node.
+
+The editor pane displays the fields of the current node with appropriate controls (text boxes, list boxes, etc.) for the individual fields. There is an apply button (which I also refer to as "commit") to apply changes and a revert button to reset to the state at the last apply or when you clicked on the node. If you attempt to navigate away from a node with unapplied changes by clicking on another node, it pops up a modal asking whether to apply the changes, revert them, or undo the navigation.
+
+There is a button to add an endpoint dependency from the current node. It switches the editor pane to edit-dependency mode. It allows changing the source endpoint (start, end), target endpoint (start, end), and the type (>= or =) and selecting a target node.  You cannot apply changes until everything is consistent and defined. The inconsistent edit controls are highlighted and an error message is displayed at the bottom. The target endpoint selection will be ignored (and display as "occurrence point") if a branch is selected as the target. If the current node is a branch, then the start displays as "occurrence point".
+
+When selecting a node, no other changes can be made until one has been clicked on or you cancel. The edit pane switches to select-target-node mode. The user navigates using the main panel until they click on an acceptable node.
+
+Tasks have a button to exclude an assigned worker. There is a list of tasks. It switches to select task node mode, which allows you to select a task node
+
+You can click on a dependency in the editor pane to edit that dependency. The dependency
+
 You can add child nodes or nodes with no parent. You can delete nodes. You can mark nodes as done, giving the real start time and the real duration (for tasks) or which possible world occurred for branches.
 
-There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name.
+You add child nodes by clicking an "add" sibling in one of the other child nodes. The added node becomes the focus. (This will be a "navigate away" event asking whether to apply changes if any others have been made.)
+
+There is a button in the editor pane to convert a task to a parent. It adds the first child and navigates to it as the focus.
+
+There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button opens a worker list editor.
+
+The upper left corner of the editor pane displays the most recent history event. If you click on the dropdown button, it displays a tree view you can use to navigate to a different node in the history. Undo (CTRL-Y goes to the parent history node) and Redo (CTRL-Z goes to the child history node with the most recent leaf). If the editor pane is in focus, CTRL-Y and Z operate on the in-focus editor control. Only if there is no in-focus control or there are no unapplied changes to the current node do they operate on the main UI.
 
 ## Dependencies
 
