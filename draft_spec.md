@@ -27,11 +27,11 @@ The duration distribution is a required field for leaf task nodes.
 
 There is a button to add an endpoint dependency from the current node. It switches the editor pane to edit-dependency mode. It allows changing the source endpoint (start, end), target endpoint (start, end), and the type (>= or =) and selecting a target node.  You cannot apply changes until everything is consistent and defined. The inconsistent edit controls are highlighted and an error message is displayed at the bottom. The target endpoint selection will be ignored (and display as "occurrence point") if a branch is selected as the target. If the current node is a branch, then the start displays as "occurrence point".
 
-When selecting a node, no other changes can be made until one has been clicked on or you cancel. The edit pane switches to select-target-node mode. The user navigates using the main panel until they click on an acceptable node.
+When selecting a target node, no other changes can be made to the other attributes or to the DAG until the user has clicked on one or canceled. The edit pane switches to select-target-node mode. The user navigates using the main panel (which can switch back and forth to list view) until they click on an acceptable node.
 
-Tasks have a button to exclude an assigned worker. There is a list of tasks. It switches to select task node mode, which allows you to select a task node
+In the worker section, there is a list of tasks whose assignees are excluded from the current task. Each entry has a trashcan 🗑️ to remove it from the list. There is also a + icon at the end to add a task to the list. It switches to select task node mode, which allows you to select a task node like the select-target-node mode, except that only task nodes can be selected.
 
-You can click on a dependency in the editor pane to edit that dependency. The dependency
+You can click on a dependency in the editor pane to edit that dependency. It switches to the edit-dependency mode described above.
 
 You can add child nodes or nodes with no parent. You can delete nodes. You can mark nodes as done, giving the real start time and the real duration (for tasks) or which possible world occurred for branches.
 
