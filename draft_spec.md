@@ -7,6 +7,8 @@ The primary UI consists of a DAG of tasks or branches. Each task can have subtas
 
 There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each branch. Eventually, I'll also allow drawing the branch probabilities from a Dirichlet distribution. Branches have only an occurrence point. They can have constraints on that occurrence point like the constraints on tasks - must occur after or at the same time as <endpoint>.
 
+Tasks can have constraints on which workers will be assigned in simulations (see *Worker restrictions* below). This consists of a whitelist of workers (which, if absent, allows any worker to be assigned) and a list of tasks (each of which must have a starts-at-or-before constraint so their assignees will be defined in the simulation) whose assignee cannot be assigned to this task. In the UI, the assignee constraint is displayed as a purple line with a 🚫 symbol on the end next to the task whose assignee is not allowed.
+
 In the UI, a branch looks like a dot (for an endpoint) with an line to a box for each possible world. When the occurrence point occurs at or after an endpoint, then there is an arrow to the dot. When a task endpoint occurs on or after a possible world, then there is an arrow from the right edge of the possible-world box to the left edge of the task box.
 
 When you select a node on the DAG, a second pane contains an editor for that node.
@@ -37,25 +39,29 @@ These restrictions are only needed in simulation.
 
 At any point, the system can generate a simulation of X (e.g., 1000) runs of the project starting at "start time" (e.g., 2024 Jan 12), which defaults to the start of the workday following the day the simulation was started. From a simulation, we can generate multiple visualizations.
 
+The simulation tracks time on a calendar. (This means that weekends (and holidays when we implement them) exist even though no work is done.)
+
+Tasks with subtasks have all their work in the subtasks, so the super-task doesn't get assigned workers etc.
+
 The simulation treats workers as having a number of hours they can accomplish per workday and a current task. Workers can work on one task at a time. They work on an assigned task until it is finished. When no workers are available, no task can start.
 
 We resolve a branch as soon as all its dependencies are satisfied. All tasks dependent on the worlds that did not happen will not be done.
 
-When multiple tasks can start at the same time (e.g., their dependencies are satisfied and there are available workers who can do the task), one is randomly selected.
+When multiple tasks can start at the same time (e.g., their dependencies are satisfied and there are available workers who can do the task), one is randomly selected. If a task N cannot have the same worker assigned as another task M, then worker assignment to M is a dependency that must be fulfilled before N can start.
 
 We can add more samples to a run (since they are generated independently) after a particular sampling run has finished.
 
 ### Gantt Charts
 
-A critical output is Gantt charts that I can give to managers. I can choose a percentile P (default 97%) and it creates a timeline that ensures all tasks start and end dates are at or after the P-percentile of the corresponding percentile of runs for that task. The key constraint is that the timeline is conservative and respects dependencies.
+A critical output is Gantt charts that I can give to managers. The user can choose a percentile P (default 97%) through the UI for creating the chart and it creates a timeline that ensures all tasks start and end dates are at or after the Pth percentile of the corresponding percentile of runs for that task. The key constraint is that the timeline is conservative and respects dependencies.
 
 #### Potential algorithm for generating Gantt charts
 
-For each task (treat versions of the task on different paths through branch nodes as different), compute the P-%ile start time and the P-%ile duration. Now solve the optimization problem that assigns a start time and duration to each item that meets the dependencies and is greater than or equal to the P%-ile start time and P%-ile duration for that item. This should be linear programming.
+For each task (treat versions of the task on different paths through branch nodes as different), compute the Pth percentile start time and the Pth percentile duration. Now solve the optimization problem that assigns a start time and duration to each item that meets the dependencies and is greater than or equal to the Pth percentile start time and Pth percentile duration for that item. This should be linear programming.
 
 ### Probabilistic timeline
 
-Choose a percentile (default=90%) Each task is represented by a box showing the minimum start, maximum end, and percentile start and percentile end. Arrows connect endpoints with a dependency relation. If the relation is equality, it's a double-ended arrow. If the relation is greater-than-or-equal-to, then the arrow goes from the (potentially) lesser to the greater (that is, in time order). Branch points create sub-diagrams for all events after the branch happens.
+The user selects a percentile (default=90%). Each task is represented by a box showing the minimum start, maximum end, and percentile start and percentile end. Arrows connect endpoints with a dependency relation. If the relation is equality, it's a double-ended arrow. If the relation is greater-than-or-equal-to, then the arrow goes from the (potentially) lesser to the greater (that is, in time order). Branch points create sub-diagrams for all events after the branch happens.
 
 ## History
 The history of a project will always be available enabling undo and to see how things developed. If I undo and then do something else, the history of the abandoned branch should still exist and be navigable.
@@ -65,12 +71,12 @@ History nodes that included simulation will not require random number generation
 ## Future Improvements
 * I hope it will eventually integrate with Jira, using past performance to constrain the variance of task lengths and allowing Jira plan updates as I update the plan and allowing me to update the timeline as things finish and new tasks are discovered. I hope to eventually use the history estimate extra costs from adding new tasks.
 * Tasks and branches will be associated with Jira issues. Any metadata that does not map cleanly to the issue's fields will be placed in an attachment. (We can adjust this storage idea when we get to the Jira integration.)
-* The tasks will get people who can do them and the simulations will take those into account.
 * Tasks will also include review time and potential reviewers.
 * We'll add holidays and vacations to the schedule.
 * We'll add different affinities for a worker on a task (Worker A can do it, but it will take longer)
 * Allow sampling until all possible worlds happen at least K times.
 * Use pymc for sampling (which will enable oversampling rare worlds while still keeping probabilities correct)
+* Allow interactive hiding of sub-tasks in Gantt charts.
 
 ## Code considerations
 The program will be written in Python using PyQt. All code (including GUI code) should be pytest unit tested to 100% code coverage unless I specifically agree to an exception. All code will be static analyzed using ruff and fully type-annotated using mypy. Data schemas will be enforced by pydantic. Static analysis will happen before any commit using pre-commit.
