@@ -69,7 +69,7 @@ At any point, the system can generate a simulation of X (e.g., 1000) runs of the
 
 The simulation tracks time on a calendar. (This means that weekends (and holidays when we implement them) exist even though no work is done.)
 
-Tasks with subtasks have all their work in the subtasks, so the super-task doesn't get assigned workers etc.
+Tasks with subtasks have all their work in the subtasks, so the super-task doesn't get assigned workers etc. and its duration distribution is ignored. (Its subtasks determine its duration distribution implicitly.)
 
 The simulation treats workers as having a number of hours they can accomplish per workday and a current task. Workers can work on one task at a time. They work on an assigned task until it is finished. When no workers are available, no task can start.
 
