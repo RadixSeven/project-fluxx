@@ -41,7 +41,9 @@ There is a button in the editor pane for leaf tasks to convert them task to a pa
 
 You add subsequent child nodes by clicking an "add sibling" in one of the other child nodes. The added node becomes the focus. (This will also be a "navigate away" event asking whether to apply changes if any others have been made.)
 
-Above the DAG view, there is a button to create a new node that has no parent. There is also a button to see the simulations associated with the current DAG. The simulations have buttons to add more samples and buttons to generate their associated visualizations. The visualization buttons bring up a dialog to set the parameters of the visualization. After generating a visualization, it is displayed for the user and they can decide whether to save it (bringing up a dialog to select where) or discard it.
+Above the DAG view, there is a button to create a new node that has no parent.
+
+There is also a button to see the simulations associated with the current DAG. This opens in the edit panel. It displays a list of simulations with a button to create a new simulation. When you create a simulation, it opens a dialog to collect the parameters. While a simulation is running, there is a progress bar with an estimated time to completion and currently selected number of samples (which allows early stopping). The simulation entries have buttons to add more samples and buttons to generate their associated visualizations. The visualization buttons bring up a dialog to set the parameters of the visualization. After generating a visualization, it is displayed for the user and they can decide whether to save it (bringing up a dialog to select where) or discard it.
 
 There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button on the DAG opens a worker list editor.
 
