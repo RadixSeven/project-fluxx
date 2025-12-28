@@ -33,7 +33,7 @@ In the worker section, there is a list of tasks whose assignees are excluded fro
 
 There is also an optional "list of allowed workers." If it is absent, the editor pane displays, "All workers allowed. `[Click to add reduced list of allowed workers]`". If present, the list is displayed. To add a worker, one can hit the + icon and type to select from a scrollable combo list. And the list entries have the clickable trashcan 🗑️ to remove them.
 
-You can click on a dependency in the editor pane to edit that dependency. It switches to the edit-dependency mode described above.
+You can click on a dependency in the editor pane to edit that dependency. It switches to the edit-dependency mode described above. There is also a clickable trashcan 🗑️ to remove them.
 
 You can add child nodes or nodes with no parent. You can delete nodes. You can mark nodes as done, giving the real start time and the real duration (for tasks) or which possible world occurred for branches.
 
