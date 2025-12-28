@@ -86,7 +86,7 @@ For each task (treat versions of the task on different paths through branch node
 The user selects a percentile (default=90%). Each task is represented by a box showing the minimum start, maximum end, and percentile start and percentile end. Arrows connect endpoints with a dependency relation. If the relation is equality, it's a double-ended arrow. If the relation is greater-than-or-equal-to, then the arrow goes from the (potentially) lesser to the greater (that is, in time order). Branch points create sub-diagrams for all events after the branch happens.
 
 ## History
-The history of a project will always be available enabling undo and to see how things developed. If I undo and then do something else, the history of the abandoned branch should still exist and be navigable.
+The history of a project will always be available enabling undo and to see how things developed. If I undo and then do something else, the history of the abandoned branch should still exist and be navigable. The history event nodes contain the time they occurred (and if they are extended events, like running a simulation, how long they took).
 
 History nodes that included simulation will not require random number generation when reloaded - this ensures that everything is reproducible even across versions that alter the order in which things are simulated.
 
