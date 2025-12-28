@@ -43,7 +43,7 @@ You add subsequent child nodes by clicking an "add sibling" in one of the other 
 
 Above the DAG view, there is a button to create a new node that has no parent. There is also a button to see the simulations associated with the current DAG. The simulations have buttons to add more samples and buttons to generate their associated visualizations. The visualization buttons bring up a dialog to set the parameters of the visualization. After generating a visualization, it is displayed for the user and they can decide whether to save it (bringing up a dialog to select where) or discard it.
 
-There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button opens a worker list editor.
+There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button on the DAG opens a worker list editor.
 
 The upper left corner of the editor pane displays the most recent history event. If you click on the dropdown button, it displays a tree view you can use to navigate to a different node in the history. Undo (CTRL-Z goes to the parent history node) and Redo (CTRL-Y goes to the child history node with the most recent leaf). If the editor pane is in focus, CTRL-Y and Z operate on the in-focus editor control. Only if there is no in-focus control or there are no unapplied changes to the current node do they operate on the main UI.
 
