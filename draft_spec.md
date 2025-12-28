@@ -35,9 +35,9 @@ You can click on a dependency in the editor pane to edit that dependency. The de
 
 You can add child nodes or nodes with no parent. You can delete nodes. You can mark nodes as done, giving the real start time and the real duration (for tasks) or which possible world occurred for branches.
 
-You add child nodes by clicking an "add" sibling in one of the other child nodes. The added node becomes the focus. (This will be a "navigate away" event asking whether to apply changes if any others have been made.)
+There is a button in the editor pane to convert a task to a parent. It adds the first child and navigates to it as the focus. (Potentially generating the "navigate away" check about discarding/applying changes.)
 
-There is a button in the editor pane to convert a task to a parent. It adds the first child and navigates to it as the focus.
+You add subsequent child nodes by clicking an "add sibling" in one of the other child nodes. The added node becomes the focus. (This will also be a "navigate away" event asking whether to apply changes if any others have been made.)
 
 There is also a button to create a new node that has no parent. There is a button to see the simulations associated with the current DAG. The simulations have buttons to add more samples and buttons to generate their associated visualizations. The visualization buttons bring up a dialog to set the parameters of the visualization. After generating a visualization, it is displayed for the user and they can decide whether to save it (bringing up a dialog to select where) or discard it.
 
