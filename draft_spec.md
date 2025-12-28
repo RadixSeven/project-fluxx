@@ -21,7 +21,7 @@ There is also a list of workers for a project. Each worker has a number of hours
 
 Task endpoints can depend on other task endpoints with two constraints: endpoint time must be equal to other endpoint, endpoint time must be greater than or equal to other endpoint. The most common idea of dependency (which I may accidentally treat as the only one in the rest of the document) is that task B start time must be greater than or equal to task A end time.
 
-Sub-tasks have the constraint that their start time is at least their parent task's start time and that their parent tasks's end time is at least their end time.
+Sub-tasks have the constraint that their start time is at least their parent task's start time and that their parent task's end time is at least their end time.
 
 The dependency graph cannot have cycles.
 
