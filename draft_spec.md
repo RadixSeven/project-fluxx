@@ -85,7 +85,7 @@ When multiple tasks can start at the same time (e.g., their dependencies are sat
 
 A sampling run runs several simulations in parallel. This is a parameter for starting the simulation. It defaults to twice the number of available processors. Early stopping should stop the child simulation processes.
 
-TODO: failed samples
+A sampling run can fail. If all workers are available and no tasks are running and there are unfulfilled dependencies for a task in the current possible world, that sample run has failed. Save the final state and mark it as failed - allow the user to see what tasks could not be completed. More than likely, there are too many worker exclusions for the workers that could be assigned. The fraction of failed runs should be on the main simulation list display.
 
 We can add more samples to a run (since they are generated independently) after a particular sampling run has finished.
 
