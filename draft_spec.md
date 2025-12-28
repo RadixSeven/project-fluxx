@@ -43,7 +43,7 @@ There is also a button to create a new node that has no parent. There is a butto
 
 There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button opens a worker list editor.
 
-The upper left corner of the editor pane displays the most recent history event. If you click on the dropdown button, it displays a tree view you can use to navigate to a different node in the history. Undo (CTRL-Y goes to the parent history node) and Redo (CTRL-Z goes to the child history node with the most recent leaf). If the editor pane is in focus, CTRL-Y and Z operate on the in-focus editor control. Only if there is no in-focus control or there are no unapplied changes to the current node do they operate on the main UI.
+The upper left corner of the editor pane displays the most recent history event. If you click on the dropdown button, it displays a tree view you can use to navigate to a different node in the history. Undo (CTRL-Z goes to the parent history node) and Redo (CTRL-Y goes to the child history node with the most recent leaf). If the editor pane is in focus, CTRL-Y and Z operate on the in-focus editor control. Only if there is no in-focus control or there are no unapplied changes to the current node do they operate on the main UI.
 
 ## Dependencies
 
