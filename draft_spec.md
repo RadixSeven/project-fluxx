@@ -15,6 +15,8 @@ When you select a node on the DAG, a second pane contains an editor for that nod
 
 The DAG is auto-laid-out and the user can pan around and zoom in and out. They can click on a node to select the node being edited in the editor pane. When you commit changes to a node, the UI updates.
 
+The DAG panel has a control bar above it containing buttons. I will mention the individual buttons later.
+
 The DAG panel has two modes: DAG display (which shows as a graph with collapsable nodes) and the list display. A "tab" at the top switches between the two modes. The list mode displays list entries with the node title and has a search bar to narrow the list by substrings. When you've clicked on a node in the list view, it switches back to the DAG view with the new node panned to the center. 
 
 Nodes all have a title and description. You only see the description when you click on it (in the editor pane) or when you hover over the node.
