@@ -49,7 +49,7 @@ There is also a button to see the simulations associated with the current DAG. T
 
 There is also a list of workers for a project. Each worker has a number of hours they complete per workday and a name. A button on the DAG opens a worker list editor.
 
-The worker list editor is displayed in the edit panel. (So this represents a "navigate away" event.) It is a list with 3 columns: Name, ID, Description, and Hours per work day. By clicking on a blank row at the bottom, you add a worker. The ID field must be filled to distinguish two workers if they have the same name. The description is optional. The Name and Hours per day are required. As usual, there is an apply/revert pair at the bottom of the edit pane.
+The worker list editor is displayed in the edit panel. (So this represents a "navigate away" event.) It is a list with 4 columns: Name, ID, Description, and Hours per work day. By clicking on a blank row at the bottom, you add a worker. The ID field must be filled to distinguish two workers if they have the same name. The description is optional. The Name and Hours per day are required. As usual, there is an apply/revert pair at the bottom of the edit pane.
 
 The upper left corner of the editor pane displays the most recent history event. If you click on the dropdown button, it displays a tree view you can use to navigate to a different node in the history. Undo (CTRL-Z goes to the parent history node) and Redo (CTRL-Y goes to the child history node with the most recently created leaf node under it - either itself or one of its descendants). If the editor pane is in focus, CTRL-Y and Z operate on the in-focus editor control. Only if there is no in-focus control or there are no unapplied changes to the current node do they operate on the main UI.
 
