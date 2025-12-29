@@ -49,7 +49,7 @@ There is a button in the editor pane for leaf tasks to convert the task to a par
 
 You add subsequent child nodes by clicking an "add sibling" button in any of the child nodes' editor panels. The added node becomes the focus. (This will also be a "navigate away" event asking whether to apply changes if any others have been made.)
 
-When you click the delete node button, it deletes the node and deletes all dependencies with that node as one endpoint. Note that simulations created before the deletion should still be usable. If they contain references, it should be to the version of the node current before they were deleted.
+When you click the delete node button, it deletes the node and deletes all dependencies with that node as one endpoint. Note that simulations created before the deletion should still be usable. If they contain references, it should be to the version of the node as it existed when the simulation was run. When the user deletes a parent node, the deletion cascades to all its children. The UI should pop up a "This node has __ children, are you sure you want to delete them and any attached dependencies? (Y/N)" prompt to confirm the deletion before cascading.
 
 Above the DAG view, in its button bar, there is a button to create a new node that has no parent.
 
