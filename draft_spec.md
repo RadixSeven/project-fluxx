@@ -41,7 +41,7 @@ You can add child nodes or nodes with no parent. You can delete nodes. You can m
 
 There is a button in the editor pane for leaf tasks to convert the task to a parent. It adds the first child and navigates to it as the focus. (Potentially generating the "navigate away" check about discarding/applying changes.) If you remove the last sub-task from a parent node, it reverts to being a leaf node and its duration distribution from before it was made a parent is restored as the source of its duration during simulations.
 
-You add subsequent child nodes by clicking an "add sibling" in one of the other child nodes. The added node becomes the focus. (This will also be a "navigate away" event asking whether to apply changes if any others have been made.)
+You add subsequent child nodes by clicking an "add sibling" button in any of the child nodes' editor panels. The added node becomes the focus. (This will also be a "navigate away" event asking whether to apply changes if any others have been made.)
 
 Above the DAG view, in its button bar, there is a button to create a new node that has no parent.
 
