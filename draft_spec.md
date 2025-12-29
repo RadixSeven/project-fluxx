@@ -3,7 +3,11 @@ Project Fluxx is project planning software that incorporates uncertainty for tas
 
 ## Primary UI
 
-The primary UI consists of a DAG of tasks or branches. Each task can have subtasks (that all need to be completed for the super-task to be completed). Any leaf task has a distribution. We'll start with two: shifted lognormal (specified as min, mode and the 95th percentile (this is a fixed percentile)) and triangle (specified as min, mode, and max) but I'll certainly add more over time. Tasks can depend on another task - which means that one task must finish before the dependent task can start. If a task depends on a branch possible world, the task only needs to be done in sampling runs where the particular possible world is chosen.
+The primary UI consists of a DAG of tasks or branches. Each task can have subtasks (that all need to be completed for the super-task to be completed). Any leaf task has a distribution. We'll start with two: shifted lognormal [^shifted_lognormal] (specified as min, mode and the 95th percentile (this is a fixed percentile)) and triangle (specified as min, mode, and max) but I'll certainly add more over time.
+
+[^shifted_lognormal]: A shifted lognormal is a lognormal whose minimum is shifted from 0 to some other value by adding a constant. So, if $L$ is a lognormally distributed random variable, $S=L+5$ is a shifted lognormal with a minimum of 5 rather than 0.
+
+Tasks can depend on another task - which means that one task must finish before the dependent task can start. If a task depends on a branch possible world, the task only needs to be done in sampling runs where the particular possible world is chosen.
 
 There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each possible world. Eventually, I'll also allow drawing the possible world probabilities from a Dirichlet distribution. Branches have only an occurrence point. They can have constraints on that occurrence point like the constraints on tasks - must occur after or at the same time as <endpoint>.
 
