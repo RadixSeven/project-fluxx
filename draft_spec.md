@@ -3,9 +3,9 @@ Project Fluxx is project planning software that incorporates uncertainty for tas
 
 ## Primary UI
 
-The primary UI consists of a DAG of tasks or branches. Each task can have subtasks (that all need to be completed for the super-task to be completed). Any leaf task has a distribution. We'll start with two: shifted lognormal (specified as min, mode and the 95th percentile (this is a fixed percentile)) and triangle (specified as min, mode, and max) but I'll certainly add more over time. Tasks can depend on another task - which means that one task must finish before the dependent task can start. If a task depends on a branch outcome, the task only needs to be done in possible worlds where the particular branch outcome happens.
+The primary UI consists of a DAG of tasks or branches. Each task can have subtasks (that all need to be completed for the super-task to be completed). Any leaf task has a distribution. We'll start with two: shifted lognormal (specified as min, mode and the 95th percentile (this is a fixed percentile)) and triangle (specified as min, mode, and max) but I'll certainly add more over time. Tasks can depend on another task - which means that one task must finish before the dependent task can start. If a task depends on a branch possible world, the task only needs to be done in sampling runs where the particular possible world is chosen.
 
-There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each branch. Eventually, I'll also allow drawing the branch probabilities from a Dirichlet distribution. Branches have only an occurrence point. They can have constraints on that occurrence point like the constraints on tasks - must occur after or at the same time as <endpoint>.
+There are also branch nodes representing uncertain conditions/events. For example - choosing one or another base software or whether something is approved or not. There is a discrete distribution over the outcomes. Initially, this will be just a listing of the probability of each possible world. Eventually, I'll also allow drawing the possible world probabilities from a Dirichlet distribution. Branches have only an occurrence point. They can have constraints on that occurrence point like the constraints on tasks - must occur after or at the same time as <endpoint>.
 
 Tasks can have constraints on which workers will be assigned in simulations (see *Worker restrictions* below). This consists of a whitelist of workers (which, if absent, allows any worker to be assigned) and a list of tasks (each of which must have a starts-at-or-before constraint so their assignees will be defined in the simulation) whose assignee cannot be assigned to this task. In the UI, the assignee constraint is displayed as a purple line with a 🚫 symbol on the end next to the task whose assignee is not allowed.
 
@@ -27,9 +27,9 @@ No changes can be applied to a node until it is consistent and has all its requi
 
 The duration distribution is a required field for leaf task nodes.
 
-There is a button to add an endpoint dependency from the current node. It switches the editor pane to edit-dependency mode. It allows changing the source endpoint (start, end), target endpoint (start, end), and the type (>= or =) and selecting a target node (which may be a task or a branch possibility). You cannot apply changes until everything is consistent and defined. The inconsistent edit controls are highlighted and an error message is displayed at the bottom. The target endpoint selection will be ignored (and display as "occurrence point") if a branch possible world is selected as the target. If the current node is a branch, then the start displays as "occurrence point".
+There is a button to add an endpoint dependency from the current node. It switches the editor pane to edit-dependency mode. It allows changing the source endpoint (start, end), target endpoint (start, end), and the type (>= or =) and selecting a target node (which may be a task or a possible world). You cannot apply changes until everything is consistent and defined. The inconsistent edit controls are highlighted and an error message is displayed at the bottom. The target endpoint selection will be ignored (and display as "occurrence point") if a possible world is selected as the target. If the current node is a branch, then the start displays as "occurrence point".
 
-When selecting a target node for a dependency, no other changes can be made to the other attributes or to the DAG until the user has clicked on one or canceled. The edit pane switches to select-target-node mode. The user navigates using the main panel (which can switch back and forth to list view) until they click on an acceptable node. They select either a task node or one of the boxes for a branch possible world.
+When selecting a target node for a dependency, no other changes can be made to the other attributes or to the DAG until the user has clicked on one or canceled. The edit pane switches to select-target-node mode. The user navigates using the main panel (which can switch back and forth to list view) until they click on an acceptable node. They select either a task node or one of the boxes for a possible world.
 
 In the worker section, there is a list of tasks whose assignees are excluded from the current task. Each entry has a trashcan 🗑️ to remove it from the list. There is also a + icon at the end to add a task to the list. It switches to select task node mode, which allows you to select a task node like the select-target-node mode, except that only task nodes can be selected.
 
@@ -61,7 +61,7 @@ Sub-tasks have the constraint that their start time is at least their parent tas
 
 The dependency graph cannot have cycles.
 
-Task start endpoint may also depend on one or more branch possible worlds (these are represented as individual dependencies). That means the task only needs to be done in those possible worlds.
+Task start endpoint may also depend on one or more possible worlds (these are represented as individual dependencies). That means the task only needs to be done in those possible worlds.
 
 ## Worker restrictions
 
