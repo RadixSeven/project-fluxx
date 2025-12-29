@@ -101,7 +101,7 @@ We can add more samples to a run (since they are generated independently) after 
 
 ### Gantt Charts
 
-A critical output is Gantt charts that I can give to managers. The user can choose a percentile P (default 97%) through the UI for creating the chart and it creates a timeline that ensures all tasks start and end dates are at or after the Pth percentile of the corresponding percentile of runs for that task. The key constraint is that the timeline is conservative and respects dependencies.
+A critical output is Gantt charts that I can give to managers. The user can choose a percentile P (default 97%) through the UI for creating the chart and it creates a timeline that ensures all tasks' start and end dates are at or after the Pth percentile start/end time observed in runs for that task. The key constraint is that the timeline is conservative and respects dependencies.
 
 #### Potential algorithm for generating Gantt charts
 
