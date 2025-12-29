@@ -21,6 +21,8 @@ The DAG panel has two modes: DAG display (which shows as a graph with collapsabl
 
 Nodes all have a title and description. You only see the description when you click on it (in the editor pane) or when you hover over the node.
 
+At the bottom of the node editing pane, there is an apply button, a revert button, and a delete node button.
+
 The editor pane displays the fields of the current node with appropriate controls (text boxes, list boxes, etc.) for the individual fields. There is an apply button (which I also refer to as "commit") to apply changes and a revert button to reset to the state at the last apply or when you clicked on the node. If you attempt to navigate away from a node with unapplied changes by clicking on another node, it pops up a modal asking whether to apply the changes, revert them, or undo the navigation. The editor is also where you mark a node as done and give when it started and when it finished.
 
 No changes can be applied to a node until it is consistent and has all its required fields. All edit controls with problem values are highlighted and there is a message at the top of the editor pane about one of the problems giving instructions for how to fix it. If the user reverts a new node, then the node is not created and the view switches back to the previously selected node.
@@ -42,6 +44,8 @@ You can add child nodes or nodes with no parent. You can delete nodes. You can m
 There is a button in the editor pane for leaf tasks to convert the task to a parent. It adds the first child and navigates to it as the focus. (Potentially generating the "navigate away" check about discarding/applying changes.) If you remove the last sub-task from a parent node, it reverts to being a leaf node and its duration distribution from before it was made a parent is restored as the source of its duration during simulations.
 
 You add subsequent child nodes by clicking an "add sibling" button in any of the child nodes' editor panels. The added node becomes the focus. (This will also be a "navigate away" event asking whether to apply changes if any others have been made.)
+
+When you click the delete node button, it deletes the node and deletes all dependencies with that node as one endpoint. Note that simulations created before the deletion should still be usable. If they contain references, it should be to the version of the node current before they were deleted.
 
 Above the DAG view, in its button bar, there is a button to create a new node that has no parent.
 
