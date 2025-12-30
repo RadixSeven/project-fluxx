@@ -212,18 +212,162 @@ Simulation {
 
 **Sample Status**: A sample is successful if `failed_tasks` is empty, otherwise failed. This makes illegal states unrepresentable.
 
-## 4. User Interface
+## 4. Project Persistence
 
-### 4.1 Overall Layout
+### 4.1 File Format
+
+Projects are saved as JSON files with a `.fluxx` extension.
+
+**Structure**:
+```
+{
+  "version": "1.0",
+  "project_metadata": {
+    "name": "Project Name",
+    "created": "2024-01-15T10:30:00Z",
+    "last_modified": "2024-01-20T14:22:00Z"
+  },
+  "workers": [...],
+  "dag": {
+    "current_version_id": "dag_v123",
+    "node_map": {...}
+  },
+  "persistent_objects": {
+    "tasks": {...},
+    "branches": {...}
+  },
+  "history": {
+    "events": [...],
+    "current_event_id": "event_456"
+  },
+  "simulations": [...]
+}
+```
+
+**Design Principles**:
+- JSON for human readability and version control friendliness
+- Pydantic models serialize/deserialize directly to/from JSON
+- Complete history preserved (entire history tree, not just current state)
+- Simulations store complete results for reproducibility
+
+### 4.2 Saving
+
+**Manual Save**:
+- File → Save (CTRL-S) saves to current file
+- File → Save As allows choosing new filename/location
+- Default location: `~/Documents/ProjectFluxx/`
+- Suggested filename: `<project_name>_<date>.fluxx`
+
+**Auto-save**:
+- Auto-save every 5 minutes (configurable)
+- Saves to temporary file: `.fluxx_autosave/<project_name>_autosave.fluxx`
+- On clean exit, auto-save file is deleted
+- On crash/unclean exit, auto-save file is preserved
+
+**Save Process**:
+1. Serialize current state to JSON
+2. Write to temporary file (`<filename>.tmp`)
+3. Atomic rename to target filename
+4. Update window title with saved status
+
+### 4.3 Loading
+
+**File → Open** (CTRL-O):
+- Opens file picker
+- Loads project from `.fluxx` file
+- Validates file format and version
+- Restores complete state including:
+  - All workers
+  - Complete DAG with all node versions
+  - Full history tree
+  - All simulations with results
+
+**Recent Files**:
+- File menu shows 5 most recent projects
+- Quick access to recently worked on projects
+
+**Recovery**:
+- On startup, check for auto-save files
+- If found, prompt user: "Found auto-saved work from [time]. Recover?"
+- Options: Recover, Discard, Open Both
+
+### 4.4 Version Compatibility
+
+**Version String**: Saved in file as `"version": "1.0"`
+
+**Forward Compatibility**:
+- If file version > application version: warn user, may fail to load
+- Display message: "This file was created with a newer version of Project Fluxx"
+
+**Backward Compatibility**:
+- If file version < application version: attempt migration
+- Migration functions transform old format to new format
+- Create backup before migration: `<filename>.backup_v<old_version>`
+
+**Schema Validation**:
+- Use Pydantic to validate structure on load
+- Clear error messages for corrupted/invalid files
+- Never lose data - always preserve original file
+
+### 4.5 File Menu Structure
+
+```
+File
+├── New Project          (CTRL-N)
+├── Open...              (CTRL-O)
+├── Recent Files         >
+│   ├── project1.fluxx
+│   ├── project2.fluxx
+│   └── ...
+├── ───────────
+├── Save                 (CTRL-S)
+├── Save As...           (CTRL-SHIFT-S)
+├── ───────────
+├── Export...            >
+│   ├── Export to CSV
+│   └── Export Gantt Chart
+├── ───────────
+└── Exit                 (CTRL-Q)
+```
+
+### 4.6 New Project
+
+**File → New Project**:
+- If current project has unsaved changes: prompt to save
+- Initialize empty DAG
+- Create default worker: "Worker 1" with 8 hours/day
+- Set project name to "Untitled Project"
+- First save will prompt for filename
+
+### 4.7 Implementation Notes
+
+**Data Consistency**:
+- All IDs must be globally unique (use UUID)
+- References between objects use IDs (never object references)
+- Validate referential integrity on load
+
+**Performance**:
+- Large projects with many simulations can be >100MB
+- Use streaming JSON parser for large files if needed
+- Consider compression for simulation data
+
+**Security**:
+- No executable code in project files (pure data)
+- Validate all inputs from file
+- Sandbox deserialization (Pydantic helps with this)
+
+## 5. User Interface
+
+### 5.1 Overall Layout
 
 The application window is divided into two main panels:
 
 1. **DAG Panel** (left/main area): Displays the task/branch graph with controls
 2. **Editor Panel** (right/side area): Displays details and controls for the selected node
 
-### 4.2 DAG Panel
+### 5.2 DAG Panel
 
-#### 4.2.1 Control Bar
+#### 5.2.1 Control Bar
 
 Located above the DAG view, contains:
 - **History Widget**: Small widget showing most recent history event with dropdown for history tree navigation
@@ -243,7 +387,7 @@ Located above the DAG view, contains:
 - When editor control has focus: CTRL-Z/Y operate on the control
 - When no control has focus or no unapplied changes: CTRL-Z/Y operate on history
 
-#### 4.2.2 DAG Display Mode
+#### 5.2.2 DAG Display Mode
 
 **Layout**:
 - Auto-laid-out graph of nodes and dependencies
@@ -273,7 +417,7 @@ Located above the DAG view, contains:
 - Click on a possible world box to select its parent branch (opens in editor panel)
   - Exception: When in select-target-node mode, clicking selects it as dependency target
 
-#### 4.2.3 List Display Mode
+#### 5.2.3 List Display Mode
 
 **Layout**:
 - List of all nodes with titles
@@ -283,9 +427,9 @@ Located above the DAG view, contains:
 **Interaction**:
 - Clicking a node switches back to DAG display with the node centered
 
-### 4.3 Editor Panel
+### 5.3 Editor Panel
 
-#### 4.3.1 Panel Structure
+#### 5.3.1 Panel Structure
 
 **Content Area**:
 - Fields specific to the selected node type
@@ -296,7 +440,7 @@ Located above the DAG view, contains:
 - **Revert** button: Discards unapplied changes
 - **Delete Node** button: Deletes the node
 
-#### 4.3.2 Task Node Editor
+#### 5.3.2 Task Node Editor
 
 **Basic Fields**:
 - Title (text input)
@@ -335,7 +479,7 @@ Located above the DAG view, contains:
   - Setting duration marks task as done
 - **Note**: Tasks with actual_duration set are done; tasks with actual_start_time but no actual_duration are in progress
 
-#### 4.3.3 Branch Node Editor
+#### 5.3.3 Branch Node Editor
 
 **Basic Fields**:
 - Title (text input)
@@ -357,7 +501,7 @@ Located above the DAG view, contains:
 - **Resolve Branch** section: Dropdown to select which possible world occurred
   - Setting chosen_world_id marks the branch as resolved/done
 
-#### 4.3.4 Edit Modes
+#### 5.3.4 Edit Modes
 
 **Edit Dependency Mode**:
 
@@ -377,7 +521,7 @@ When selecting target:
 
 Used when adding excluded assignee tasks. Similar to select-target-node mode but only task nodes are selectable.
 
-#### 4.3.5 Navigation and Change Management
+#### 5.3.5 Navigation and Change Management
 
 **Navigation**:
 - Clicking a different node while editing triggers a modal if there are unapplied changes:
@@ -401,7 +545,7 @@ Used when adding excluded assignee tasks. Similar to select-target-node mode but
   - Confirmation modal: "This node has X children, are you sure you want to delete them and any attached dependencies? (Y/N)"
 - Simulations retain references to nodes as they existed when the simulation ran
 
-### 4.4 Worker List Editor
+### 5.4 Worker List Editor
 
 Opened from DAG panel button bar, displays in editor panel (a "navigate away" event).
 
@@ -418,7 +562,7 @@ Opened from DAG panel button bar, displays in editor panel (a "navigate away" ev
 **Footer**:
 - Apply and Revert buttons
 
-### 4.5 Simulation Management
+### 5.5 Simulation Management
 
 Opened from DAG panel button bar, displays in editor panel.
 
@@ -457,7 +601,7 @@ After generation, visualization is displayed with options:
 - **Save**: Opens file dialog to choose save location
 - **Discard**: Closes visualization without saving
 
-### 4.6 History Tree Navigation
+### 5.6 History Tree Navigation
 
 **History Tree Structure**:
 - Each event is a node in the tree
@@ -465,11 +609,11 @@ After generation, visualization is displayed with options:
 - Events include timestamps
 - Extended events (simulations) include duration
 
-See section 4.2.1 for history display UI and keyboard shortcuts.
+See section 5.2.1 for history display UI and keyboard shortcuts.
 
-## 5. Dependencies and Constraints
+## 6. Dependencies and Constraints
 
-### 5.1 Task-Task Dependencies
+### 6.1 Task-Task Dependencies
 
 Task endpoints can depend on other task endpoints with two constraint types:
 
@@ -478,7 +622,7 @@ Task endpoints can depend on other task endpoints with two constraint types:
 
 Most common: Task B start time ≥ Task A end time (Task B starts after Task A finishes)
 
-### 5.2 Parent-Child Constraints
+### 6.2 Parent-Child Constraints
 
 **Implementation Note**: Parent-child temporal constraints should be represented as explicit dependencies in the dependency graph (not special-cased). This simplifies the implementation and makes the dependency graph complete.
 
@@ -488,13 +632,13 @@ When a subtask is created:
 
 These dependencies are maintained automatically by the system but can be viewed like other dependencies.
 
-### 5.3 Possible World Dependencies
+### 6.3 Possible World Dependencies
 
 Tasks can depend on one or more branch possible worlds:
 - Represented as individual dependencies
 - Task only executes in sampling runs where one of its dependent possible worlds is chosen
 
-### 5.4 Worker Constraints
+### 6.4 Worker Constraints
 
 **Allowed Workers Whitelist**:
 - If specified, only listed workers can be assigned during simulation
@@ -506,7 +650,7 @@ Tasks can depend on one or more branch possible worlds:
   - This ensures M's assignee is known before N starts in the simulation
   - System should validate this constraint and prevent adding exclusions without the dependency
 
-### 5.5 Constraint Validation
+### 6.5 Constraint Validation
 
 **Cycle Detection**:
 - Dependency graph must be acyclic
@@ -516,15 +660,15 @@ Tasks can depend on one or more branch possible worlds:
 - All dependencies must be satisfiable
 - System should validate before allowing simulation
 
-## 6. Simulation Engine
+## 7. Simulation Engine
 
-### 6.1 Simulation Parameters
+### 7.1 Simulation Parameters
 
 - **Number of samples**: How many runs to simulate (e.g., 1000)
 - **Start date**: When the project begins (default: start of next workday)
 - **Parallel processes**: Number of simultaneous simulations (default: 2 × CPU count)
 
-### 6.2 Simulation Mechanics
+### 7.2 Simulation Mechanics
 
 **Calendar Tracking**:
 - Tracks time on a calendar
@@ -570,7 +714,7 @@ Tasks can depend on one or more branch possible worlds:
 - Number of parallel processes configurable
 - Early stopping terminates all child processes
 
-### 6.3 Failed Runs
+### 7.3 Failed Runs
 
 A sampling run fails if:
 - All workers are available
@@ -589,15 +733,15 @@ When a run fails:
 - Fraction of failed runs shown in simulation list
 - User can inspect failed runs to see incomplete tasks
 
-### 6.4 Incremental Sampling
+### 7.4 Incremental Sampling
 
 - Can add more samples to a completed simulation
 - Samples are independent, so can be generated separately
 - Results are merged into existing simulation statistics
 
-## 7. Visualizations
+## 8. Visualizations
 
-### 7.1 Gantt Charts
+### 8.1 Gantt Charts
 
 **Purpose**: Conservative timeline for management
 
@@ -622,7 +766,7 @@ When a run fails:
 
 **Implementation Tool**: pyomo for linear programming
 
-### 7.2 Probabilistic Timeline
+### 8.2 Probabilistic Timeline
 
 **Purpose**: Show uncertainty visually
 
@@ -647,9 +791,9 @@ When a run fails:
 - Arrows show dependency relationships
 - Branch outcomes create parallel sub-diagrams
 
-## 8. History System
+## 9. History System
 
-### 8.1 History Event Tracking
+### 9.1 History Event Tracking
 
 Every change creates a history event:
 - User actions (node edits, deletions, additions)
@@ -662,7 +806,7 @@ Each event records:
 - Changed data
 - Previous state (for undo)
 
-### 8.2 Branching History
+### 9.2 Branching History
 
 **Linear History**:
 - Normal undo/redo creates linear chain
@@ -677,7 +821,7 @@ Each event records:
 - Each event points to parent and children
 - Current state is a leaf in the tree
 
-### 8.3 Reproducibility
+### 9.3 Reproducibility
 
 **Simulation Storage**:
 - Simulations store complete results (all sample events and outcomes), NOT just RNG seeds
@@ -693,9 +837,9 @@ Each event records:
 - References in simulations point to node versions as they existed at simulation time
 - This ensures simulations remain valid even after nodes are deleted or modified
 
-## 9. Implementation Considerations
+## 10. Implementation Considerations
 
-### 9.1 Technology Stack
+### 10.1 Technology Stack
 
 **Language**: Python
 
@@ -717,7 +861,7 @@ Each event records:
 
 **Fuzzy Matching**: RapidFuzz for search functionality in list display mode
 
-### 9.2 Code Quality Standards
+### 10.2 Code Quality Standards
 
 **Type Safety**:
 - All code must be fully type-annotated
@@ -737,7 +881,7 @@ Each event records:
 - Enforced by ruff
 - Must pass pre-commit checks
 
-### 9.3 Architecture Recommendations
+### 10.3 Architecture Recommendations
 
 **Separation of Concerns**:
 - Data model (pydantic schemas)
@@ -755,11 +899,11 @@ Each event records:
 - Lazy loading where appropriate
 - Efficient graph algorithms for dependency checking
 
-## 10. Future Improvements
+## 11. Future Improvements
 
 These features are planned but not part of the initial implementation:
 
-### 10.1 Jira Integration
+### 11.1 Jira Integration
 
 - Use past performance to constrain variance of task lengths
 - Allow Jira plan updates as project plan updates
@@ -769,29 +913,29 @@ These features are planned but not part of the initial implementation:
 - Associate tasks/branches with Jira issues
 - Store metadata that doesn't map to Jira fields in attachments
 
-### 10.2 Enhanced Task Features
+### 11.2 Enhanced Task Features
 
 - Review time and potential reviewers
 - Worker affinities (different workers take different amounts of time)
 
-### 10.3 Calendar Enhancements
+### 11.3 Calendar Enhancements
 
 - Holidays
 - Vacations
 - Sick days
 - Custom work schedules
 
-### 10.4 Enhanced Sampling
+### 11.4 Enhanced Sampling
 
 - Sample until all possible worlds happen at least K times
 - Use pymc for sampling (enables oversampling rare worlds while keeping probabilities correct)
 
-### 10.5 Visualization Enhancements
+### 11.5 Visualization Enhancements
 
 - Interactive hiding/showing of sub-tasks in Gantt charts
 - Additional visualization types
 
-## 11. Glossary
+## 12. Glossary
 
 **DAG**: Directed Acyclic Graph - the structure of tasks and branches with dependencies
 
