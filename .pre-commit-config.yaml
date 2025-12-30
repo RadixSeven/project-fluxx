@@ -20,4 +20,4 @@ repos:
     hooks:
       - id: mypy
         args: [--strict, --ignore-missing-imports]
-        additional_dependencies: [tokenize-rt==3.2.0, pydantic, PyQt6-stubs]
+        additional_dependencies: [tokenize-rt==3.2.0, pydantic, PyQt6-stubs, pytest]
