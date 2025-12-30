@@ -400,3 +400,63 @@ def test_task_editor_clear_task(task_editor: TaskEditor) -> None:
 
     # Title field should be empty
     assert task_editor.title_field.text() == ""
+
+
+def test_task_editor_add_dependency_and_apply(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test that adding a dependency and applying works without errors."""
+    from fluxx.data.models import (
+        ConstraintType,
+        Dependency,
+        Endpoint,
+        NodeId,
+        Triangular,
+    )
+
+    # Create two tasks
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Load task2 in editor
+    task_editor.load_task(task2_id)
+
+    # Simulate adding a dependency to task1
+    # This is what the UI does when user adds a dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId(task1_id),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    # Get current dependencies from task
+    project = controller.get_project()
+    current_version = project.dag.current_version_id
+    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    task2 = project.persistent_tasks[persistent_id].versions[current_version]
+    current_deps = list(task2.dependencies)
+    current_deps.append(dep)
+
+    # Update pending changes with new dependencies list
+    task_editor.pending_changes["dependencies"] = current_deps
+    task_editor._update_button_states()
+
+    # Apply should work without raising TypeError
+    # This is the bug: update_task doesn't accept 'dependencies' parameter
+    task_editor._on_apply()
+
+    # Verify the dependency was added
+    project_after = controller.get_project()
+    persistent_id_after = project_after.dag.node_map[NodeId(task2_id)]
+    task2_after = project_after.persistent_tasks[persistent_id_after].versions[
+        project_after.dag.current_version_id
+    ]
+    assert len(task2_after.dependencies) == 1
+    assert task2_after.dependencies[0].target_node_id == NodeId(task1_id)

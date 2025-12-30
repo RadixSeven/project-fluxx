@@ -526,8 +526,34 @@ class BranchEditor(QWidget):
         if not self._validate_changes():
             return
 
-        # Apply changes through controller
-        self.controller.update_branch(self.current_branch_id, **self.pending_changes)
+        # Handle dependencies separately (use add/remove_dependency calls)
+        if "dependencies" in self.pending_changes:
+            # Get original dependencies
+            project = self.controller.get_project()
+            node_id = NodeId(self.current_branch_id)
+            persistent_id = project.dag.node_map[node_id]
+            persistent_branch = project.persistent_branches[persistent_id]
+            branch = persistent_branch.versions[project.dag.current_version_id]
+            original_deps = branch.dependencies
+
+            new_deps = self.pending_changes["dependencies"]
+
+            # Find dependencies to remove (in original but not in new)
+            for dep in original_deps:
+                if dep not in new_deps:
+                    self.controller.remove_dependency(node_id, dep)
+
+            # Find dependencies to add (in new but not in original)
+            for dep in new_deps:
+                if dep not in original_deps:
+                    self.controller.add_dependency(node_id, dep)
+
+        # Apply non-dependency changes through update_branch
+        branch_changes = {
+            k: v for k, v in self.pending_changes.items() if k != "dependencies"
+        }
+        if branch_changes:
+            self.controller.update_branch(self.current_branch_id, **branch_changes)
 
         # Clear pending changes
         self.pending_changes.clear()

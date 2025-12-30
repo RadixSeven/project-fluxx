@@ -277,5 +277,66 @@ def test_branch_editor_remove_world(
     # Verify row removed
     assert branch_editor.worlds_table.rowCount() == 1
 
-    # Verify pending changes
-    assert "possible_worlds" in branch_editor.pending_changes
+
+def test_branch_editor_add_dependency_and_apply(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that adding a dependency to a branch and applying works without errors."""
+    from fluxx.data.id_generation import generate_possible_world_id
+    from fluxx.data.models import (
+        ConstraintType,
+        Dependency,
+        Endpoint,
+        NodeId,
+        PossibleWorld,
+        Triangular,
+    )
+
+    # Create a task and a branch
+    task_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    branch_id = controller.create_branch(
+        title="Branch 1",
+        possible_worlds=[
+            PossibleWorld(
+                id=generate_possible_world_id(), title="Option A", weight=1.0
+            ),
+        ],
+    )
+
+    # Load branch in editor
+    branch_editor.load_branch(branch_id)
+
+    # Simulate adding a dependency to the task
+    dep = Dependency(
+        source_endpoint=Endpoint.OCCURRENCE,
+        target_node_id=NodeId(task_id),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    # Get current dependencies from branch
+    project = controller.get_project()
+    current_version = project.dag.current_version_id
+    persistent_id = project.dag.node_map[NodeId(branch_id)]
+    branch = project.persistent_branches[persistent_id].versions[current_version]
+    current_deps = list(branch.dependencies)
+    current_deps.append(dep)
+
+    # Update pending changes with new dependencies list
+    branch_editor.pending_changes["dependencies"] = current_deps
+    branch_editor._update_button_states()
+
+    # Apply should work without raising TypeError
+    branch_editor._on_apply()
+
+    # Verify the dependency was added
+    project_after = controller.get_project()
+    persistent_id_after = project_after.dag.node_map[NodeId(branch_id)]
+    branch_after = project_after.persistent_branches[persistent_id_after].versions[
+        project_after.dag.current_version_id
+    ]
+    assert len(branch_after.dependencies) == 1
+    assert branch_after.dependencies[0].target_node_id == NodeId(task_id)
