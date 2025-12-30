@@ -4,8 +4,26 @@ Based on the specification in project_fluxx_specification.md section 3.
 """
 
 from abc import ABC
+from datetime import datetime
+from enum import Enum
+from typing import Any, NewType
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Type definitions for IDs to provide semantic meaning
+
+
+TaskId = NewType("TaskId", str)
+BranchId = NewType("BranchId", str)
+WorkerId = NewType("WorkerId", str)
+PossibleWorldId = NewType("PossibleWorldId", str)
+NodeId = NewType("NodeId", str)  # Can be TaskId or BranchId
+DAGId = NewType("DAGId", str)
+DAGVersionId = NewType("DAGVersionId", str)
+EventId = NewType("EventId", str)
+SimulationId = NewType("SimulationId", str)
+PersistentObjectId = NewType("PersistentObjectId", str)
+SampleId = NewType("SampleId", int)
 
 
 class DurationDistribution(BaseModel, ABC):
@@ -54,7 +72,7 @@ class Triangular(DurationDistribution):
 class Worker(BaseModel):
     """Worker in the project."""
 
-    id: str = Field(description="Unique identifier")
+    id: WorkerId = Field(description="Unique identifier")
     name: str = Field(description="Worker name")
     worker_id: str | None = Field(
         default=None, description="Optional ID for distinguishing same-named workers"
@@ -63,19 +81,68 @@ class Worker(BaseModel):
     hours_per_workday: float = Field(description="Hours worker completes per workday")
 
 
+# Enums and supporting classes
+
+
+class ConstraintType(str, Enum):
+    """Type of dependency constraint."""
+
+    GREATER_EQUAL = ">="
+    EQUAL = "="
+
+
+class Endpoint(str, Enum):
+    """Endpoint of a task or branch."""
+
+    START = "start"
+    END = "end"
+    OCCURRENCE = "occurrence_point"
+
+
+class Dependency(BaseModel):
+    """Dependency between task/branch endpoints."""
+
+    source_endpoint: Endpoint = Field(description="Source endpoint type")
+    target_node_id: NodeId = Field(
+        description="Target node ID (task or possible world ID)"
+    )
+    target_endpoint: Endpoint = Field(description="Target endpoint type")
+    constraint_type: ConstraintType = Field(description="Type of constraint")
+
+
+class PossibleWorld(BaseModel):
+    """One possible outcome of a branch node."""
+
+    id: PossibleWorldId = Field(description="Unique identifier")
+    title: str = Field(description="Possible world title")
+    description: str = Field(default="", description="Possible world description")
+    weight: float = Field(default=1.0, description="Weight for probability calculation")
+
+    @field_validator("weight")
+    @classmethod
+    def weight_must_be_positive(cls, v: float) -> float:
+        """Validate that weight is positive."""
+        if v <= 0:
+            raise ValueError("weight must be positive")
+        return v
+
+
+# Node models
+
+
 class Task(BaseModel):
     """Task node in the project DAG."""
 
-    id: str = Field(description="Unique identifier")
+    id: TaskId = Field(description="Unique identifier")
     title: str = Field(description="Task title")
     description: str = Field(description="Task description")
     node_type: str = Field(default="task", description="Node type identifier")
 
     # Hierarchy
-    parent_id: str | None = Field(
+    parent_id: TaskId | None = Field(
         default=None, description="Parent task ID if this is a subtask"
     )
-    children: list[str] = Field(
+    children: list[TaskId] = Field(
         default_factory=list, description="List of child task IDs"
     )
 
@@ -84,12 +151,17 @@ class Task(BaseModel):
         default=None, description="Duration distribution for leaf tasks"
     )
 
+    # Dependencies
+    dependencies: list[Dependency] = Field(
+        default_factory=list, description="Dependencies for this task"
+    )
+
     # Worker constraints
-    allowed_workers: list[str] | None = Field(
+    allowed_workers: list[WorkerId] | None = Field(
         default=None,
         description="Whitelist of worker IDs. If None, all workers are allowed",
     )
-    excluded_worker_tasks: list[str] = Field(
+    excluded_worker_tasks: list[TaskId] = Field(
         default_factory=list,
         description="Task IDs whose assignees cannot be assigned to this task",
     )
@@ -98,7 +170,7 @@ class Task(BaseModel):
     actual_start_time: str | None = Field(
         default=None, description="When task actually started (ISO format)"
     )
-    actual_assignee: str | None = Field(
+    actual_assignee: WorkerId | None = Field(
         default=None, description="Worker ID who was actually assigned"
     )
     actual_duration: float | None = Field(
@@ -109,13 +181,203 @@ class Task(BaseModel):
 class Branch(BaseModel):
     """Branch node representing uncertain conditions/events."""
 
-    id: str = Field(description="Unique identifier")
+    id: BranchId = Field(description="Unique identifier")
     title: str = Field(description="Branch title")
     description: str = Field(description="Branch description")
     node_type: str = Field(default="branch", description="Node type identifier")
 
+    # Possible worlds
+    possible_worlds: list[PossibleWorld] = Field(
+        default_factory=list, description="List of possible outcomes"
+    )
+
+    # Dependencies (on occurrence point)
+    dependencies: list[Dependency] = Field(
+        default_factory=list, description="Dependencies for occurrence point"
+    )
+
     # Completion tracking
-    chosen_world_id: str | None = Field(
+    chosen_world_id: PossibleWorldId | None = Field(
         default=None,
         description="ID of the chosen possible world. If set, branch is resolved",
+    )
+
+
+# DAG and History Models
+
+
+class DAG(BaseModel):
+    """Directed Acyclic Graph representing the project structure."""
+
+    id: DAGId = Field(description="Unique identifier")
+    current_version_id: DAGVersionId = Field(description="Current DAG version ID")
+    node_map: dict[NodeId, PersistentObjectId] = Field(
+        default_factory=dict,
+        description="Maps node IDs to persistent object IDs",
+    )
+
+
+class EventType(str, Enum):
+    """Type of history event."""
+
+    NODE_CREATED = "node_created"
+    NODE_MODIFIED = "node_modified"
+    NODE_DELETED = "node_deleted"
+    SIMULATION_CREATED = "simulation_created"
+    SIMULATION_COMPLETED = "simulation_completed"
+
+
+class DAGEvent(BaseModel):
+    """Event in the project history."""
+
+    id: EventId = Field(description="Unique identifier")
+    timestamp: datetime = Field(description="When the event occurred")
+    parent_event_id: EventId | None = Field(
+        default=None, description="Parent event in history tree"
+    )
+    event_type: EventType = Field(description="Type of event")
+    affected_nodes: list[NodeId] = Field(
+        default_factory=list, description="Node IDs affected by this event"
+    )
+    resulting_dag_version: DAGVersionId = Field(
+        description="DAG version ID after this event"
+    )
+
+
+class PersistentTask(BaseModel):
+    """Persistent storage for task with all versions."""
+
+    id: PersistentObjectId = Field(description="Unique identifier (never reused)")
+    versions: dict[DAGVersionId, Task] = Field(
+        default_factory=dict, description="Map of version ID to Task snapshot"
+    )
+
+
+class PersistentBranch(BaseModel):
+    """Persistent storage for branch with all versions."""
+
+    id: PersistentObjectId = Field(description="Unique identifier (never reused)")
+    versions: dict[DAGVersionId, Branch] = Field(
+        default_factory=dict, description="Map of version ID to Branch snapshot"
+    )
+
+
+# Simulation Models
+
+
+class SimulationStatus(str, Enum):
+    """Status of a simulation."""
+
+    RUNNING = "running"
+    COMPLETED = "completed"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+
+
+class TaskEvent(BaseModel):
+    """Event during simulation (task start/end or branch resolution)."""
+
+    timestamp: datetime = Field(description="When the event occurred")
+    node_id: NodeId = Field(description="Task or branch ID")
+    event_type: str = Field(description="Type of event (start, end, resolve)")
+    details: dict[str, Any] = Field(
+        default_factory=dict, description="Event-specific details"
+    )
+
+
+class Sample(BaseModel):
+    """Single simulation run sample."""
+
+    sample_id: SampleId = Field(description="Sample identifier")
+    events: list[TaskEvent] = Field(
+        default_factory=list, description="All events in this sample"
+    )
+    failed_tasks: list[TaskId] = Field(
+        default_factory=list,
+        description="Task IDs that couldn't be completed (empty if successful)",
+    )
+
+
+class Checkpoint(BaseModel):
+    """Checkpoint for resuming interrupted simulations."""
+
+    timestamp: datetime = Field(description="When checkpoint was created")
+    completed_samples: int = Field(description="Number of samples completed")
+    rng_state: list[Any] = Field(
+        default_factory=list, description="RNG states for each parallel process"
+    )
+
+
+class Simulation(BaseModel):
+    """Monte Carlo simulation of project timeline."""
+
+    id: SimulationId = Field(description="Unique identifier")
+    dag_version_id: DAGVersionId = Field(
+        description="DAG version ID when simulation was created"
+    )
+    start_date: datetime = Field(description="Project start date for simulation")
+    num_samples: int = Field(description="Target number of samples")
+    num_parallel_processes: int = Field(
+        description="Number of parallel simulation processes"
+    )
+
+    # Status
+    status: SimulationStatus = Field(description="Current simulation status")
+    completed_samples: int = Field(
+        default=0, description="Number of samples completed so far"
+    )
+
+    # Results
+    samples: list[Sample] = Field(
+        default_factory=list, description="All completed samples"
+    )
+
+    # Checkpoint
+    last_checkpoint: Checkpoint | None = Field(
+        default=None, description="Last checkpoint for resuming"
+    )
+
+
+# Project Container Models
+
+
+class ProjectMetadata(BaseModel):
+    """Metadata for a project."""
+
+    name: str = Field(description="Project name")
+    created: datetime = Field(description="When project was created")
+    last_modified: datetime = Field(description="When project was last modified")
+
+
+class Project(BaseModel):
+    """Top-level project container."""
+
+    version: str = Field(default="1.0", description="File format version")
+    metadata: ProjectMetadata = Field(description="Project metadata")
+
+    # Core data
+    workers: list[Worker] = Field(
+        default_factory=list, description="All workers in the project"
+    )
+    dag: DAG = Field(description="Current DAG structure")
+
+    # Persistent objects
+    persistent_tasks: dict[PersistentObjectId, PersistentTask] = Field(
+        default_factory=dict, description="All task versions"
+    )
+    persistent_branches: dict[PersistentObjectId, PersistentBranch] = Field(
+        default_factory=dict, description="All branch versions"
+    )
+
+    # History
+    history_events: list[DAGEvent] = Field(
+        default_factory=list, description="All history events"
+    )
+    current_event_id: EventId | None = Field(
+        default=None, description="Current position in history"
+    )
+
+    # Simulations
+    simulations: list[Simulation] = Field(
+        default_factory=list, description="All simulations for this project"
     )
