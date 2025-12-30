@@ -8,6 +8,7 @@ from fluxx.data.models import (
     DAGVersionId,
     EventId,
     PersistentObjectId,
+    PossibleWorldId,
     TaskId,
 )
 
@@ -32,6 +33,17 @@ def generate_branch_id() -> BranchId:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     random_suffix = secrets.token_hex(4)
     return BranchId(f"branch_{timestamp}_{random_suffix}")
+
+
+def generate_possible_world_id() -> PossibleWorldId:
+    """Generate a unique possible world ID.
+
+    Returns:
+        A unique PossibleWorldId
+    """
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    random_suffix = secrets.token_hex(4)
+    return PossibleWorldId(f"pw_{timestamp}_{random_suffix}")
 
 
 def generate_persistent_object_id() -> PersistentObjectId:

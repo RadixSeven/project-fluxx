@@ -2,8 +2,9 @@
 
 from PyQt6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
-from fluxx.data.models import NodeId, TaskId
+from fluxx.data.models import BranchId, NodeId, TaskId
 from fluxx.gui.controller import ProjectController
+from fluxx.gui.widgets.editors.branch_editor import BranchEditor
 from fluxx.gui.widgets.editors.task_editor import TaskEditor
 
 
@@ -43,14 +44,9 @@ class EditorPanel(QWidget):
         self.task_editor = TaskEditor(controller)
         self.stack.addWidget(self.task_editor)
 
-        # Create placeholder for branch editor
-        self.branch_editor_widget = QWidget()
-        branch_layout = QVBoxLayout()
-        branch_label = QLabel("Branch Editor - Coming Soon")
-        branch_label.setStyleSheet("font-size: 16px; padding: 20px;")
-        branch_layout.addWidget(branch_label)
-        self.branch_editor_widget.setLayout(branch_layout)
-        self.stack.addWidget(self.branch_editor_widget)
+        # Create branch editor widget
+        self.branch_editor = BranchEditor(controller)
+        self.stack.addWidget(self.branch_editor)
 
         # Main layout
         layout = QVBoxLayout()
@@ -94,8 +90,9 @@ class EditorPanel(QWidget):
                 self.task_editor.load_task(TaskId(str(selected_node_id)))
                 self.stack.setCurrentWidget(self.task_editor)
             elif persistent_id in project.persistent_branches:
-                # Show branch editor (placeholder for now)
-                self.stack.setCurrentWidget(self.branch_editor_widget)
+                # Show branch editor
+                self.branch_editor.load_branch(BranchId(str(selected_node_id)))
+                self.stack.setCurrentWidget(self.branch_editor)
             else:
                 # Unknown node type
                 self.stack.setCurrentWidget(self.empty_widget)
