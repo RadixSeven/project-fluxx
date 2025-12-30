@@ -197,6 +197,10 @@ Simulation {
   num_samples: integer
   num_parallel_processes: integer (default: 2 * num_processors)
 
+  # Completion status
+  status: "running" | "completed" | "failed"
+  completed_samples: integer  # How many samples have finished
+
   # Results stored for reproducibility (not regenerated)
   # Stores complete simulation results, not just RNG seed
   samples: list of {
@@ -205,12 +209,21 @@ Simulation {
     failed_tasks: list of task ids (empty if successful)
   }
 
+  # Checkpoint data (for resuming interrupted simulations)
+  last_checkpoint: optional {
+    timestamp: datetime
+    completed_samples: integer
+    rng_state: serialized RNG state for continuing
+  }
+
   # Note: Percentiles and statistics are computed on-demand when generating
   # visualizations, not pre-calculated and stored
 }
 ```
 
 **Sample Status**: A sample is successful if `failed_tasks` is empty, otherwise failed. This makes illegal states unrepresentable.
+
+**Checkpoint Strategy**: Rather than saving complete worker state during simulation execution, periodic snapshots are created. If a simulation is interrupted, it can be resumed from the last checkpoint by re-running samples since that checkpoint. This is much simpler than trying to persist complete execution state.
 
 ## 4. Project Persistence
 
@@ -570,10 +583,11 @@ Opened from DAG panel button bar, displays in editor panel.
 - Shows all simulations for current DAG
 - Each entry displays:
   - Simulation ID/name
-  - Number of samples
+  - Number of samples (completed/target for incomplete)
   - Failure rate (if any failures)
-  - Status (running/complete)
+  - Status (running/completed/interrupted)
 - **Create New Simulation** button
+- For interrupted simulations: **Resume** button appears
 
 **Creating a Simulation**:
 
@@ -589,6 +603,15 @@ Progress display shows:
 - Estimated time to completion
 - Current sample count / target sample count
 - Progress bar with early stop button
+- Last checkpoint time (if checkpoints enabled)
+
+**Resuming Interrupted Simulation**:
+
+When clicking Resume on an interrupted simulation:
+- Confirms: "Resume from checkpoint at X/Y samples?"
+- Continues from last checkpoint
+- Shows same progress display as new simulation
+- Can early stop or let complete
 
 **Simulation Actions**:
 - **Add More Samples**: Adds additional samples to completed simulation
@@ -738,6 +761,43 @@ When a run fails:
 - Can add more samples to a completed simulation
 - Samples are independent, so can be generated separately
 - Results are merged into existing simulation statistics
+
+### 7.5 Checkpointing and Resuming
+
+**Checkpoint Creation**:
+- Periodic snapshots created during long-running simulations
+- Checkpoint frequency: every 100 completed samples (configurable)
+- Checkpoint contains:
+  - Number of completed samples
+  - All completed sample results
+  - RNG state for continuing from this point
+  - Timestamp
+
+**Resuming Interrupted Simulations**:
+- On application startup or project load, check for incomplete simulations
+- If found: display "Resume simulation with X/Y samples completed?"
+- On resume:
+  - Load last checkpoint
+  - Restore RNG state
+  - Continue from completed_samples count
+  - Re-run any samples that were in progress when interrupted
+
+**Benefits of Checkpoint Approach**:
+- Much simpler than saving complete worker/task state during execution
+- Minimal overhead (just sample results and RNG state)
+- Can resume from any checkpoint if earlier ones are preserved
+- Failed/crashed simulations don't lose all work
+
+**Auto-save Integration**:
+- Checkpoints are saved with the project file
+- Auto-save captures latest checkpoint
+- On crash recovery, can resume simulation from last auto-saved checkpoint
+
+**Implementation Notes**:
+- Each parallel process maintains its own RNG state
+- Checkpoint saves all process RNG states as array
+- Sample IDs must be deterministic (not based on timestamp)
+- Use sample_id = checkpoint_count * 100 + local_sample_id for reproducibility
 
 ## 8. Visualizations
 
