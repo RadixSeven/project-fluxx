@@ -32,6 +32,7 @@ from fluxx.data.models import (
     Project,
     ProjectMetadata,
     TaskId,
+    Worker,
     WorkerId,
 )
 
@@ -338,6 +339,123 @@ class ProjectController(QObject):
         """
         project = redo(self.get_project())
         self._set_project(project)
+
+    # Worker management
+
+    def add_worker(
+        self,
+        name: str,
+        hours_per_workday: float,
+        worker_id: str | None = None,
+        description: str | None = None,
+    ) -> WorkerId:
+        """Add a worker to the project.
+
+        Args:
+            name: Worker name
+            hours_per_workday: Hours per workday
+            worker_id: Optional ID for distinguishing same-named workers
+            description: Optional worker description
+
+        Returns:
+            The WorkerId of the new worker
+        """
+        from fluxx.data.id_generation import generate_worker_id
+
+        new_worker_id = generate_worker_id()
+        worker = Worker(
+            id=new_worker_id,
+            name=name,
+            worker_id=worker_id,
+            description=description,
+            hours_per_workday=hours_per_workday,
+        )
+
+        # Create updated project with new worker
+        project = self.get_project()
+        updated_project = project.model_copy(
+            update={"workers": project.workers + [worker]}
+        )
+
+        self._set_project(updated_project)
+        return new_worker_id
+
+    def update_worker(
+        self,
+        worker_id: WorkerId,
+        name: str | None = None,
+        hours_per_workday: float | None = None,
+        worker_optional_id: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        """Update a worker.
+
+        Args:
+            worker_id: Worker ID to update
+            name: New worker name (None to keep current)
+            hours_per_workday: New hours per workday (None to keep current)
+            worker_optional_id: New worker_id (None to keep current)
+            description: New description (None to keep current)
+        """
+        project = self.get_project()
+
+        # Find the worker
+        worker_index = None
+        for i, worker in enumerate(project.workers):
+            if worker.id == worker_id:
+                worker_index = i
+                break
+
+        if worker_index is None:
+            return  # Worker not found
+
+        # Get current worker
+        current_worker = project.workers[worker_index]
+
+        # Update with new values
+        updated_worker = current_worker.model_copy(
+            update={
+                k: v
+                for k, v in {
+                    "name": name,
+                    "hours_per_workday": hours_per_workday,
+                    "worker_id": worker_optional_id,
+                    "description": description,
+                }.items()
+                if v is not None
+            }
+        )
+
+        # Create updated workers list
+        updated_workers = project.workers.copy()
+        updated_workers[worker_index] = updated_worker
+
+        # Create updated project
+        updated_project = project.model_copy(update={"workers": updated_workers})
+        self._set_project(updated_project)
+
+    def remove_worker(self, worker_id: WorkerId) -> None:
+        """Remove a worker from the project.
+
+        Args:
+            worker_id: Worker ID to remove
+        """
+        project = self.get_project()
+
+        # Filter out the worker
+        updated_workers = [w for w in project.workers if w.id != worker_id]
+
+        # Create updated project
+        updated_project = project.model_copy(update={"workers": updated_workers})
+        self._set_project(updated_project)
+
+    def get_workers(self) -> list[Worker]:
+        """Get all workers in the project.
+
+        Returns:
+            List of workers
+        """
+        return self.get_project().workers
 
     # Selection
 

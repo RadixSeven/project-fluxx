@@ -6,6 +6,7 @@ from fluxx.data.models import BranchId, NodeId, TaskId
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.branch_editor import BranchEditor
 from fluxx.gui.widgets.editors.task_editor import TaskEditor
+from fluxx.gui.widgets.editors.worker_editor import WorkerEditor
 
 
 class EditorPanel(QWidget):
@@ -47,6 +48,10 @@ class EditorPanel(QWidget):
         # Create branch editor widget
         self.branch_editor = BranchEditor(controller)
         self.stack.addWidget(self.branch_editor)
+
+        # Create worker editor widget
+        self.worker_editor = WorkerEditor(controller)
+        self.stack.addWidget(self.worker_editor)
 
         # Main layout
         layout = QVBoxLayout()
@@ -96,3 +101,7 @@ class EditorPanel(QWidget):
             else:
                 # Unknown node type
                 self.stack.setCurrentWidget(self.empty_widget)
+
+    def show_worker_editor(self) -> None:
+        """Show the worker editor."""
+        self.stack.setCurrentWidget(self.worker_editor)

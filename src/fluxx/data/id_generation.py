@@ -10,6 +10,7 @@ from fluxx.data.models import (
     PersistentObjectId,
     PossibleWorldId,
     TaskId,
+    WorkerId,
 )
 
 
@@ -77,3 +78,14 @@ def generate_event_id() -> EventId:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     random_suffix = secrets.token_hex(4)
     return EventId(f"event_{timestamp}_{random_suffix}")
+
+
+def generate_worker_id() -> WorkerId:
+    """Generate a unique worker ID.
+
+    Returns:
+        A unique WorkerId
+    """
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    random_suffix = secrets.token_hex(4)
+    return WorkerId(f"worker_{timestamp}_{random_suffix}")

@@ -405,3 +405,97 @@ def test_signals_emitted_on_operations(
         signal_names = [s[0] for s in listener.signals_received]
         assert "file_path_changed" in signal_names
         assert "modified_changed" in signal_names
+
+
+def test_add_worker(controller: ProjectController) -> None:
+    """Test adding a worker to the project."""
+    controller.new_project("Test Project")
+
+    # Initially no workers
+    assert len(controller.get_workers()) == 0
+
+    # Add a worker
+    worker_id = controller.add_worker(
+        name="Alice",
+        hours_per_workday=8.0,
+        worker_id="alice_001",
+        description="Lead developer",
+    )
+
+    # Should have one worker
+    workers = controller.get_workers()
+    assert len(workers) == 1
+    assert workers[0].id == worker_id
+    assert workers[0].name == "Alice"
+    assert workers[0].hours_per_workday == 8.0
+    assert workers[0].worker_id == "alice_001"
+    assert workers[0].description == "Lead developer"
+
+
+def test_update_worker(controller: ProjectController) -> None:
+    """Test updating a worker."""
+    controller.new_project("Test Project")
+
+    # Add a worker
+    worker_id = controller.add_worker(
+        name="Bob",
+        hours_per_workday=8.0,
+    )
+
+    # Update the worker
+    controller.update_worker(
+        worker_id=worker_id,
+        name="Robert",
+        hours_per_workday=6.0,
+        worker_optional_id="robert_001",
+        description="Part-time developer",
+    )
+
+    # Check updated values
+    workers = controller.get_workers()
+    assert len(workers) == 1
+    assert workers[0].id == worker_id
+    assert workers[0].name == "Robert"
+    assert workers[0].hours_per_workday == 6.0
+    assert workers[0].worker_id == "robert_001"
+    assert workers[0].description == "Part-time developer"
+
+
+def test_remove_worker(controller: ProjectController) -> None:
+    """Test removing a worker."""
+    controller.new_project("Test Project")
+
+    # Add two workers
+    worker1_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    worker2_id = controller.add_worker(name="Bob", hours_per_workday=8.0)
+
+    assert len(controller.get_workers()) == 2
+
+    # Remove first worker
+    controller.remove_worker(worker1_id)
+
+    # Should have one worker left
+    workers = controller.get_workers()
+    assert len(workers) == 1
+    assert workers[0].id == worker2_id
+    assert workers[0].name == "Bob"
+
+
+def test_get_workers(controller: ProjectController) -> None:
+    """Test getting all workers."""
+    controller.new_project("Test Project")
+
+    # Initially empty
+    assert controller.get_workers() == []
+
+    # Add multiple workers
+    controller.add_worker(name="Alice", hours_per_workday=8.0)
+    controller.add_worker(name="Bob", hours_per_workday=7.5)
+    controller.add_worker(name="Charlie", hours_per_workday=6.0)
+
+    # Should get all workers
+    workers = controller.get_workers()
+    assert len(workers) == 3
+    assert workers[0].name == "Alice"
+    assert workers[1].name == "Bob"
+    assert workers[2].name == "Charlie"
