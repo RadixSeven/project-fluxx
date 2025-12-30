@@ -5,6 +5,7 @@ description = "Project planning that incorporates uncertainty"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "networkx>=3.0.0",
     "numpy>=1.26.0",
     "PyQt6>=6.6.0",
     "pydantic>=2.0.0",
