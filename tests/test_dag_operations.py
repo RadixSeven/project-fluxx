@@ -12,6 +12,9 @@ from fluxx.data import (
     add_task,
     generate_persistent_object_id,
     generate_task_id,
+    remove_dependency,
+    update_branch,
+    update_task,
 )
 from fluxx.data.models import (
     DAG,
@@ -28,6 +31,7 @@ from fluxx.data.models import (
     PossibleWorldId,
     Project,
     ProjectMetadata,
+    TaskId,
     Triangular,
     Worker,
     WorkerId,
@@ -597,3 +601,362 @@ def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
                 PossibleWorld(id=PossibleWorldId("pw3"), title="Option C"),
             ],
         )
+
+
+def test_update_task_title(empty_project: Project) -> None:
+    """Test updating a task's title."""
+    # Add a task
+    project, task_id = add_task(
+        empty_project,
+        title="Original Title",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    initial_version = project.dag.current_version_id
+
+    # Update the title
+    updated_project = update_task(project, task_id, title="New Title")
+
+    # Version should change
+    assert updated_project.dag.current_version_id != initial_version
+
+    # Get the updated task
+    persistent_id = updated_project.dag.node_map[NodeId(task_id)]
+    task = updated_project.persistent_tasks[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Title should be updated, description unchanged
+    assert task.title == "New Title"
+    assert task.description == "Test"
+
+    # Event should be recorded
+    last_event = updated_project.history_events[-1]
+    assert last_event.event_type == EventType.NODE_MODIFIED
+    assert NodeId(task_id) in last_event.affected_nodes
+
+
+def test_update_task_multiple_fields(empty_project: Project) -> None:
+    """Test updating multiple task fields at once."""
+    # Add a task
+    project, task_id = add_task(
+        empty_project,
+        title="Original",
+        description="Old description",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update multiple fields
+    new_duration = Triangular(min=5.0, mode=10.0, max=15.0)
+    updated_project = update_task(
+        project,
+        task_id,
+        title="Updated Title",
+        description="Updated description",
+        duration_distribution=new_duration,
+        allowed_workers=[WorkerId("w1")],
+    )
+
+    # Get the updated task
+    persistent_id = updated_project.dag.node_map[NodeId(task_id)]
+    task = updated_project.persistent_tasks[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    assert task.title == "Updated Title"
+    assert task.description == "Updated description"
+    assert task.duration_distribution == new_duration
+    assert task.allowed_workers == [WorkerId("w1")]
+
+
+def test_update_task_no_changes(empty_project: Project) -> None:
+    """Test that updating with no changes returns unchanged project."""
+    # Add a task
+    project, task_id = add_task(
+        empty_project,
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    initial_version = project.dag.current_version_id
+
+    # Update with no changes (all parameters None)
+    updated_project = update_task(project, task_id)
+
+    # Should return the same project (same version)
+    assert updated_project.dag.current_version_id == initial_version
+    assert len(updated_project.history_events) == len(project.history_events)
+
+
+def test_update_task_nonexistent(empty_project: Project) -> None:
+    """Test that updating a non-existent task raises error."""
+    with pytest.raises(DAGOperationError, match="Task.*not found"):
+        update_task(
+            empty_project,
+            TaskId("nonexistent"),
+            title="New Title",
+        )
+
+
+def test_update_task_validation_failure(empty_project: Project) -> None:
+    """Test that updating a task with invalid data raises error."""
+    # Add a task
+    project, task_id = add_task(
+        empty_project,
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Try to update with non-existent worker
+    with pytest.raises(DAGOperationError, match="Failed to update task"):
+        update_task(
+            project,
+            task_id,
+            allowed_workers=[WorkerId("nonexistent")],
+        )
+
+
+def test_update_branch_title(empty_project: Project) -> None:
+    """Test updating a branch's title."""
+    # Add a branch
+    project, branch_id = add_branch(
+        empty_project,
+        title="Original Title",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="Option A"),
+        ],
+    )
+    initial_version = project.dag.current_version_id
+
+    # Update the title
+    updated_project = update_branch(project, branch_id, title="New Title")
+
+    # Version should change
+    assert updated_project.dag.current_version_id != initial_version
+
+    # Get the updated branch
+    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    branch = updated_project.persistent_branches[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Title should be updated, description unchanged
+    assert branch.title == "New Title"
+    assert branch.description == "Test"
+
+    # Event should be recorded
+    last_event = updated_project.history_events[-1]
+    assert last_event.event_type == EventType.NODE_MODIFIED
+    assert NodeId(branch_id) in last_event.affected_nodes
+
+
+def test_update_branch_possible_worlds(empty_project: Project) -> None:
+    """Test updating a branch's possible worlds."""
+    # Add a branch
+    project, branch_id = add_branch(
+        empty_project,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="Option A"),
+        ],
+    )
+
+    # Update possible worlds
+    new_worlds = [
+        PossibleWorld(id=PossibleWorldId("pw1"), title="Option A Updated"),
+        PossibleWorld(id=PossibleWorldId("pw2"), title="Option B"),
+    ]
+    updated_project = update_branch(project, branch_id, possible_worlds=new_worlds)
+
+    # Get the updated branch
+    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    branch = updated_project.persistent_branches[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    assert branch.possible_worlds == new_worlds
+
+
+def test_update_branch_no_changes(empty_project: Project) -> None:
+    """Test that updating a branch with no changes returns unchanged project."""
+    # Add a branch
+    project, branch_id = add_branch(
+        empty_project,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="Option A"),
+        ],
+    )
+    initial_version = project.dag.current_version_id
+
+    # Update with no changes
+    updated_project = update_branch(project, branch_id)
+
+    # Should return the same project
+    assert updated_project.dag.current_version_id == initial_version
+
+
+def test_update_branch_nonexistent(empty_project: Project) -> None:
+    """Test that updating a non-existent branch raises error."""
+    with pytest.raises(DAGOperationError, match="Branch.*not found"):
+        update_branch(
+            empty_project,
+            BranchId("nonexistent"),
+            title="New Title",
+        )
+
+
+def test_remove_dependency_from_task(empty_project: Project) -> None:
+    """Test removing a dependency from a task."""
+    # Add two tasks
+    project, task1_id = add_task(
+        empty_project,
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    project, task2_id = add_task(
+        project,
+        title="Task 2",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.END,
+        target_node_id=NodeId(task2_id),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    project = add_dependency(project, NodeId(task1_id), dep)
+
+    initial_version = project.dag.current_version_id
+
+    # Remove the dependency
+    updated_project = remove_dependency(project, NodeId(task1_id), dep)
+
+    # Version should change
+    assert updated_project.dag.current_version_id != initial_version
+
+    # Task should no longer have the dependency
+    persistent_id = updated_project.dag.node_map[NodeId(task1_id)]
+    task = updated_project.persistent_tasks[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+    assert dep not in task.dependencies
+    assert len(task.dependencies) == 0
+
+    # Event should be recorded
+    last_event = updated_project.history_events[-1]
+    assert last_event.event_type == EventType.NODE_MODIFIED
+    assert NodeId(task1_id) in last_event.affected_nodes
+
+
+def test_remove_dependency_from_branch(empty_project: Project) -> None:
+    """Test removing a dependency from a branch."""
+    # Add a branch and a task
+    project, branch_id = add_branch(
+        empty_project,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="Option A"),
+        ],
+    )
+    project, task_id = add_task(
+        project,
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add dependency from branch to task
+    dep = Dependency(
+        source_endpoint=Endpoint.OCCURRENCE,
+        target_node_id=NodeId(task_id),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    project = add_dependency(project, NodeId(branch_id), dep)
+
+    # Remove the dependency
+    updated_project = remove_dependency(project, NodeId(branch_id), dep)
+
+    # Branch should no longer have the dependency
+    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    branch = updated_project.persistent_branches[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+    assert dep not in branch.dependencies
+    assert len(branch.dependencies) == 0
+
+
+def test_remove_dependency_nonexistent_node(empty_project: Project) -> None:
+    """Test that removing a dependency from a non-existent node raises error."""
+    dep = Dependency(
+        source_endpoint=Endpoint.END,
+        target_node_id=NodeId("task_123"),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    with pytest.raises(DAGOperationError, match="Node.*not found"):
+        remove_dependency(empty_project, NodeId("nonexistent"), dep)
+
+
+def test_remove_dependency_preserves_other_dependencies(empty_project: Project) -> None:
+    """Test that removing a dependency preserves other dependencies."""
+    # Add three tasks
+    project, task1_id = add_task(
+        empty_project,
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    project, task2_id = add_task(
+        project,
+        title="Task 2",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    project, task3_id = add_task(
+        project,
+        title="Task 3",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add two dependencies from task1
+    dep1 = Dependency(
+        source_endpoint=Endpoint.END,
+        target_node_id=NodeId(task2_id),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    dep2 = Dependency(
+        source_endpoint=Endpoint.END,
+        target_node_id=NodeId(task3_id),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    project = add_dependency(project, NodeId(task1_id), dep1)
+    project = add_dependency(project, NodeId(task1_id), dep2)
+
+    # Remove only dep1
+    updated_project = remove_dependency(project, NodeId(task1_id), dep1)
+
+    # Get the task
+    persistent_id = updated_project.dag.node_map[NodeId(task1_id)]
+    task = updated_project.persistent_tasks[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Should have only dep2
+    assert dep1 not in task.dependencies
+    assert dep2 in task.dependencies
+    assert len(task.dependencies) == 1

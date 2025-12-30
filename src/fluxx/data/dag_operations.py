@@ -86,7 +86,11 @@ def add_task(
     # Copy all existing persistent objects with new version
     new_persistent_tasks = {}
     for pid, ptask in project.persistent_tasks.items():
-        # Get task from current version
+        # Get task from current version (skip if doesn't exist in current version)
+        if project.dag.current_version_id not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
         current_task = ptask.versions[project.dag.current_version_id]
         # Add to new version
         new_versions = dict(ptask.versions)
@@ -108,6 +112,11 @@ def add_task(
     # Copy persistent branches with new version
     new_persistent_branches = {}
     for pid, pbranch in project.persistent_branches.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
         current_branch = pbranch.versions[project.dag.current_version_id]
         new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
         new_versions_branch[new_version_id] = current_branch
@@ -207,6 +216,11 @@ def add_branch(
     # Copy all existing persistent objects with new version
     new_persistent_tasks = {}
     for pid, ptask in project.persistent_tasks.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
         current_task = ptask.versions[project.dag.current_version_id]
         new_versions = dict(ptask.versions)
         new_versions[new_version_id] = current_task
@@ -214,6 +228,11 @@ def add_branch(
 
     new_persistent_branches = {}
     for pid, pbranch in project.persistent_branches.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
         current_branch = pbranch.versions[project.dag.current_version_id]
         new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
         new_versions_branch[new_version_id] = current_branch
@@ -312,14 +331,18 @@ def add_dependency(
     # Copy all persistent objects with new version
     new_persistent_tasks = {}
     for pid, ptask in project.persistent_tasks.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
         current_task = ptask.versions[project.dag.current_version_id]
         new_versions = dict(ptask.versions)
 
         # If this is the source node, add the dependency
         if pid == persistent_id:
-            updated_task = Task(
-                **current_task.model_dump(exclude={"dependencies"}),
-                dependencies=current_task.dependencies + [dependency],
+            updated_task = current_task.model_copy(
+                update={"dependencies": current_task.dependencies + [dependency]}
             )
             new_versions[new_version_id] = updated_task
         else:
@@ -329,14 +352,18 @@ def add_dependency(
 
     new_persistent_branches = {}
     for pid, pbranch in project.persistent_branches.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
         current_branch = pbranch.versions[project.dag.current_version_id]
         new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
 
         # If this is the source node, add the dependency
         if pid == persistent_id:
-            updated_branch = Branch(
-                **current_branch.model_dump(exclude={"dependencies"}),
-                dependencies=current_branch.dependencies + [dependency],
+            updated_branch = current_branch.model_copy(
+                update={"dependencies": current_branch.dependencies + [dependency]}
             )
             new_versions_branch[new_version_id] = updated_branch
         else:
@@ -383,5 +410,398 @@ def add_dependency(
         validate_dag(updated_project)
     except Exception as e:
         raise DAGOperationError(f"Failed to add dependency: {e}") from e
+
+    return updated_project
+
+
+def update_task(
+    project: Project,
+    task_id: TaskId,
+    title: str | None = None,
+    description: str | None = None,
+    duration_distribution: DurationDistribution | None = None,
+    allowed_workers: list[WorkerId] | None = None,
+    excluded_worker_tasks: list[TaskId] | None = None,
+    assigned_worker: WorkerId | None = None,
+    actual_duration: float | None = None,
+) -> Project:
+    """Update an existing task's properties.
+
+    Creates a new DAG version and records the event in history.
+    Only updates properties that are explicitly provided (not None).
+
+    Args:
+        project: The project to modify
+        task_id: The task to update
+        title: New title (if provided)
+        description: New description (if provided)
+        duration_distribution: New duration distribution (if provided)
+        allowed_workers: New allowed workers list (if provided)
+        excluded_worker_tasks: New excluded worker tasks (if provided)
+        assigned_worker: New assigned worker (if provided)
+        actual_duration: New actual duration (if provided)
+
+    Returns:
+        Updated project
+
+    Raises:
+        DAGOperationError: If the operation fails validation
+    """
+    # Find the task
+    node_id = NodeId(task_id)
+    persistent_id = project.dag.node_map.get(node_id)
+    if persistent_id is None:
+        raise DAGOperationError(f"Task {task_id} not found")
+
+    if persistent_id not in project.persistent_tasks:
+        raise DAGOperationError(f"Node {task_id} is not a task")
+
+    # Get current task
+    persistent_task = project.persistent_tasks[persistent_id]
+    current_task = persistent_task.versions[project.dag.current_version_id]
+
+    # Build updated task with only changed properties
+    update_dict: dict[str, object] = {}
+    if title is not None:
+        update_dict["title"] = title
+    if description is not None:
+        update_dict["description"] = description
+    if duration_distribution is not None:
+        update_dict["duration_distribution"] = duration_distribution
+    if allowed_workers is not None:
+        update_dict["allowed_workers"] = allowed_workers
+    if excluded_worker_tasks is not None:
+        update_dict["excluded_worker_tasks"] = excluded_worker_tasks
+    if assigned_worker is not None:
+        update_dict["actual_assignee"] = assigned_worker
+    if actual_duration is not None:
+        update_dict["actual_duration"] = actual_duration
+
+    # If nothing to update, return unchanged project
+    if not update_dict:
+        return project
+
+    updated_task = current_task.model_copy(update=update_dict)
+
+    # Generate IDs
+    new_version_id = generate_dag_version_id()
+    event_id = generate_event_id()
+
+    # Copy all persistent objects with new version
+    new_persistent_tasks = {}
+    for pid, ptask in project.persistent_tasks.items():
+        # Skip if doesnt exist in current version
+        if project.dag.current_version_id not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
+        current = ptask.versions[project.dag.current_version_id]
+        new_versions = dict(ptask.versions)
+
+        # If this is the task being updated, use the updated version
+        if pid == persistent_id:
+            new_versions[new_version_id] = updated_task
+        else:
+            new_versions[new_version_id] = current
+
+        new_persistent_tasks[pid] = PersistentTask(id=pid, versions=new_versions)
+
+    new_persistent_branches = {}
+    for pid, pbranch in project.persistent_branches.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
+        current_branch = pbranch.versions[project.dag.current_version_id]
+        new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
+        new_versions_branch[new_version_id] = current_branch
+        new_persistent_branches[pid] = PersistentBranch(
+            id=pid, versions=new_versions_branch
+        )
+
+    # Create event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now(UTC),
+        parent_event_id=project.current_event_id,
+        event_type=EventType.NODE_MODIFIED,
+        affected_nodes=[node_id],
+        resulting_dag_version=new_version_id,
+    )
+
+    # Create updated project
+    updated_project = Project(
+        **project.model_dump(
+            exclude={
+                "dag",
+                "persistent_tasks",
+                "persistent_branches",
+                "history_events",
+                "current_event_id",
+                "metadata",
+            }
+        ),
+        metadata=project.metadata.model_copy(
+            update={"last_modified": datetime.now(UTC)}
+        ),
+        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
+        persistent_tasks=new_persistent_tasks,
+        persistent_branches=new_persistent_branches,
+        history_events=project.history_events + [event],
+        current_event_id=event_id,
+    )
+
+    # Validate the updated project
+    try:
+        validate_dag(updated_project)
+    except Exception as e:
+        raise DAGOperationError(f"Failed to update task: {e}") from e
+
+    return updated_project
+
+
+def update_branch(
+    project: Project,
+    branch_id: BranchId,
+    title: str | None = None,
+    description: str | None = None,
+    possible_worlds: list[PossibleWorld] | None = None,
+) -> Project:
+    """Update an existing branch's properties.
+
+    Creates a new DAG version and records the event in history.
+    Only updates properties that are explicitly provided (not None).
+
+    Args:
+        project: The project to modify
+        branch_id: The branch to update
+        title: New title (if provided)
+        description: New description (if provided)
+        possible_worlds: New possible worlds (if provided)
+
+    Returns:
+        Updated project
+
+    Raises:
+        DAGOperationError: If the operation fails validation
+    """
+    # Find the branch
+    node_id = NodeId(branch_id)
+    persistent_id = project.dag.node_map.get(node_id)
+    if persistent_id is None:
+        raise DAGOperationError(f"Branch {branch_id} not found")
+
+    if persistent_id not in project.persistent_branches:
+        raise DAGOperationError(f"Node {branch_id} is not a branch")
+
+    # Get current branch
+    persistent_branch = project.persistent_branches[persistent_id]
+    current_branch = persistent_branch.versions[project.dag.current_version_id]
+
+    # Build updated branch with only changed properties
+    update_dict: dict[str, object] = {}
+    if title is not None:
+        update_dict["title"] = title
+    if description is not None:
+        update_dict["description"] = description
+    if possible_worlds is not None:
+        update_dict["possible_worlds"] = possible_worlds
+
+    # If nothing to update, return unchanged project
+    if not update_dict:
+        return project
+
+    updated_branch = current_branch.model_copy(update=update_dict)
+
+    # Generate IDs
+    new_version_id = generate_dag_version_id()
+    event_id = generate_event_id()
+
+    # Copy all persistent objects with new version
+    new_persistent_tasks = {}
+    for pid, ptask in project.persistent_tasks.items():
+        # Skip if doesnt exist in current version
+        if project.dag.current_version_id not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
+        current = ptask.versions[project.dag.current_version_id]
+        new_versions = dict(ptask.versions)
+        new_versions[new_version_id] = current
+        new_persistent_tasks[pid] = PersistentTask(id=pid, versions=new_versions)
+
+    new_persistent_branches = {}
+    for pid, pbranch in project.persistent_branches.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
+        current_branch = pbranch.versions[project.dag.current_version_id]
+        new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
+
+        # If this is the branch being updated, use the updated version
+        if pid == persistent_id:
+            new_versions_branch[new_version_id] = updated_branch
+        else:
+            new_versions_branch[new_version_id] = current_branch
+
+        new_persistent_branches[pid] = PersistentBranch(
+            id=pid, versions=new_versions_branch
+        )
+
+    # Create event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now(UTC),
+        parent_event_id=project.current_event_id,
+        event_type=EventType.NODE_MODIFIED,
+        affected_nodes=[node_id],
+        resulting_dag_version=new_version_id,
+    )
+
+    # Create updated project
+    updated_project = Project(
+        **project.model_dump(
+            exclude={
+                "dag",
+                "persistent_tasks",
+                "persistent_branches",
+                "history_events",
+                "current_event_id",
+                "metadata",
+            }
+        ),
+        metadata=project.metadata.model_copy(
+            update={"last_modified": datetime.now(UTC)}
+        ),
+        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
+        persistent_tasks=new_persistent_tasks,
+        persistent_branches=new_persistent_branches,
+        history_events=project.history_events + [event],
+        current_event_id=event_id,
+    )
+
+    # Validate the updated project
+    try:
+        validate_dag(updated_project)
+    except Exception as e:
+        raise DAGOperationError(f"Failed to update branch: {e}") from e
+
+    return updated_project
+
+
+def remove_dependency(
+    project: Project,
+    source_node_id: NodeId,
+    dependency: Dependency,
+) -> Project:
+    """Remove a dependency from a node.
+
+    Creates a new DAG version and records the event in history.
+
+    Args:
+        project: The project to modify
+        source_node_id: The node to remove the dependency from
+        dependency: The dependency to remove
+
+    Returns:
+        Updated project
+
+    Raises:
+        DAGOperationError: If the operation fails
+    """
+    # Find the persistent object ID
+    persistent_id = project.dag.node_map.get(source_node_id)
+    if persistent_id is None:
+        raise DAGOperationError(f"Node {source_node_id} not found")
+
+    # Generate IDs
+    new_version_id = generate_dag_version_id()
+    event_id = generate_event_id()
+
+    # Copy all persistent objects with new version
+    new_persistent_tasks = {}
+    for pid, ptask in project.persistent_tasks.items():
+        # Skip if doesnt exist in current version
+        if project.dag.current_version_id not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
+        current_task = ptask.versions[project.dag.current_version_id]
+        new_versions = dict(ptask.versions)
+
+        # If this is the source node, remove the dependency
+        if pid == persistent_id:
+            new_deps = [d for d in current_task.dependencies if d != dependency]
+            updated_task = current_task.model_copy(update={"dependencies": new_deps})
+            new_versions[new_version_id] = updated_task
+        else:
+            new_versions[new_version_id] = current_task
+
+        new_persistent_tasks[pid] = PersistentTask(id=pid, versions=new_versions)
+
+    new_persistent_branches = {}
+    for pid, pbranch in project.persistent_branches.items():
+        # Skip if doesn't exist in current version
+        if project.dag.current_version_id not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
+        current_branch = pbranch.versions[project.dag.current_version_id]
+        new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
+
+        # If this is the source node, remove the dependency
+        if pid == persistent_id:
+            new_deps = [d for d in current_branch.dependencies if d != dependency]
+            updated_branch = current_branch.model_copy(
+                update={"dependencies": new_deps}
+            )
+            new_versions_branch[new_version_id] = updated_branch
+        else:
+            new_versions_branch[new_version_id] = current_branch
+
+        new_persistent_branches[pid] = PersistentBranch(
+            id=pid, versions=new_versions_branch
+        )
+
+    # Create event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now(UTC),
+        parent_event_id=project.current_event_id,
+        event_type=EventType.NODE_MODIFIED,
+        affected_nodes=[source_node_id],
+        resulting_dag_version=new_version_id,
+    )
+
+    # Create updated project
+    updated_project = Project(
+        **project.model_dump(
+            exclude={
+                "dag",
+                "persistent_tasks",
+                "persistent_branches",
+                "history_events",
+                "current_event_id",
+                "metadata",
+            }
+        ),
+        metadata=project.metadata.model_copy(
+            update={"last_modified": datetime.now(UTC)}
+        ),
+        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
+        persistent_tasks=new_persistent_tasks,
+        persistent_branches=new_persistent_branches,
+        history_events=project.history_events + [event],
+        current_event_id=event_id,
+    )
+
+    # Validate the updated project
+    try:
+        validate_dag(updated_project)
+    except Exception as e:
+        raise DAGOperationError(f"Failed to remove dependency: {e}") from e
 
     return updated_project

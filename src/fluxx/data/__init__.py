@@ -5,6 +5,9 @@ from fluxx.data.dag_operations import (
     add_branch,
     add_dependency,
     add_task,
+    remove_dependency,
+    update_branch,
+    update_task,
 )
 from fluxx.data.id_generation import (
     generate_branch_id,
@@ -19,6 +22,13 @@ from fluxx.data.persistence import (
     VersionError,
     load_project,
     save_project,
+)
+from fluxx.data.undo import (
+    UndoError,
+    can_redo,
+    can_undo,
+    redo,
+    undo,
 )
 from fluxx.data.validation import (
     CycleError,
@@ -49,7 +59,16 @@ __all__ = [
     "add_task",
     "add_branch",
     "add_dependency",
+    "update_task",
+    "update_branch",
+    "remove_dependency",
     "DAGOperationError",
+    # Undo/Redo
+    "undo",
+    "redo",
+    "can_undo",
+    "can_redo",
+    "UndoError",
     # ID Generation
     "generate_task_id",
     "generate_branch_id",
