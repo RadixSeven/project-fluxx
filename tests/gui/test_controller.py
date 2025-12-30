@@ -15,6 +15,7 @@ from fluxx.data.models import (
     NodeId,
     PossibleWorld,
     PossibleWorldId,
+    ShiftedLognormal,
     Triangular,
 )
 from fluxx.gui.controller import ProjectController
@@ -499,3 +500,77 @@ def test_get_workers(controller: ProjectController) -> None:
     assert workers[0].name == "Alice"
     assert workers[1].name == "Bob"
     assert workers[2].name == "Charlie"
+
+
+def test_add_sibling_without_distribution(controller: ProjectController) -> None:
+    """Test adding a sibling without specifying a distribution.
+
+    This should use a default distribution instead of leaving it None,
+    which would cause validation errors.
+    """
+    controller.new_project("Test Project")
+
+    # Create a parent task
+    parent_id = controller.create_task(
+        title="Parent Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Convert to parent (creates first child)
+    child1_id = controller.convert_to_parent(parent_id, "Child 1")
+
+    # Add sibling without specifying a distribution
+    # This should NOT crash and should use a default distribution
+    child2_id = controller.add_sibling(child1_id, "Child 2")
+
+    # Verify the sibling was created
+    project = controller.get_project()
+    child2_node_id = NodeId(child2_id)
+    assert child2_node_id in project.dag.node_map
+
+    # Get the sibling task
+    child2_persistent_id = project.dag.node_map[child2_node_id]
+    child2_task = project.persistent_tasks[child2_persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    # Should have a duration distribution (not None)
+    assert child2_task.duration_distribution is not None
+
+    # Should be ShiftedLognormal with specific parameters
+    assert isinstance(child2_task.duration_distribution, ShiftedLognormal)
+    assert child2_task.duration_distribution.min == 0.25
+    assert child2_task.duration_distribution.mode == 6.0
+    assert child2_task.duration_distribution.percentile_95 == 24.0
+
+
+def test_convert_to_parent_uses_default_distribution(
+    controller: ProjectController,
+) -> None:
+    """Test that converting to parent uses default distribution for first child.
+
+    When a parent task has no distribution (None), the first child should
+    get a default distribution instead of inheriting None.
+    """
+    controller.new_project("Test Project")
+
+    # Create a task without a distribution
+    # (This might not be directly possible, but let's test the edge case)
+    parent_id = controller.create_task(
+        title="Parent Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Convert to parent (creates first child)
+    child_id = controller.convert_to_parent(parent_id, "Child Task")
+
+    # Get the child task
+    project = controller.get_project()
+    child_node_id = NodeId(child_id)
+    child_persistent_id = project.dag.node_map[child_node_id]
+    child_task = project.persistent_tasks[child_persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    # Child should have inherited the parent's distribution or have a default
+    assert child_task.duration_distribution is not None

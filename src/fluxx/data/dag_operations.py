@@ -800,12 +800,17 @@ def convert_to_parent_task(
     # Create child task with parent's duration distribution
     from fluxx.data.models import ConstraintType, Endpoint
 
+    # Use parent's distribution, or default if parent has none
+    child_distribution = parent_task.duration_distribution
+    if child_distribution is None:
+        child_distribution = ShiftedLognormal(min=0.25, mode=6.0, percentile_95=24.0)
+
     child_task = Task(
         id=child_id,
         title=child_title,
         description="",
         parent_id=task_id,
-        duration_distribution=parent_task.duration_distribution,
+        duration_distribution=child_distribution,
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
@@ -968,6 +973,10 @@ def add_sibling_subtask(
 
     # Create sibling task
     from fluxx.data.models import ConstraintType, Endpoint
+
+    # Use default distribution if none provided
+    if duration_distribution is None:
+        duration_distribution = ShiftedLognormal(min=0.25, mode=6.0, percentile_95=24.0)
 
     sibling_task = Task(
         id=sibling_id,
