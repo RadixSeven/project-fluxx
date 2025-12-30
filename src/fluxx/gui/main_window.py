@@ -4,8 +4,15 @@ from pathlib import Path
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
-from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QSplitter
+from PyQt6.QtWidgets import (
+    QFileDialog,
+    QInputDialog,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+)
 
+from fluxx.data.models import Triangular
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.panels import DAGPanel, EditorPanel
 
@@ -103,6 +110,20 @@ class MainWindow(QMainWindow):
         self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
         self.redo_action.triggered.connect(self._on_redo)
         edit_menu.addAction(self.redo_action)
+
+        edit_menu.addSeparator()
+
+        # New Task
+        new_task_action = QAction("New &Task", self)
+        new_task_action.setShortcut("Ctrl+T")
+        new_task_action.triggered.connect(self._on_new_task)
+        edit_menu.addAction(new_task_action)
+
+        # New Branch
+        new_branch_action = QAction("New &Branch", self)
+        new_branch_action.setShortcut("Ctrl+B")
+        new_branch_action.triggered.connect(self._on_new_branch)
+        edit_menu.addAction(new_branch_action)
 
     def _create_panels(self) -> None:
         """Create two-panel layout with splitter."""
@@ -272,4 +293,58 @@ class MainWindow(QMainWindow):
                     self,
                     "Error",
                     f"Failed to redo: {e}",
+                )
+
+    def _on_new_task(self) -> None:
+        """Handle New Task menu action."""
+        # Prompt for task title
+        title, ok = QInputDialog.getText(
+            self, "New Task", "Enter task title:", text="New Task"
+        )
+
+        if ok and title:
+            try:
+                # Create task with default values
+                task_id = self.controller.create_task(
+                    title=title,
+                    description="",
+                    duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+                )
+
+                # Select the new task
+                from fluxx.data.models import NodeId
+
+                self.controller.select_node(NodeId(task_id))
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to create task: {e}",
+                )
+
+    def _on_new_branch(self) -> None:
+        """Handle New Branch menu action."""
+        # Prompt for branch title
+        title, ok = QInputDialog.getText(
+            self, "New Branch", "Enter branch title:", text="New Branch"
+        )
+
+        if ok and title:
+            try:
+                # Create branch with default values
+                branch_id = self.controller.create_branch(
+                    title=title,
+                    description="",
+                    possible_worlds=[],
+                )
+
+                # Select the new branch
+                from fluxx.data.models import NodeId
+
+                self.controller.select_node(NodeId(branch_id))
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Error",
+                    f"Failed to create branch: {e}",
                 )

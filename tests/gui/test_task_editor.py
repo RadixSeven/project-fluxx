@@ -229,3 +229,96 @@ def test_task_editor_triangular_params(
     dist = task_editor.pending_changes["duration_distribution"]
     assert isinstance(dist, Triangular)
     assert dist.max == 5.0
+
+
+def test_task_editor_dependencies_display(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test that dependencies are displayed in the list."""
+    # Create two tasks
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add dependency: task2 depends on task1
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint, NodeId
+
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId(task1_id),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(NodeId(task2_id), dep)
+
+    # Load task 2
+    task_editor.load_task(task2_id)
+
+    # Verify dependency is shown
+    assert task_editor.dependencies_list.count() == 1
+    item = task_editor.dependencies_list.item(0)
+    assert item is not None
+    assert "Task 1" in item.text()
+
+
+def test_task_editor_remove_dependency(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test removing a dependency."""
+    # Create two tasks with dependency
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint, NodeId
+
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId(task1_id),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(NodeId(task2_id), dep)
+
+    # Load task 2
+    task_editor.load_task(task2_id)
+
+    # Select the dependency
+    task_editor.dependencies_list.setCurrentRow(0)
+
+    # Remove button should be enabled
+    assert task_editor.remove_dependency_button.isEnabled()
+
+    # Remove dependency
+    task_editor._on_remove_dependency()
+
+    # Verify dependency removed from pending changes
+    assert "dependencies" in task_editor.pending_changes
+    assert len(task_editor.pending_changes["dependencies"]) == 0
+
+
+def test_task_editor_dependency_selection(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test dependency list selection changes."""
+    # Create task
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Initially, remove button should be disabled
+    assert not task_editor.remove_dependency_button.isEnabled()
+
+    # (No dependencies to select, so button remains disabled)

@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView
 from fluxx.data.models import NodeId, Project
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.utils.layout import compute_dag_layout
+from fluxx.gui.widgets.dag_view.edge_item import EdgeItem
 from fluxx.gui.widgets.dag_view.node_item import BranchNodeItem, NodeItem, TaskNodeItem
 
 
@@ -45,6 +46,9 @@ class DAGGraphicsView(QGraphicsView):
         # Store node items for later reference
         self.node_items: dict[NodeId, NodeItem] = {}
 
+        # Store edge items for later reference
+        self.edge_items: list[EdgeItem] = []
+
         # Connect to controller signals
         self.controller.project_changed.connect(self._on_project_changed)
         self.controller.selection_changed.connect(self._on_selection_changed)
@@ -79,6 +83,7 @@ class DAGGraphicsView(QGraphicsView):
         # Clear scene
         self._scene.clear()
         self.node_items.clear()
+        self.edge_items.clear()
 
         project = self.controller.get_project()
         current_version = project.dag.current_version_id
@@ -116,6 +121,43 @@ class DAGGraphicsView(QGraphicsView):
             # Add to scene and store reference
             self._scene.addItem(item)
             self.node_items[node_id] = item
+
+        # Create edges for dependencies
+        for node_id, persistent_id in project.dag.node_map.items():
+            # Get dependencies for this node
+            dependencies = []
+
+            if persistent_id in project.persistent_tasks:
+                persistent_task = project.persistent_tasks[persistent_id]
+                if current_version in persistent_task.versions:
+                    task = persistent_task.versions[current_version]
+                    dependencies = task.dependencies
+            elif persistent_id in project.persistent_branches:
+                persistent_branch = project.persistent_branches[persistent_id]
+                if current_version in persistent_branch.versions:
+                    branch = persistent_branch.versions[current_version]
+                    dependencies = branch.dependencies
+
+            # Create edge items for each dependency
+            for dep in dependencies:
+                # Skip if source or target node not in view
+                if (
+                    node_id not in self.node_items
+                    or dep.target_node_id not in self.node_items
+                ):
+                    continue
+
+                # Get node positions (center of nodes)
+                source_item = self.node_items[node_id]
+                target_item = self.node_items[dep.target_node_id]
+
+                source_pos = source_item.pos()
+                target_pos = target_item.pos()
+
+                # Create edge item
+                edge = EdgeItem(node_id, dep.target_node_id, source_pos, target_pos)
+                self._scene.addItem(edge)
+                self.edge_items.append(edge)
 
         # Update selection state
         selected_node_id = self.controller.get_selected_node_id()
