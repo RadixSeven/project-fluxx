@@ -340,3 +340,50 @@ def test_branch_editor_add_dependency_and_apply(
     ]
     assert len(branch_after.dependencies) == 1
     assert branch_after.dependencies[0].target_node_id == NodeId(task_id)
+
+
+def test_branch_editor_dependency_display(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that dependencies are displayed in the correct format."""
+    from fluxx.data.id_generation import generate_possible_world_id
+    from fluxx.data.models import (
+        ConstraintType,
+        Dependency,
+        Endpoint,
+        NodeId,
+        PossibleWorld,
+        Triangular,
+    )
+
+    # Create a task and a branch
+    task_id = controller.create_task(
+        title="Make Plan",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    branch_id = controller.create_branch(
+        title="Source Branch",
+        possible_worlds=[
+            PossibleWorld(
+                id=generate_possible_world_id(), title="Option A", weight=1.0
+            ),
+        ],
+    )
+
+    # Add dependency: branch.occurrence >= task.end
+    dep = Dependency(
+        source_endpoint=Endpoint.OCCURRENCE,
+        target_node_id=NodeId(task_id),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(NodeId(branch_id), dep)
+
+    # Load branch in editor
+    branch_editor.load_branch(branch_id)
+
+    # Verify dependency display format
+    assert branch_editor.dependencies_list.count() == 1
+    item = branch_editor.dependencies_list.item(0)
+    assert item is not None
+    assert item.text() == "occurrence_point ≥ Make Plan.end"

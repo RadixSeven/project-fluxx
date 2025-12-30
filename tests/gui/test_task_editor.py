@@ -263,7 +263,7 @@ def test_task_editor_dependencies_display(
     assert task_editor.dependencies_list.count() == 1
     item = task_editor.dependencies_list.item(0)
     assert item is not None
-    assert "Task 1" in item.text()
+    assert item.text() == "start ≥ Task 1.end"
 
 
 def test_task_editor_remove_dependency(

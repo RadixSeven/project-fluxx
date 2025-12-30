@@ -300,8 +300,13 @@ class BranchEditor(QWidget):
                         target_title = persistent_branch.versions[current_version].title
 
             # Format dependency display
-            endpoint_str = dep.source_endpoint.value
-            item_text = f"{target_title} ({endpoint_str})"
+            source_ep = dep.source_endpoint.value
+            target_ep = dep.target_endpoint.value
+            constraint = dep.constraint_type.value
+            if constraint == ">=":
+                constraint = "≥"
+
+            item_text = f"{source_ep} {constraint} {target_title}.{target_ep}"
             self.dependencies_list.addItem(item_text)
 
     def _on_title_changed(self, text: str) -> None:
