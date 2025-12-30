@@ -104,7 +104,22 @@ class Endpoint(str, Enum):
 
 
 class Dependency(BaseModel):
-    """Dependency between task/branch endpoints."""
+    """Dependency between task/branch endpoints.
+
+    Semantics:
+        containing_node[source_endpoint]
+           <constraint>
+        target_node[target_endpoint]
+
+    Example:
+    # Add dependency: task1.end >= task2.start
+    Dependency(
+        source_endpoint=Endpoint.END,
+        target_node_id=NodeId(task2_id),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    """
 
     source_endpoint: Endpoint = Field(description="Source endpoint type")
     target_node_id: NodeId = Field(
