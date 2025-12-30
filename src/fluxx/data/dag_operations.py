@@ -746,3 +746,334 @@ def remove_dependency(
         new_persistent_branches=new_persistent_branches,
         operation_name="remove dependency",
     )
+
+
+def convert_to_parent_task(
+    project: Project,
+    task_id: TaskId,
+    child_title: str,
+) -> tuple[Project, TaskId]:
+    """Convert a leaf task to a parent task with one child.
+
+    The child task inherits the duration distribution. Two required dependencies
+    are created:
+    - child.start >= parent.start (added to child)
+    - parent.end >= child.end (added to parent)
+
+    Args:
+        project: The project to modify
+        task_id: ID of the task to convert to parent
+        child_title: Title for the new child task
+
+    Returns:
+        Tuple of (updated project, new child task ID)
+
+    Raises:
+        DAGOperationError: If the task is already a parent or doesn't exist
+    """
+    # Validate task exists and is a leaf
+    node_id = NodeId(task_id)
+    if node_id not in project.dag.node_map:
+        raise DAGOperationError(f"Task {task_id} not found")
+
+    persistent_id = project.dag.node_map[node_id]
+    if persistent_id not in project.persistent_tasks:
+        raise DAGOperationError(f"Task {task_id} is not a task")
+
+    persistent_task = project.persistent_tasks[persistent_id]
+    current_version = project.dag.current_version_id
+
+    if current_version not in persistent_task.versions:
+        raise DAGOperationError(f"Task {task_id} not in current version")
+
+    parent_task = persistent_task.versions[current_version]
+
+    if parent_task.children:
+        raise DAGOperationError(f"Task {task_id} already has children")
+
+    # Generate IDs for child and new version
+    child_id = generate_task_id()
+    child_persistent_id = generate_persistent_object_id()
+    new_version_id = generate_dag_version_id()
+    event_id = generate_event_id()
+
+    # Create child task with parent's duration distribution
+    from fluxx.data.models import ConstraintType, Endpoint
+
+    child_task = Task(
+        id=child_id,
+        title=child_title,
+        description="",
+        parent_id=task_id,
+        duration_distribution=parent_task.duration_distribution,
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=NodeId(task_id),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create persistent child task
+    persistent_child = PersistentTask(
+        id=child_persistent_id,
+        versions={new_version_id: child_task},
+    )
+
+    # Update parent task: remove duration, add child, add dependency
+    updated_parent = parent_task.model_copy(
+        update={
+            "children": [child_id],
+            "duration_distribution": None,
+            "dependencies": parent_task.dependencies
+            + [
+                Dependency(
+                    source_endpoint=Endpoint.END,
+                    target_node_id=NodeId(child_id),
+                    target_endpoint=Endpoint.END,
+                    constraint_type=ConstraintType.GREATER_EQUAL,
+                )
+            ],
+        }
+    )
+
+    # Copy all persistent tasks with new version
+    new_persistent_tasks = {}
+    for pid, ptask in project.persistent_tasks.items():
+        if current_version not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
+        current_task = ptask.versions[current_version]
+        new_versions = dict(ptask.versions)
+
+        # Update the parent task
+        if pid == persistent_id:
+            new_versions[new_version_id] = updated_parent
+        else:
+            new_versions[new_version_id] = current_task
+
+        new_persistent_tasks[pid] = PersistentTask(id=pid, versions=new_versions)
+
+    # Add new child persistent task
+    new_persistent_tasks[child_persistent_id] = persistent_child
+
+    # Copy persistent branches with new version
+    new_persistent_branches = {}
+    for pid, pbranch in project.persistent_branches.items():
+        if current_version not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
+        current_branch = pbranch.versions[current_version]
+        new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
+        new_versions_branch[new_version_id] = current_branch
+        new_persistent_branches[pid] = PersistentBranch(
+            id=pid, versions=new_versions_branch
+        )
+
+    # Update node map
+    new_node_map = dict(project.dag.node_map)
+    new_node_map[NodeId(child_id)] = child_persistent_id
+
+    # Create event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now(UTC),
+        parent_event_id=project.current_event_id,
+        event_type=EventType.NODE_MODIFIED,
+        affected_nodes=[NodeId(task_id), NodeId(child_id)],
+        resulting_dag_version=new_version_id,
+    )
+
+    # Create updated project
+    updated_project = project.model_copy(
+        update={
+            "metadata": project.metadata.model_copy(
+                update={"last_modified": datetime.now(UTC)}
+            ),
+            "dag": project.dag.model_copy(
+                update={"current_version_id": new_version_id, "node_map": new_node_map}
+            ),
+            "persistent_tasks": new_persistent_tasks,
+            "persistent_branches": new_persistent_branches,
+            "history_events": project.history_events + [event],
+            "current_event_id": event_id,
+        }
+    )
+
+    # Validate
+    try:
+        validate_dag(updated_project)
+    except Exception as e:
+        raise DAGOperationError(f"Failed to convert to parent: {e}") from e
+
+    return updated_project, child_id
+
+
+def add_sibling_subtask(
+    project: Project,
+    task_id: TaskId,
+    sibling_title: str,
+    duration_distribution: Triangular | ShiftedLognormal | None = None,
+) -> tuple[Project, TaskId]:
+    """Add a sibling subtask to an existing subtask.
+
+    Creates a new task with the same parent as the given task. Two required
+    dependencies are created:
+    - sibling.start >= parent.start (added to sibling)
+    - parent.end >= sibling.end (added to parent)
+
+    Args:
+        project: The project to modify
+        task_id: ID of an existing subtask (to get parent)
+        sibling_title: Title for the new sibling task
+        duration_distribution: Duration distribution for the new sibling
+
+    Returns:
+        Tuple of (updated project, new sibling task ID)
+
+    Raises:
+        DAGOperationError: If the task doesn't have a parent or doesn't exist
+    """
+    # Validate task exists and has a parent
+    node_id = NodeId(task_id)
+    if node_id not in project.dag.node_map:
+        raise DAGOperationError(f"Task {task_id} not found")
+
+    persistent_id = project.dag.node_map[node_id]
+    if persistent_id not in project.persistent_tasks:
+        raise DAGOperationError(f"Task {task_id} is not a task")
+
+    persistent_task = project.persistent_tasks[persistent_id]
+    current_version = project.dag.current_version_id
+
+    if current_version not in persistent_task.versions:
+        raise DAGOperationError(f"Task {task_id} not in current version")
+
+    existing_task = persistent_task.versions[current_version]
+
+    if existing_task.parent_id is None:
+        raise DAGOperationError(f"Task {task_id} is not a subtask (has no parent)")
+
+    parent_id = existing_task.parent_id
+
+    # Generate IDs
+    sibling_id = generate_task_id()
+    sibling_persistent_id = generate_persistent_object_id()
+    new_version_id = generate_dag_version_id()
+    event_id = generate_event_id()
+
+    # Create sibling task
+    from fluxx.data.models import ConstraintType, Endpoint
+
+    sibling_task = Task(
+        id=sibling_id,
+        title=sibling_title,
+        description="",
+        parent_id=parent_id,
+        duration_distribution=duration_distribution,
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=NodeId(parent_id),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create persistent sibling task
+    persistent_sibling = PersistentTask(
+        id=sibling_persistent_id,
+        versions={new_version_id: sibling_task},
+    )
+
+    # Copy all persistent tasks with new version
+    new_persistent_tasks = {}
+    for pid, ptask in project.persistent_tasks.items():
+        if current_version not in ptask.versions:
+            new_persistent_tasks[pid] = ptask
+            continue
+
+        current_task = ptask.versions[current_version]
+        new_versions = dict(ptask.versions)
+
+        # Update parent task: add child and dependency
+        if current_task.id == parent_id:
+            updated_parent = current_task.model_copy(
+                update={
+                    "children": current_task.children + [sibling_id],
+                    "dependencies": current_task.dependencies
+                    + [
+                        Dependency(
+                            source_endpoint=Endpoint.END,
+                            target_node_id=NodeId(sibling_id),
+                            target_endpoint=Endpoint.END,
+                            constraint_type=ConstraintType.GREATER_EQUAL,
+                        )
+                    ],
+                }
+            )
+            new_versions[new_version_id] = updated_parent
+        else:
+            new_versions[new_version_id] = current_task
+
+        new_persistent_tasks[pid] = PersistentTask(id=pid, versions=new_versions)
+
+    # Add new sibling persistent task
+    new_persistent_tasks[sibling_persistent_id] = persistent_sibling
+
+    # Copy persistent branches with new version
+    new_persistent_branches = {}
+    for pid, pbranch in project.persistent_branches.items():
+        if current_version not in pbranch.versions:
+            new_persistent_branches[pid] = pbranch
+            continue
+
+        current_branch = pbranch.versions[current_version]
+        new_versions_branch: dict[DAGVersionId, Branch] = dict(pbranch.versions)
+        new_versions_branch[new_version_id] = current_branch
+        new_persistent_branches[pid] = PersistentBranch(
+            id=pid, versions=new_versions_branch
+        )
+
+    # Update node map
+    new_node_map = dict(project.dag.node_map)
+    new_node_map[NodeId(sibling_id)] = sibling_persistent_id
+
+    # Create event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now(UTC),
+        parent_event_id=project.current_event_id,
+        event_type=EventType.NODE_CREATED,
+        affected_nodes=[NodeId(parent_id), NodeId(sibling_id)],
+        resulting_dag_version=new_version_id,
+    )
+
+    # Create updated project
+    updated_project = project.model_copy(
+        update={
+            "metadata": project.metadata.model_copy(
+                update={"last_modified": datetime.now(UTC)}
+            ),
+            "dag": project.dag.model_copy(
+                update={"current_version_id": new_version_id, "node_map": new_node_map}
+            ),
+            "persistent_tasks": new_persistent_tasks,
+            "persistent_branches": new_persistent_branches,
+            "history_events": project.history_events + [event],
+            "current_event_id": event_id,
+        }
+    )
+
+    # Validate
+    try:
+        validate_dag(updated_project)
+    except Exception as e:
+        raise DAGOperationError(f"Failed to add sibling subtask: {e}") from e
+
+    return updated_project, sibling_id

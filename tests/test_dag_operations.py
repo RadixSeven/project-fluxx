@@ -9,7 +9,9 @@ from fluxx.data import (
     DAGOperationError,
     add_branch,
     add_dependency,
+    add_sibling_subtask,
     add_task,
+    convert_to_parent_task,
     generate_persistent_object_id,
     generate_task_id,
     remove_dependency,
@@ -243,7 +245,7 @@ def test_add_dependency_detects_cycle(empty_project: Project) -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    # Add dependency: task1 -> task2
+    # Add dependency: task1.end >= task2.start
     dep1 = Dependency(
         source_endpoint=Endpoint.END,
         target_node_id=NodeId(task2_id),
@@ -252,11 +254,18 @@ def test_add_dependency_detects_cycle(empty_project: Project) -> None:
     )
     project = add_dependency(project, NodeId(task1_id), dep1)
 
-    # Try to add reverse dependency: task2 -> task1 (creates cycle)
+    # Try to add dependency that creates cycle: task2.end >= task1.end
+    # This creates: task2.start -> task2.end -> task1.end (via dep2)
+    #               task1.end -> task2.start (via dep1 reversed)
+    # Wait, that's not quite right. Let me create a clearer cycle:
+    # dep2: task2.start >= task1.end means task1.end -> task2.start
+    # Combined with implicit task2.start -> task2.end,
+    # and dep1 which is task1.end >= task2.start means task2.start -> task1.end
+    # This creates: task1.end -> task2.start -> task1.end (cycle!)
     dep2 = Dependency(
-        source_endpoint=Endpoint.END,
+        source_endpoint=Endpoint.START,
         target_node_id=NodeId(task1_id),
-        target_endpoint=Endpoint.START,
+        target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
@@ -960,3 +969,161 @@ def test_remove_dependency_preserves_other_dependencies(empty_project: Project) 
     assert dep1 not in task.dependencies
     assert dep2 in task.dependencies
     assert len(task.dependencies) == 1
+
+
+def test_convert_to_parent_creates_child(empty_project: Project) -> None:
+    """Test that converting a task to parent creates a child with dependencies."""
+    # Add a leaf task
+    project, task_id = add_task(
+        empty_project,
+        title="Parent Task",
+        description="Will become parent",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Convert to parent
+    updated_project, child_id = convert_to_parent_task(project, task_id, "Child Task")
+
+    # Get parent task
+    parent_node_id = NodeId(task_id)
+    parent_persistent_id = updated_project.dag.node_map[parent_node_id]
+    parent_task = updated_project.persistent_tasks[parent_persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Parent should have child
+    assert len(parent_task.children) == 1
+    assert parent_task.children[0] == child_id
+
+    # Parent should have no duration
+    assert parent_task.duration_distribution is None
+
+    # Get child task
+    child_node_id = NodeId(child_id)
+    child_persistent_id = updated_project.dag.node_map[child_node_id]
+    child_task = updated_project.persistent_tasks[child_persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Child should have parent_id
+    assert child_task.parent_id == task_id
+
+    # Child should have parent's duration
+    assert child_task.duration_distribution == Triangular(min=1.0, mode=2.0, max=3.0)
+
+    # Child should have dependency: child.start >= parent.start
+    assert len(child_task.dependencies) == 1
+    child_dep = child_task.dependencies[0]
+    assert child_dep.source_endpoint == Endpoint.START
+    assert child_dep.target_node_id == NodeId(task_id)
+    assert child_dep.target_endpoint == Endpoint.START
+    assert child_dep.constraint_type == ConstraintType.GREATER_EQUAL
+
+    # Parent should have dependency: parent.end >= child.end
+    assert len(parent_task.dependencies) == 1
+    parent_dep = parent_task.dependencies[0]
+    assert parent_dep.source_endpoint == Endpoint.END
+    assert parent_dep.target_node_id == NodeId(child_id)
+    assert parent_dep.target_endpoint == Endpoint.END
+    assert parent_dep.constraint_type == ConstraintType.GREATER_EQUAL
+
+
+def test_convert_to_parent_fails_if_already_parent(empty_project: Project) -> None:
+    """Test that converting a task that already has children fails."""
+    # Create a parent task by converting a leaf
+    project, leaf_id = add_task(
+        empty_project,
+        title="Leaf Task",
+        description="Will become parent",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Convert to parent (now it has a child)
+    project, child_id = convert_to_parent_task(project, leaf_id, "First Child")
+
+    # Try to convert to parent again - should fail
+    with pytest.raises(DAGOperationError, match="already has children"):
+        convert_to_parent_task(project, leaf_id, "Another Child")
+
+
+def test_convert_to_parent_fails_if_task_not_found(empty_project: Project) -> None:
+    """Test that converting a non-existent task fails."""
+    with pytest.raises(DAGOperationError, match="not found"):
+        convert_to_parent_task(empty_project, TaskId("nonexistent"), "Child")
+
+
+def test_add_sibling_creates_sibling(empty_project: Project) -> None:
+    """Test that adding a sibling creates a task with same parent."""
+    # Create a parent task by converting a leaf
+    project, parent_id = add_task(
+        empty_project,
+        title="Parent Task",
+        description="Will become parent",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Convert to parent (creates first child)
+    project, child1_id = convert_to_parent_task(project, parent_id, "Child 1")
+
+    # Add sibling
+    updated_project, sibling_id = add_sibling_subtask(
+        project, child1_id, "Child 2", Triangular(min=2.0, mode=3.0, max=4.0)
+    )
+
+    # Get parent task
+    parent_node_id = NodeId(parent_id)
+    parent_persistent_id = updated_project.dag.node_map[parent_node_id]
+    parent_task = updated_project.persistent_tasks[parent_persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Parent should have both children
+    assert len(parent_task.children) == 2
+    assert child1_id in parent_task.children
+    assert sibling_id in parent_task.children
+
+    # Get sibling task
+    sibling_node_id = NodeId(sibling_id)
+    sibling_persistent_id = updated_project.dag.node_map[sibling_node_id]
+    sibling_task = updated_project.persistent_tasks[sibling_persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+
+    # Sibling should have same parent
+    assert sibling_task.parent_id == parent_id
+
+    # Sibling should have its own duration
+    assert sibling_task.duration_distribution == Triangular(min=2.0, mode=3.0, max=4.0)
+
+    # Sibling should have dependency: sibling.start >= parent.start
+    assert len(sibling_task.dependencies) == 1
+    sibling_dep = sibling_task.dependencies[0]
+    assert sibling_dep.source_endpoint == Endpoint.START
+    assert sibling_dep.target_node_id == NodeId(parent_id)
+    assert sibling_dep.target_endpoint == Endpoint.START
+    assert sibling_dep.constraint_type == ConstraintType.GREATER_EQUAL
+
+    # Parent should have dependency to new sibling: parent.end >= sibling.end
+    # Check that it has dependencies to both children
+    assert len(parent_task.dependencies) == 2
+
+
+def test_add_sibling_fails_if_not_subtask(empty_project: Project) -> None:
+    """Test that adding a sibling to a non-subtask fails."""
+    # Add a standalone task (no parent)
+    project, task_id = add_task(
+        empty_project,
+        title="Standalone Task",
+        description="Has no parent",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Try to add sibling - should fail
+    with pytest.raises(DAGOperationError, match="not a subtask"):
+        add_sibling_subtask(project, task_id, "Sibling", None)
+
+
+def test_add_sibling_fails_if_task_not_found(empty_project: Project) -> None:
+    """Test that adding a sibling to a non-existent task fails."""
+    with pytest.raises(DAGOperationError, match="not found"):
+        add_sibling_subtask(empty_project, TaskId("nonexistent"), "Sibling", None)

@@ -121,7 +121,88 @@ Branch {
 }
 ```
 
-### 3.3 Worker Schema
+### 3.3 Dependency Graph Structure and Cycle Detection
+
+The dependency graph is **endpoint-based**, not node-based. This means that each task or branch contributes multiple nodes to the dependency graph, rather than being treated as a single node.
+
+#### 3.3.1 Endpoint Nodes
+
+Each task **T** has two endpoint nodes in the dependency graph:
+- **T.start** - When the task begins
+- **T.end** - When the task completes
+
+Each branch **B** has W+1 endpoint nodes (where W is the number of possible worlds):
+- **B.occurrence** - When the branch condition is resolved
+- **B.pw1, B.pw2, ..., B.pwW** - One node for each possible world
+
+#### 3.3.2 Implicit Dependencies
+
+For each task T, there is an implicit dependency:
+- **T.end >= T.start** (a task must end after it starts)
+
+This creates a directed edge: **T.start → T.end** in the precedence graph.
+
+For each branch B with possible worlds pw1, pw2, ..., pwW, there are implicit dependencies:
+- **pw1 >= B.occurrence**
+- **pw2 >= B.occurrence**
+- ...
+- **pwW >= B.occurrence**
+
+These create directed edges: **B.occurrence → B.pw1**, **B.occurrence → B.pw2**, etc.
+
+#### 3.3.3 Explicit Dependencies
+
+An explicit dependency defined on node N:
+```
+{
+  source_endpoint: E1
+  target_node_id: M
+  target_endpoint: E2
+  constraint_type: ">=" | "="
+}
+```
+
+Means: **N.E1 >= M.E2** (N's endpoint E1 must occur at or after M's endpoint E2)
+
+This creates a directed edge in the precedence graph: **M.E2 → N.E1**
+
+#### 3.3.4 Cycle Detection
+
+A cycle exists if there is a path in the directed graph that returns to its starting node. For example:
+
+**Valid (no cycle)**:
+- Task1.end >= Task2.start (Task1 must finish before Task2 starts)
+- Task2.end >= Task1.start (Task1 must start before Task2 ends)
+- Graph edges: Task2.start → Task1.end and Task1.start → Task2.end
+- No cycle: These constraints can be satisfied (e.g., Task1: 0→10, Task2: 5→15)
+
+**Invalid (cycle)**:
+- Task1.end >= Task2.start
+- Task2.start >= Task1.end
+- Graph edges: Task2.start → Task1.end → Task2.start
+- Cycle detected: Task2.start → Task1.end → Task2.start forms a loop
+
+**Parent-Child Example (valid)**:
+- Parent P with child C
+- C.start >= P.start (child starts after parent)
+- P.end >= C.end (parent ends after child)
+- Graph edges:
+  - P.start → P.end (implicit)
+  - C.start → C.end (implicit)
+  - P.start → C.start (from first dependency)
+  - C.end → P.end (from second dependency)
+- Complete path: P.start → C.start → C.end → P.end
+- No cycle: This forms a chain, not a loop
+
+#### 3.3.5 Visualization Implications
+
+In the DAG visualization, dependency edges should ideally connect to the appropriate side of node boxes:
+- Dependencies targeting the **start** endpoint connect to the left side of a task box
+- Dependencies targeting the **end** endpoint connect to the right side of a task box
+- Dependencies involving a branch's **occurrence** point connect to the branch decision point
+- Dependencies targeting a specific **possible world** connect to the right side of that world's box
+
+### 3.4 Worker Schema
 
 ```
 Worker {
@@ -135,7 +216,7 @@ Worker {
 
 The `hours_per_workday` field is used to convert task durations (measured in work-hours) to calendar time. For example, if a worker has `hours_per_workday = 6.0` and a task has a duration of 12 work-hours, the task will take 2 workdays for that worker to complete.
 
-### 3.4 Duration Distribution Schemas
+### 3.5 Duration Distribution Schemas
 
 Base class and subclasses for type-safe duration distributions:
 
@@ -155,7 +236,7 @@ class Triangular(DurationDistribution):
   max: float  # must be > mode
 ```
 
-### 3.5 DAG and History Schemas
+### 3.6 DAG and History Schemas
 
 The DAG and history system use persistent objects to maintain references across versions:
 

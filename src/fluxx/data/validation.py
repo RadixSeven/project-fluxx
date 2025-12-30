@@ -66,6 +66,10 @@ def validate_dag(project: Project) -> None:
 def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
     """Check for cycles in the dependency graph.
 
+    The dependency graph is endpoint-based: each task has two nodes (start, end),
+    and each branch has nodes for its occurrence point and each possible world.
+    Dependencies connect specific endpoints, not whole nodes.
+
     Args:
         project: The project to check
         version_id: The DAG version to check
@@ -73,8 +77,12 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
     Raises:
         CycleError: If a cycle is detected
     """
-    # Build adjacency list from dependencies
-    graph: dict[NodeId, list[NodeId]] = defaultdict(list)
+    # Build adjacency list from dependencies using (node_id, endpoint) as graph nodes
+    from fluxx.data.models import Endpoint
+
+    graph: dict[tuple[NodeId, Endpoint], list[tuple[NodeId, Endpoint]]] = defaultdict(
+        list
+    )
 
     # Get all nodes in current version
     for node_id, persistent_id in project.dag.node_map.items():
@@ -83,27 +91,50 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
             persistent_task = project.persistent_tasks[persistent_id]
             if version_id in persistent_task.versions:
                 task = persistent_task.versions[version_id]
+
+                # Add implicit dependency: task.start -> task.end
+                graph[(node_id, Endpoint.START)].append((node_id, Endpoint.END))
+
+                # Add explicit dependencies from this task
                 for dep in task.dependencies:
-                    graph[node_id].append(dep.target_node_id)
+                    # Dependency: source[source_endpoint] >= target[target_endpoint]
+                    # Creates edge: target[target_endpoint] -> source[source_endpoint]
+                    graph[(dep.target_node_id, dep.target_endpoint)].append(
+                        (node_id, dep.source_endpoint)
+                    )
 
         # Check if it's a branch
         elif persistent_id in project.persistent_branches:
             persistent_branch = project.persistent_branches[persistent_id]
             if version_id in persistent_branch.versions:
                 branch = persistent_branch.versions[version_id]
+
+                # Add implicit dependencies: occurrence_point -> each possible world
+                for pw in branch.possible_worlds:
+                    graph[(node_id, Endpoint.OCCURRENCE)].append(
+                        (NodeId(pw.id), Endpoint.OCCURRENCE)
+                    )
+
+                # Add explicit dependencies from this branch
                 for dep in branch.dependencies:
-                    graph[node_id].append(dep.target_node_id)
+                    # Dependency: source[source_endpoint] >= target[target_endpoint]
+                    # Creates edge: target[target_endpoint] -> source[source_endpoint]
+                    graph[(dep.target_node_id, dep.target_endpoint)].append(
+                        (node_id, dep.source_endpoint)
+                    )
 
     # DFS-based cycle detection
     white, gray, black = 0, 1, 2
-    color: dict[NodeId, int] = defaultdict(lambda: white)
+    color: dict[tuple[NodeId, Endpoint], int] = defaultdict(lambda: white)
 
-    def dfs(node: NodeId, path: list[NodeId]) -> None:
+    def dfs(node: tuple[NodeId, Endpoint], path: list[tuple[NodeId, Endpoint]]) -> None:
         if color[node] == gray:
             # Found a cycle
             cycle_start = path.index(node)
             cycle = path[cycle_start:] + [node]
-            cycle_str = " -> ".join(str(n) for n in cycle)
+            cycle_str = " -> ".join(
+                f"{node_id}.{endpoint.value}" for node_id, endpoint in cycle
+            )
             raise CycleError(f"Cycle detected in DAG: {cycle_str}")
 
         if color[node] == black:
@@ -118,10 +149,20 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
         path.pop()
         color[node] = black
 
-    # Check all nodes
+    # Check all endpoint nodes
     for node_id in project.dag.node_map:
-        if color[node_id] == white:
-            dfs(node_id, [])
+        # Check task endpoints
+        if (node_id, Endpoint.START) in graph and color[
+            (node_id, Endpoint.START)
+        ] == white:
+            dfs((node_id, Endpoint.START), [])
+        if (node_id, Endpoint.END) in graph and color[(node_id, Endpoint.END)] == white:
+            dfs((node_id, Endpoint.END), [])
+        # Check branch endpoints
+        if (node_id, Endpoint.OCCURRENCE) in graph and color[
+            (node_id, Endpoint.OCCURRENCE)
+        ] == white:
+            dfs((node_id, Endpoint.OCCURRENCE), [])
 
 
 def _validate_task_hierarchy(project: Project, version_id: DAGVersionId) -> None:

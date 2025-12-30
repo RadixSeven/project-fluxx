@@ -4,7 +4,9 @@ from fluxx.data.dag_operations import (
     DAGOperationError,
     add_branch,
     add_dependency,
+    add_sibling_subtask,
     add_task,
+    convert_to_parent_task,
     remove_dependency,
     update_branch,
     update_task,
@@ -62,6 +64,8 @@ __all__ = [
     "update_task",
     "update_branch",
     "remove_dependency",
+    "convert_to_parent_task",
+    "add_sibling_subtask",
     "DAGOperationError",
     # Undo/Redo
     "undo",

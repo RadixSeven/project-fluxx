@@ -47,10 +47,13 @@ class MainWindow(QMainWindow):
         self.controller.file_path_changed.connect(self._update_window_title)
         self.controller.modified_changed.connect(self._update_window_title)
         self.controller.project_changed.connect(self._update_undo_redo_actions)
+        self.controller.project_changed.connect(self._update_subtask_actions)
+        self.controller.selection_changed.connect(self._update_subtask_actions)
 
         # Initialize window title
         self._update_window_title()
         self._update_undo_redo_actions()
+        self._update_subtask_actions()
 
     def _create_menu_bar(self) -> None:
         """Create menu bar with File and Edit menus."""
@@ -125,6 +128,22 @@ class MainWindow(QMainWindow):
         new_branch_action.triggered.connect(self._on_new_branch)
         edit_menu.addAction(new_branch_action)
 
+        edit_menu.addSeparator()
+
+        # Convert to Parent
+        self.convert_to_parent_action = QAction("Convert to &Parent", self)
+        self.convert_to_parent_action.setShortcut("Ctrl+Shift+P")
+        self.convert_to_parent_action.triggered.connect(self._on_convert_to_parent)
+        self.convert_to_parent_action.setEnabled(False)
+        edit_menu.addAction(self.convert_to_parent_action)
+
+        # Add Sibling
+        self.add_sibling_action = QAction("Add &Sibling", self)
+        self.add_sibling_action.setShortcut("Ctrl+Shift+S")
+        self.add_sibling_action.triggered.connect(self._on_add_sibling)
+        self.add_sibling_action.setEnabled(False)
+        edit_menu.addAction(self.add_sibling_action)
+
     def _create_panels(self) -> None:
         """Create two-panel layout with splitter."""
         # Create panels
@@ -196,6 +215,46 @@ class MainWindow(QMainWindow):
         """Update undo/redo action enabled state."""
         self.undo_action.setEnabled(self.controller.can_undo())
         self.redo_action.setEnabled(self.controller.can_redo())
+
+    def _update_subtask_actions(self) -> None:
+        """Update subtask action enabled state based on current selection."""
+        selected_node_id = self.controller.get_selected_node_id()
+
+        if selected_node_id is None:
+            self.convert_to_parent_action.setEnabled(False)
+            self.add_sibling_action.setEnabled(False)
+            return
+
+        # Get the selected task
+        project = self.controller.get_project()
+        if selected_node_id not in project.dag.node_map:
+            self.convert_to_parent_action.setEnabled(False)
+            self.add_sibling_action.setEnabled(False)
+            return
+
+        persistent_id = project.dag.node_map[selected_node_id]
+        if persistent_id not in project.persistent_tasks:
+            # Not a task (might be a branch)
+            self.convert_to_parent_action.setEnabled(False)
+            self.add_sibling_action.setEnabled(False)
+            return
+
+        persistent_task = project.persistent_tasks[persistent_id]
+        current_version = project.dag.current_version_id
+        if current_version not in persistent_task.versions:
+            self.convert_to_parent_action.setEnabled(False)
+            self.add_sibling_action.setEnabled(False)
+            return
+
+        task = persistent_task.versions[current_version]
+
+        # Convert to Parent: enabled only for leaf tasks (no children)
+        is_leaf = len(task.children) == 0
+        self.convert_to_parent_action.setEnabled(is_leaf)
+
+        # Add Sibling: enabled only for subtasks (has parent_id)
+        is_subtask = task.parent_id is not None
+        self.add_sibling_action.setEnabled(is_subtask)
 
     def _check_unsaved_changes(self) -> bool:
         """Check for unsaved changes and prompt user.
@@ -378,3 +437,64 @@ class MainWindow(QMainWindow):
                     "Error",
                     f"Failed to create branch: {e}",
                 )
+
+    def _on_convert_to_parent(self) -> None:
+        """Handle Convert to Parent menu action."""
+        selected_node_id = self.controller.get_selected_node_id()
+        if selected_node_id is None:
+            return
+
+        # Get the task ID (selected_node_id is a NodeId, which could be TaskId)
+        from fluxx.data.models import TaskId
+
+        task_id = TaskId(str(selected_node_id))
+
+        # Prompt for child title
+        child_title, ok = QInputDialog.getText(
+            self, "Convert to Parent", "Enter title for the new child task:"
+        )
+
+        if not ok or not child_title.strip():
+            return  # User cancelled or entered empty title
+
+        try:
+            # Call controller method
+            self.controller.convert_to_parent(task_id, child_title)
+            # Controller will select the new child automatically
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to convert to parent: {e}",
+            )
+
+    def _on_add_sibling(self) -> None:
+        """Handle Add Sibling menu action."""
+        selected_node_id = self.controller.get_selected_node_id()
+        if selected_node_id is None:
+            return
+
+        # Get the task ID (selected_node_id is a NodeId, which could be TaskId)
+        from fluxx.data.models import TaskId
+
+        task_id = TaskId(str(selected_node_id))
+
+        # Prompt for sibling title
+        sibling_title, ok = QInputDialog.getText(
+            self, "Add Sibling", "Enter title for the new sibling task:"
+        )
+
+        if not ok or not sibling_title.strip():
+            return  # User cancelled or entered empty title
+
+        try:
+            # Call controller method with no duration distribution
+            # User can set it later if needed
+            self.controller.add_sibling(task_id, sibling_title, None)
+            # Controller will select the new sibling automatically
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to add sibling: {e}",
+            )

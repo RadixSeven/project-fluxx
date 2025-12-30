@@ -7,9 +7,11 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -17,8 +19,10 @@ from PySide6.QtWidgets import (
 )
 
 from fluxx.data.models import (
+    ConstraintType,
     Dependency,
     DurationDistribution,
+    Endpoint,
     NodeId,
     ShiftedLognormal,
     TaskId,
@@ -142,6 +146,26 @@ class TaskEditor(QWidget):
 
         # Track editing state
         self._editing_dependency_index: int | None = None  # None = adding new
+
+        # Subtask operations section
+        subtask_label = QLabel("Subtask Operations:")
+        subtask_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(subtask_label)
+
+        subtask_button_layout = QHBoxLayout()
+
+        self.convert_to_parent_button = QPushButton("Convert to Parent")
+        self.convert_to_parent_button.clicked.connect(self._on_convert_to_parent)
+        self.convert_to_parent_button.setEnabled(False)
+        subtask_button_layout.addWidget(self.convert_to_parent_button)
+
+        self.add_sibling_button = QPushButton("Add Sibling")
+        self.add_sibling_button.clicked.connect(self._on_add_sibling)
+        self.add_sibling_button.setEnabled(False)
+        subtask_button_layout.addWidget(self.add_sibling_button)
+
+        subtask_button_layout.addStretch()
+        layout.addLayout(subtask_button_layout)
 
         # Spacer
         layout.addStretch()
@@ -401,6 +425,32 @@ class TaskEditor(QWidget):
         self.revert_button.setEnabled(has_changes)
         self.delete_button.setEnabled(self.current_task_id is not None)
 
+        # Update subtask operation buttons
+        if self.current_task_id is not None:
+            project = self.controller.get_project()
+            node_id = NodeId(self.current_task_id)
+
+            if node_id in project.dag.node_map:
+                persistent_id = project.dag.node_map[node_id]
+                if persistent_id in project.persistent_tasks:
+                    persistent_task = project.persistent_tasks[persistent_id]
+                    current_version = project.dag.current_version_id
+                    if current_version in persistent_task.versions:
+                        task = persistent_task.versions[current_version]
+
+                        # Convert to Parent: enabled only for leaf tasks (no children)
+                        is_leaf = len(task.children) == 0
+                        self.convert_to_parent_button.setEnabled(is_leaf)
+
+                        # Add Sibling: enabled only for subtasks (has parent_id)
+                        is_subtask = task.parent_id is not None
+                        self.add_sibling_button.setEnabled(is_subtask)
+                        return
+
+        # If we couldn't find the task, disable both buttons
+        self.convert_to_parent_button.setEnabled(False)
+        self.add_sibling_button.setEnabled(False)
+
     def _validate_changes(self) -> bool:
         """Validate pending changes.
 
@@ -591,6 +641,56 @@ class TaskEditor(QWidget):
         self._on_dependency_selection_changed()
         self._update_button_states()
 
+    def _is_required_dependency(self, dependency: Dependency) -> bool:
+        """Check if a dependency is a required parent-child dependency.
+
+        Args:
+            dependency: Dependency to check
+
+        Returns:
+            True if the dependency is required (part of parent-child relationship)
+        """
+        if self.current_task_id is None:
+            return False
+
+        project = self.controller.get_project()
+        node_id = NodeId(self.current_task_id)
+
+        if node_id not in project.dag.node_map:
+            return False
+
+        persistent_id = project.dag.node_map[node_id]
+        if persistent_id not in project.persistent_tasks:
+            return False
+
+        persistent_task = project.persistent_tasks[persistent_id]
+        current_version = project.dag.current_version_id
+        if current_version not in persistent_task.versions:
+            return False
+
+        task = persistent_task.versions[current_version]
+
+        # Check if this is a subtask's required "start >= parent.start" dependency
+        if task.parent_id is not None and (
+            dependency.source_endpoint == Endpoint.START
+            and dependency.target_node_id == NodeId(task.parent_id)
+            and dependency.target_endpoint == Endpoint.START
+            and dependency.constraint_type == ConstraintType.GREATER_EQUAL
+        ):
+            return True
+
+        # Check if this is a parent's required "end >= child.end" dependency
+        for child_id in task.children:
+            if (
+                dependency.source_endpoint == Endpoint.END
+                and dependency.target_node_id == NodeId(child_id)
+                and dependency.target_endpoint == Endpoint.END
+                and dependency.constraint_type == ConstraintType.GREATER_EQUAL
+            ):
+                return True
+
+        return False
+
     def _on_remove_dependency(self) -> None:
         """Remove selected dependency."""
         if self.current_task_id is None:
@@ -614,8 +714,20 @@ class TaskEditor(QWidget):
             task = persistent_task.versions[project.dag.current_version_id]
             current_deps = task.dependencies.copy()
 
-        # Remove dependency at index
+        # Check if the dependency is required before removing
         if 0 <= selected_index < len(current_deps):
+            dependency = current_deps[selected_index]
+
+            if self._is_required_dependency(dependency):
+                QMessageBox.warning(
+                    self,
+                    "Cannot Remove Dependency",
+                    "This dependency is required for the parent-child relationship "
+                    "and cannot be removed.",
+                )
+                return
+
+            # Remove dependency at index
             current_deps.pop(selected_index)
 
             # Update pending changes
@@ -628,3 +740,47 @@ class TaskEditor(QWidget):
         # TODO: Implement task deletion
         # This will require adding a delete_task method to the controller
         pass
+
+    def _on_convert_to_parent(self) -> None:
+        """Convert the current task to a parent task with one child."""
+        if self.current_task_id is None:
+            return
+
+        # Prompt for child title
+        child_title, ok = QInputDialog.getText(
+            self, "Convert to Parent", "Enter title for the new child task:"
+        )
+
+        if not ok or not child_title.strip():
+            return  # User cancelled or entered empty title
+
+        try:
+            # Call controller method
+            self.controller.convert_to_parent(self.current_task_id, child_title)
+            # Controller will select the new child, so editor will reload automatically
+        except Exception as e:
+            # TODO: Show error dialog
+            print(f"Error converting to parent: {e}")
+
+    def _on_add_sibling(self) -> None:
+        """Add a sibling subtask to the current task."""
+        if self.current_task_id is None:
+            return
+
+        # Prompt for sibling title
+        sibling_title, ok = QInputDialog.getText(
+            self, "Add Sibling", "Enter title for the new sibling task:"
+        )
+
+        if not ok or not sibling_title.strip():
+            return  # User cancelled or entered empty title
+
+        try:
+            # Call controller method with no duration distribution
+            # User can set it later if needed
+            self.controller.add_sibling(self.current_task_id, sibling_title, None)
+            # Controller will select the new sibling, so editor will reload
+            # automatically
+        except Exception as e:
+            # TODO: Show error dialog
+            print(f"Error adding sibling: {e}")

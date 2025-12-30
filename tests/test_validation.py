@@ -90,6 +90,8 @@ def test_validate_single_task(base_project: Project) -> None:
 
 def test_detect_simple_cycle(base_project: Project) -> None:
     """Test detecting a simple cycle (t1 -> t2 -> t1)."""
+    # Create a real cycle: task1.end >= task2.start AND task2.start >= task1.end
+    # This creates: task2.start -> task1.end -> task2.start (cycle!)
     task1 = Task(
         id=TaskId("t1"),
         title="Task 1",
@@ -111,9 +113,9 @@ def test_detect_simple_cycle(base_project: Project) -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
         dependencies=[
             Dependency(
-                source_endpoint=Endpoint.END,
+                source_endpoint=Endpoint.START,
                 target_node_id=NodeId("t1"),
-                target_endpoint=Endpoint.START,
+                target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
         ],
@@ -150,6 +152,8 @@ def test_detect_simple_cycle(base_project: Project) -> None:
 
 def test_detect_self_cycle(base_project: Project) -> None:
     """Test detecting a self-referencing cycle."""
+    # Create a self-loop: task1.end >= task1.end
+    # This creates: task1.end -> task1.end (self-cycle!)
     task = Task(
         id=TaskId("t1"),
         title="Task 1",
@@ -159,7 +163,7 @@ def test_detect_self_cycle(base_project: Project) -> None:
             Dependency(
                 source_endpoint=Endpoint.END,
                 target_node_id=NodeId("t1"),
-                target_endpoint=Endpoint.START,
+                target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
         ],
@@ -482,7 +486,9 @@ def test_branch_cannot_use_start_end_endpoint(base_project: Project) -> None:
 
 def test_cycle_detection_with_branches(base_project: Project) -> None:
     """Test cycle detection that includes branches."""
-    # Create a cycle: task1 -> branch1 -> task1
+    # Create a cycle: task1.end >= branch1.occurrence AND
+    # branch1.occurrence >= task1.end
+    # This creates: branch1.occurrence -> task1.end -> branch1.occurrence (cycle!)
     task1 = Task(
         id=TaskId("t1"),
         title="Task 1",
@@ -506,7 +512,7 @@ def test_cycle_detection_with_branches(base_project: Project) -> None:
             Dependency(
                 source_endpoint=Endpoint.OCCURRENCE,
                 target_node_id=NodeId("t1"),
-                target_endpoint=Endpoint.START,
+                target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
         ],

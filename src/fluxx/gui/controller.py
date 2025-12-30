@@ -9,9 +9,11 @@ from PySide6.QtCore import QObject, Signal
 from fluxx.data import (
     add_branch,
     add_dependency,
+    add_sibling_subtask,
     add_task,
     can_redo,
     can_undo,
+    convert_to_parent_task,
     load_project,
     redo,
     remove_dependency,
@@ -304,6 +306,64 @@ class ProjectController(QObject):
         """
         project = remove_dependency(self.get_project(), source_node_id, dependency)
         self._set_project(project)
+
+    def convert_to_parent(self, task_id: TaskId, child_title: str) -> TaskId:
+        """Convert a leaf task to a parent task with one child.
+
+        The child task inherits the duration distribution. Two required dependencies
+        are created:
+        - child.start >= parent.start (added to child)
+        - parent.end >= child.end (added to parent)
+
+        Args:
+            task_id: ID of the task to convert to parent
+            child_title: Title for the new child task
+
+        Returns:
+            ID of the newly created child task
+
+        Raises:
+            DAGOperationError: If the task is already a parent or doesn't exist
+        """
+        project, child_id = convert_to_parent_task(
+            self.get_project(), task_id, child_title
+        )
+        self._set_project(project)
+        # Select the newly created child
+        self.select_node(NodeId(child_id))
+        return child_id
+
+    def add_sibling(
+        self,
+        task_id: TaskId,
+        sibling_title: str,
+        duration_distribution: Triangular | ShiftedLognormal | None = None,
+    ) -> TaskId:
+        """Add a sibling subtask to an existing subtask.
+
+        Creates a new task with the same parent as the given task. Two required
+        dependencies are created:
+        - sibling.start >= parent.start (added to sibling)
+        - parent.end >= sibling.end (added to parent)
+
+        Args:
+            task_id: ID of an existing subtask (to get parent)
+            sibling_title: Title for the new sibling task
+            duration_distribution: Duration distribution for the new sibling
+
+        Returns:
+            ID of the newly created sibling task
+
+        Raises:
+            DAGOperationError: If the task doesn't have a parent or doesn't exist
+        """
+        project, sibling_id = add_sibling_subtask(
+            self.get_project(), task_id, sibling_title, duration_distribution
+        )
+        self._set_project(project)
+        # Select the newly created sibling
+        self.select_node(NodeId(sibling_id))
+        return sibling_id
 
     # History operations
 
