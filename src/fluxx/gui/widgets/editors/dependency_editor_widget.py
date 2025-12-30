@@ -22,11 +22,13 @@ class DependencyEditorWidget(QWidget):
     Signals:
         select_target_requested: Emitted when user clicks Select Target button
         dependency_changed: Emitted when dependency fields change
+        confirmed: Emitted when user confirms the dependency
         cancelled: Emitted when user cancels editing
     """
 
     select_target_requested = Signal()
     dependency_changed = Signal()
+    confirmed = Signal()
     cancelled = Signal()
 
     def __init__(
@@ -111,6 +113,11 @@ class DependencyEditorWidget(QWidget):
         button_layout.addWidget(cancel_button)
         button_layout.addStretch()
 
+        self.add_button = QPushButton("Add")
+        self.add_button.clicked.connect(self._on_add)
+        self.add_button.setEnabled(False)  # Disabled until target is selected
+        button_layout.addWidget(self.add_button)
+
         group_layout.addLayout(button_layout)
 
         group.setLayout(group_layout)
@@ -124,7 +131,15 @@ class DependencyEditorWidget(QWidget):
 
     def _on_field_changed(self) -> None:
         """Handle field value changes."""
+        # Enable Add button only if target is selected
+        self.add_button.setEnabled(self._target_node_id is not None)
         self.dependency_changed.emit()
+
+    def _on_add(self) -> None:
+        """Handle Add button click."""
+        # Only emit if we have a valid dependency
+        if self.get_dependency() is not None:
+            self.confirmed.emit()
 
     def _on_cancel(self) -> None:
         """Handle cancel button click."""
@@ -257,3 +272,6 @@ class DependencyEditorWidget(QWidget):
 
         self.constraint_type_combo.setCurrentIndex(0)
         self.target_endpoint_combo.setCurrentIndex(0)
+
+        # Disable Add button when cleared
+        self.add_button.setEnabled(False)

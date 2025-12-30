@@ -425,8 +425,11 @@ def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
     task_editor.dependency_editor.constraint_type_combo.setCurrentIndex(0)  # >=
     task_editor.dependency_editor.target_endpoint_combo.setCurrentIndex(1)  # END
 
-    # Finish dependency editing (simulating some user action that triggers this)
-    task_editor.finish_dependency_editing()
+    # Verify Add button is now enabled (target is selected)
+    assert task_editor.dependency_editor.add_button.isEnabled()
+
+    # Click Add button to finish dependency editing
+    task_editor.dependency_editor.add_button.click()
 
     # Verify dependency was added to pending changes
     assert "dependencies" in task_editor.pending_changes

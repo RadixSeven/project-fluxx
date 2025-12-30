@@ -84,6 +84,9 @@ def test_dependency_editor_initialization_task(
     # Target should not be selected
     assert task_dependency_editor._target_node_id is None
 
+    # Add button should be disabled initially (no target selected)
+    assert not task_dependency_editor.add_button.isEnabled()
+
 
 def test_dependency_editor_initialization_branch(
     branch_dependency_editor: DependencyEditorWidget,
@@ -110,12 +113,18 @@ def test_dependency_editor_set_target_task(
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
+    # Add button should be disabled before target is set
+    assert not task_dependency_editor.add_button.isEnabled()
+
     # Set as target
     task_dependency_editor.set_target_node(NodeId(task_id))
 
     # Verify target is set
     assert task_dependency_editor._target_node_id == NodeId(task_id)
     assert "Task: Target Task" in task_dependency_editor.target_display.text()
+
+    # Add button should now be enabled
+    assert task_dependency_editor.add_button.isEnabled()
 
     # Note: We don't verify enabled/disabled state of combo items as that
     # requires accessing Qt model internals which vary by Qt version

@@ -156,6 +156,7 @@ class BranchEditor(QWidget):
             self._on_dependency_select_target
         )
         self.dependency_editor.dependency_changed.connect(self._on_dependency_changed)
+        self.dependency_editor.confirmed.connect(self.finish_dependency_editing)
         self.dependency_editor.cancelled.connect(self._on_dependency_cancelled)
         layout.addWidget(self.dependency_editor)
 
