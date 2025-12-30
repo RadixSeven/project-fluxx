@@ -46,7 +46,7 @@ Tasks can depend on specific possible worlds, meaning they only need to be done 
 
 Workers have:
 - Name
-- ID (to distinguish workers with the same name)
+- ID (optional, to distinguish workers with the same name)
 - Description (optional)
 - Hours per workday
 
@@ -64,10 +64,8 @@ Task {
   children: list of task ids
 
   # Duration (for leaf tasks only)
-  duration_distribution: {
-    type: "shifted_lognormal" | "triangular"
-    parameters: distribution-specific parameters
-  }
+  # Must be one of the DurationDistribution subclasses
+  duration_distribution: ShiftedLognormal | Triangular
 
   # Dependencies
   dependencies: list of {
@@ -82,8 +80,11 @@ Task {
   excluded_worker_tasks: list of task ids whose assignees cannot be assigned to this task
 
   # Completion tracking
-  is_done: boolean
+  # Task is done if actual_duration is present
+  # actual_assignee and actual_start_time must be set together (task in progress or done)
+  # actual_duration can only be set if actual_start_time is set
   actual_start_time: optional datetime
+  actual_assignee: optional worker id
   actual_duration: optional duration
 }
 ```
@@ -113,7 +114,7 @@ Branch {
   }
 
   # Completion tracking
-  is_done: boolean
+  # Branch is done if chosen_world_id is present
   chosen_world_id: optional possible world id
 }
 ```
@@ -124,40 +125,92 @@ Branch {
 Worker {
   id: unique identifier
   name: string
-  worker_id: string (for distinguishing same-named workers)
+  worker_id: optional string (for distinguishing same-named workers)
   description: optional string
   hours_per_workday: float
 }
 ```
 
-### 3.4 Simulation Schema
+### 3.4 Duration Distribution Schemas
+
+Base class and subclasses for type-safe duration distributions:
+
+```
+class DurationDistribution:
+  # Base class for all duration distributions
+  pass
+
+class ShiftedLognormal(DurationDistribution):
+  min: float
+  mode: float  # must be > min
+  percentile_95: float  # must be > min
+
+class Triangular(DurationDistribution):
+  min: float
+  mode: float  # must be > min
+  max: float  # must be > mode
+```
+
+### 3.5 DAG and History Schemas
+
+The DAG and history system use persistent objects to maintain references across versions:
+
+```
+DAG {
+  id: unique identifier
+  current_version_id: version id
+  # Maps node ids to their current persistent object versions
+  node_map: map of node_id to persistent_object_id
+}
+
+DAGEvent {
+  id: unique identifier
+  timestamp: datetime
+  parent_event_id: optional event id
+  # What changed
+  event_type: "node_created" | "node_modified" | "node_deleted" | "simulation_created" | etc.
+  affected_nodes: list of node ids
+  # DAG state after this event
+  resulting_dag_version: DAG version id
+}
+
+PersistentTask {
+  id: unique identifier (never reused)
+  versions: list of Task snapshots with version ids
+}
+
+PersistentBranch {
+  id: unique identifier (never reused)
+  versions: list of Branch snapshots with version ids
+}
+```
+
+**Design Note**: When a simulation is created, it references the specific DAG version and persistent object versions that existed at that time. When nodes are deleted, their persistent objects remain in the database, ensuring simulations can always resolve their references.
+
+### 3.6 Simulation Schema
 
 ```
 Simulation {
   id: unique identifier
-  dag_snapshot: snapshot of DAG state when simulation was created
+  dag_version_id: version id of DAG when simulation was created
   start_date: datetime
   num_samples: integer
   num_parallel_processes: integer (default: 2 * num_processors)
 
-  # Results
+  # Results stored for reproducibility (not regenerated)
+  # Stores complete simulation results, not just RNG seed
   samples: list of {
     sample_id: integer
-    status: "success" | "failed"
     events: list of task/branch events with timestamps
-    failed_tasks: optional list (if status = "failed")
+    failed_tasks: list of task ids (empty if successful)
   }
 
-  # Statistics (computed from samples)
-  task_statistics: map of task_id to {
-    percentiles: map of percentile to {start_time, end_time, duration}
-    min_start: datetime
-    max_end: datetime
-  }
-
-  failure_rate: float (fraction of failed runs)
+  # Note: Percentiles and statistics are computed on-demand when generating
+  # visualizations, not pre-calculated and stored
 }
 ```
+
+**Sample Status**: A sample is successful if `failed_tasks` is empty, otherwise failed. This makes illegal states unrepresentable.
 
 ## 4. User Interface
 
@@ -170,15 +223,30 @@ The application window is divided into two main panels:
 
 ### 4.2 DAG Panel
 
-#### 4.2.1 Control Bar
+#### 4.2.1 History Display
 
-Located above the DAG view, contains:
+Located at the top of the DAG panel (above the control bar):
+- Shows most recent history event
+- Dropdown button to show history tree view for navigation
+- User selects which historical DAG version to view/edit
+
+**Keyboard Shortcuts**:
+- **CTRL-Z**: Undo (navigate to parent history node)
+- **CTRL-Y**: Redo (navigate to child with most recent leaf descendant)
+
+**Context Sensitivity**:
+- When editor control has focus: CTRL-Z/Y operate on the control
+- When no control has focus or no unapplied changes: CTRL-Z/Y operate on history
+
+#### 4.2.2 Control Bar
+
+Located above the DAG view (below history display), contains:
 - **View Mode Toggle**: Radio buttons to switch between DAG display and list display
 - **Add Root Node**: Button to create a new node with no parent
 - **View Simulations**: Button to open simulation management (displays in editor panel)
 - **Edit Workers**: Button to open worker list editor (displays in editor panel)
 
-#### 4.2.2 DAG Display Mode
+#### 4.2.3 DAG Display Mode
 
 **Layout**:
 - Auto-laid-out graph of nodes and dependencies
@@ -204,14 +272,16 @@ Located above the DAG view, contains:
 - Assignee exclusions: purple line with 🚫 symbol pointing to the task whose assignee is excluded
 
 **Interaction**:
-- Click on a node to select it (opens in editor panel)
-- Click on a possible world box to select it as dependency target
+- Click on a task node to select it (opens in editor panel)
+- Click on a possible world box to select its parent branch (opens in editor panel)
+  - Exception: When in select-target-node mode, clicking selects it as dependency target
 
-#### 4.2.3 List Display Mode
+#### 4.2.4 List Display Mode
 
 **Layout**:
 - List of all nodes with titles
-- Search bar to filter by substring
+- Search bar to filter nodes using fuzzy matching (RapidFuzz library)
+  - Nodes ranked by match quality
 
 **Interaction**:
 - Clicking a node switches back to DAG display with the node centered
@@ -219,10 +289,6 @@ Located above the DAG view, contains:
 ### 4.3 Editor Panel
 
 #### 4.3.1 Panel Structure
-
-**Header** (upper left):
-- Current history event display
-- Dropdown button to show history tree view for navigation
 
 **Content Area**:
 - Fields specific to the selected node type
@@ -263,12 +329,14 @@ Located above the DAG view, contains:
 **Subtask Management** (leaf tasks):
 - **Convert to Parent** button: Adds first child and navigates to it
 
-**Subtask Management** (parent tasks):
-- Children have **Add Sibling** button in their editors
+**Subtask Management** (child tasks):
+- **Add Sibling** button: Creates a new sibling task (child of same parent)
 
 **Completion Tracking**:
-- **Mark as Done** checkbox/section
-- If done: Start time and duration inputs
+- **Start Task** section: Start time and assignee inputs (marks task as in progress)
+- **Complete Task** section: Duration input (only enabled if task is started)
+  - Setting duration marks task as done
+- **Note**: Tasks with actual_duration set are done; tasks with actual_start_time but no actual_duration are in progress
 
 #### 4.3.3 Branch Node Editor
 
@@ -280,6 +348,7 @@ Located above the DAG view, contains:
 - Table with columns: Title, Description, Weight, Probability (computed), Actions
 - Each row has a trashcan icon to delete
 - Bottom row is blank; clicking any cell creates a new possible world
+- Blank weights are treated as 0
 - Probability auto-updates as weight / sum(weights)
 
 **Dependencies Section**:
@@ -288,8 +357,8 @@ Located above the DAG view, contains:
 - **Add Dependency** button
 
 **Completion Tracking**:
-- **Mark as Done** checkbox/section
-- If done: Which possible world occurred (dropdown)
+- **Resolve Branch** section: Dropdown to select which possible world occurred
+  - Setting chosen_world_id marks the branch as resolved/done
 
 #### 4.3.4 Edit Modes
 
@@ -323,6 +392,8 @@ Used when adding excluded assignee tasks. Similar to select-target-node mode but
 - Apply button disabled until all required fields are filled and consistent
 - Invalid controls are highlighted
 - Error message at top of editor explains one issue and how to fix it
+- **Dependency validation**: Adding a dependency is checked to ensure it does not create a cycle
+  - If cycle detected, the dependency cannot be added and user is shown an error
 
 **New Node Handling**:
 - Reverting a new node deletes it and returns to previously selected node
@@ -344,7 +415,7 @@ Opened from DAG panel button bar, displays in editor panel (a "navigate away" ev
 
 **Validation**:
 - Name and Hours per Workday are required
-- ID must be filled if multiple workers share the same name
+- ID is optional, but must be filled if multiple workers share the same name
 - Description is optional
 
 **Footer**:
@@ -389,29 +460,15 @@ After generation, visualization is displayed with options:
 - **Save**: Opens file dialog to choose save location
 - **Discard**: Closes visualization without saving
 
-### 4.6 History and Undo/Redo
+### 4.6 History Tree Navigation
 
-**History Display** (upper left of editor panel):
-- Shows most recent history event
-- Dropdown shows tree view of history
-
-**History Tree**:
-- Each event is a node
+**History Tree Structure**:
+- Each event is a node in the tree
 - Branching occurs when undo followed by different action
 - Events include timestamps
 - Extended events (simulations) include duration
 
-**Keyboard Shortcuts**:
-- **CTRL-Z**: Undo (navigate to parent history node)
-- **CTRL-Y**: Redo (navigate to child with most recent leaf descendant)
-
-**Context Sensitivity**:
-- When editor control has focus: CTRL-Z/Y operate on the control
-- When no control has focus or no unapplied changes: CTRL-Z/Y operate on history
-
-**Simulation Reproducibility**:
-- History nodes with simulations store the random seed/state
-- Reloading doesn't require regeneration - ensures reproducibility across versions
+See section 4.2.1 for history display UI and keyboard shortcuts.
 
 ## 5. Dependencies and Constraints
 
@@ -426,9 +483,13 @@ Most common: Task B start time ≥ Task A end time (Task B starts after Task A f
 
 ### 5.2 Parent-Child Constraints
 
-Automatically enforced for subtasks:
-- Subtask start time ≥ parent start time
-- Parent end time ≥ subtask end time
+**Implementation Note**: Parent-child temporal constraints should be represented as explicit dependencies in the dependency graph (not special-cased). This simplifies the implementation and makes the dependency graph complete.
+
+When a subtask is created:
+- Automatically add dependency: subtask.start >= parent.start
+- Automatically add dependency: parent.end >= subtask.end
+
+These dependencies are maintained automatically by the system but can be viewed like other dependencies.
 
 ### 5.3 Possible World Dependencies
 
@@ -444,7 +505,9 @@ Tasks can depend on one or more branch possible worlds:
 
 **Excluded Assignees**:
 - List of tasks whose assigned workers cannot be assigned to this task
-- Referenced tasks must have a starts-at-or-before dependency so their assignees are known in simulation
+- **Required dependency**: If task N excludes the assignee of task M, there must be a dependency: N.start >= M.start
+  - This ensures M's assignee is known before N starts in the simulation
+  - System should validate this constraint and prevent adding exclusions without the dependency
 
 ### 5.5 Constraint Validation
 
@@ -469,7 +532,7 @@ Tasks can depend on one or more branch possible worlds:
 **Calendar Tracking**:
 - Tracks time on a calendar
 - Weekends exist (no work done)
-- Holidays will be added in future
+- Holidays, vacations, and sick days will be added in future
 
 **Worker Simulation**:
 - Each worker has hours/workday and current task assignment
@@ -483,6 +546,14 @@ Tasks can depend on one or more branch possible worlds:
   - Must be in allowed workers list (if specified)
   - Cannot be assignee of excluded tasks
 
+**Tasks in Progress**:
+- If a task has actual_start_time and actual_assignee but no actual_duration, it's in progress
+- During simulation, the task must:
+  - Be assigned to the actual_assignee (not a random worker)
+  - Use rejection sampling for duration: sample from distribution and reject durations < elapsed time
+  - Elapsed time = work hours between actual_start_time and simulation start
+  - This ensures the simulated duration is consistent with the task already being in progress
+
 **Branch Resolution**:
 - Branches resolve as soon as dependencies satisfied
 - One possible world chosen based on probability distribution
@@ -493,7 +564,9 @@ Tasks can depend on one or more branch possible worlds:
   - All dependencies satisfied
   - Workers available who can do the task
   - One is randomly selected
-- If task N excludes assignee of task M, assignment to M must happen first
+- **Worker Exclusion Handling**: If task N excludes the assignee of task M:
+  - The required dependency (N.start >= M.start) ensures M is assigned before N starts
+  - When N becomes eligible, M's assignee is already known and can be excluded from N's candidate workers
 
 **Parallel Execution**:
 - Multiple simulation runs execute in parallel
@@ -505,7 +578,9 @@ Tasks can depend on one or more branch possible worlds:
 A sampling run fails if:
 - All workers are available
 - No tasks are running
-- Unfulfilled dependencies exist for tasks in current possible world
+- ALL remaining tasks in the current possible world have unfulfilled dependencies
+
+This indicates a deadlock: the simulation cannot progress because no new task can start.
 
 When a run fails:
 - Save final state
@@ -540,7 +615,8 @@ When a run fails:
    - Must satisfy all dependencies
    - Start time ≥ Pth percentile start time
    - Duration ≥ Pth percentile duration
-   - Minimize some objective (e.g., total project duration)
+   - Minimize: sum of all start times + sum of all durations (possibly with scaling factor)
+     - This objective avoids computing the critical path while still producing reasonable timelines
 
 **Properties**:
 - Conservative: all dates at or after Pth percentile from samples
@@ -556,12 +632,12 @@ When a run fails:
 **Algorithm**:
 
 1. User selects percentile P (default 90%)
-2. For each task:
-   - Show box with:
-     - Minimum start time (across all samples)
-     - Maximum end time (across all samples)
-     - Pth percentile start time
-     - Pth percentile end time
+2. For each task, show box with:
+   - Minimum start time (across all samples)
+   - Maximum end time (across all samples)
+   - (1-P)th percentile start time (e.g., if P=90%, show 10th percentile start)
+   - Pth percentile end time
+   - This shows the range where the task is likely to occur
 3. Draw dependency arrows:
    - Equality: double-ended arrow
    - Greater-than-or-equal: arrow from earlier to later (in time)
@@ -569,7 +645,8 @@ When a run fails:
 
 **Visual Encoding**:
 - Box represents task temporal uncertainty
-- Inner markers show percentile boundaries
+- Outer boundaries: minimum start to maximum end
+- Inner markers: (1-P)th percentile start to Pth percentile end
 - Arrows show dependency relationships
 - Branch outcomes create parallel sub-diagrams
 
@@ -606,15 +683,18 @@ Each event records:
 ### 8.3 Reproducibility
 
 **Simulation Storage**:
-- Store RNG seed/state with simulation
-- Reloading simulation uses stored results
+- Simulations store complete results (all sample events and outcomes), NOT just RNG seeds
+- This representation does not require random number generation to "hydrate" the simulation
+- Reloading a simulation from history uses the stored results directly
 - No regeneration needed
-- Ensures reproducibility even if simulation algorithm changes
+- Ensures reproducibility even if simulation algorithm changes across software versions
+- This is critical: changing the simulation implementation should not change historical simulation results
 
 **DAG Snapshots**:
-- Simulations store snapshot of DAG at creation time
-- Deleted nodes are preserved in simulation history
-- References in simulations point to node versions at simulation time
+- Simulations reference a specific DAG version from when they were created
+- Deleted nodes are preserved in the persistent object store
+- References in simulations point to node versions as they existed at simulation time
+- This ensures simulations remain valid even after nodes are deleted or modified
 
 ## 9. Implementation Considerations
 
@@ -637,6 +717,8 @@ Each event records:
 - Prevent commits that fail checks
 
 **Optimization**: pyomo for linear programming (Gantt chart generation)
+
+**Fuzzy Matching**: RapidFuzz for search functionality in list display mode
 
 ### 9.2 Code Quality Standards
 
@@ -699,6 +781,7 @@ These features are planned but not part of the initial implementation:
 
 - Holidays
 - Vacations
+- Sick days
 - Custom work schedules
 
 ### 10.4 Enhanced Sampling
