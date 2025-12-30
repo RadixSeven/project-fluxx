@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
-from fluxx.data.models import Triangular
+from fluxx.data.models import NodeId, Triangular
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.panels import DAGPanel, EditorPanel
 
@@ -131,6 +131,9 @@ class MainWindow(QMainWindow):
         self.dag_panel = DAGPanel(self.controller)
         self.editor_panel = EditorPanel(self.controller)
 
+        # Connect dependency editing signals
+        self._connect_dependency_editing_signals()
+
         # Create splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.dag_panel)
@@ -141,6 +144,37 @@ class MainWindow(QMainWindow):
 
         # Set as central widget
         self.setCentralWidget(splitter)
+
+    def _connect_dependency_editing_signals(self) -> None:
+        """Connect signals for dependency editing workflow."""
+        # Connect editor signals to enter select-target mode
+        self.editor_panel.task_editor.select_dependency_target_requested.connect(
+            self.dag_panel.dag_view.enter_select_target_mode
+        )
+        self.editor_panel.branch_editor.select_dependency_target_requested.connect(
+            self.dag_panel.dag_view.enter_select_target_mode
+        )
+
+        # Connect DAG view signal to handle node selection
+        self.dag_panel.dag_view.node_selected_for_dependency.connect(
+            self._on_node_selected_for_dependency
+        )
+
+    def _on_node_selected_for_dependency(self, node_id: NodeId) -> None:
+        """Handle node selection for dependency editing.
+
+        Args:
+            node_id: Selected node ID
+        """
+        # Determine which editor is currently active
+        current_widget = self.editor_panel.stack.currentWidget()
+
+        if current_widget == self.editor_panel.task_editor:
+            # Set target on task editor
+            self.editor_panel.task_editor.set_dependency_target(node_id)
+        elif current_widget == self.editor_panel.branch_editor:
+            # Set target on branch editor
+            self.editor_panel.branch_editor.set_dependency_target(node_id)
 
     def _update_window_title(self) -> None:
         """Update window title based on file path and modified state."""
@@ -312,8 +346,6 @@ class MainWindow(QMainWindow):
                 )
 
                 # Select the new task
-                from fluxx.data.models import NodeId
-
                 self.controller.select_node(NodeId(task_id))
             except Exception as e:
                 QMessageBox.critical(
@@ -339,8 +371,6 @@ class MainWindow(QMainWindow):
                 )
 
                 # Select the new branch
-                from fluxx.data.models import NodeId
-
                 self.controller.select_node(NodeId(branch_id))
             except Exception as e:
                 QMessageBox.critical(

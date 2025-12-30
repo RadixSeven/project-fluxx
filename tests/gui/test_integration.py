@@ -339,3 +339,118 @@ def test_dependency_removal_workflow(qtbot: QtBot) -> None:
     persistent_id = project.dag.node_map[NodeId(task2_id)]
     task2 = project.persistent_tasks[persistent_id].versions[current_version]
     assert len(task2.dependencies) == 0
+
+
+def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
+    """Test UI workflow for dependency editing with inline editor and node selection."""
+    from unittest.mock import MagicMock
+
+    from PySide6.QtWidgets import QApplication
+
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    # Mock _check_unsaved_changes AFTER window creation to prevent segfault
+    window._check_unsaved_changes = MagicMock(return_value=True)  # type: ignore[method-assign]
+
+    window.show()  # Make window visible
+    controller = window.controller
+
+    controller.new_project("Dependency UI Test")
+
+    # Create two tasks
+    task1_id = controller.create_task(
+        title="Task 1",
+        description="First task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task2_id = controller.create_task(
+        title="Task 2",
+        description="Second task depends on first",
+        duration_distribution=Triangular(min=2.0, mode=4.0, max=6.0),
+    )
+
+    # Select task 2 to edit
+    controller.select_node(NodeId(task2_id))
+
+    # Verify task editor is showing
+    task_editor = window.editor_panel.task_editor
+    assert window.editor_panel.stack.currentWidget() == task_editor
+    assert task_editor.current_task_id == task2_id
+
+    # Verify dependency editor is initially hidden
+    assert not task_editor.dependency_editor.isVisible()
+
+    # Simulate clicking "Add Dependency" button
+    task_editor._on_add_dependency()
+
+    # Process Qt events to update visibility
+    QApplication.processEvents()
+
+    # Verify dependency editor is now visible
+    assert task_editor.dependency_editor.isVisible()
+
+    # Verify add button is disabled during editing
+    assert not task_editor.add_dependency_button.isEnabled()
+
+    # Simulate clicking "Select Target" button
+    # This should emit signal to enter select-target mode
+    dag_view = window.dag_panel.dag_view
+
+    # Verify DAG view is not in select-target mode initially
+    assert not dag_view._select_target_mode
+
+    # Emit the signal (simulating button click)
+    task_editor.dependency_editor.select_target_requested.emit()
+
+    # Verify DAG view entered select-target mode
+    assert dag_view._select_target_mode
+
+    # Simulate clicking on task1 in DAG view
+    # This emits node_selected_for_dependency signal and exits mode
+    # (in real usage, both happen in mousePressEvent)
+    dag_view.node_selected_for_dependency.emit(NodeId(task1_id))
+    dag_view.exit_select_target_mode()
+
+    # Verify DAG view exited select-target mode
+    assert not dag_view._select_target_mode
+
+    # Verify target was set in dependency editor
+    assert task_editor.dependency_editor._target_node_id == NodeId(task1_id)
+    assert "Task: Task 1" in task_editor.dependency_editor.target_display.text()
+
+    # Configure remaining dependency fields
+    task_editor.dependency_editor.source_endpoint_combo.setCurrentIndex(1)  # END
+    task_editor.dependency_editor.constraint_type_combo.setCurrentIndex(0)  # >=
+    task_editor.dependency_editor.target_endpoint_combo.setCurrentIndex(1)  # END
+
+    # Finish dependency editing (simulating some user action that triggers this)
+    task_editor.finish_dependency_editing()
+
+    # Verify dependency was added to pending changes
+    assert "dependencies" in task_editor.pending_changes
+    assert len(task_editor.pending_changes["dependencies"]) == 1
+
+    dep = task_editor.pending_changes["dependencies"][0]
+    assert dep.source_endpoint == Endpoint.END
+    assert dep.target_node_id == NodeId(task1_id)
+    assert dep.target_endpoint == Endpoint.END
+    assert dep.constraint_type == ConstraintType.GREATER_EQUAL
+
+    # Verify dependency editor is hidden again
+    assert not task_editor.dependency_editor.isVisible()
+
+    # Verify add button is re-enabled
+    assert task_editor.add_dependency_button.isEnabled()
+
+    # Apply changes
+    task_editor._on_apply()
+
+    # Verify dependency was applied to project
+    project = controller.get_project()
+    current_version = project.dag.current_version_id
+    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    task2 = project.persistent_tasks[persistent_id].versions[current_version]
+    assert len(task2.dependencies) == 1
+    assert task2.dependencies[0].target_node_id == NodeId(task1_id)

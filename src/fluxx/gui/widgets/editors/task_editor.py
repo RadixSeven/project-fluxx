@@ -2,10 +2,9 @@
 
 from typing import Any
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -18,16 +17,15 @@ from PySide6.QtWidgets import (
 )
 
 from fluxx.data.models import (
-    ConstraintType,
     Dependency,
     DurationDistribution,
-    Endpoint,
     NodeId,
     ShiftedLognormal,
     TaskId,
     Triangular,
 )
 from fluxx.gui.controller import ProjectController
+from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
 
 
 class TaskEditor(QWidget):
@@ -39,7 +37,13 @@ class TaskEditor(QWidget):
     - Pending changes tracking
     - Validation with inline error messages
     - Apply/Revert/Delete actions
+
+    Signals:
+        select_dependency_target_requested: Emitted when user wants to select
+            a dependency target from the DAG view
     """
+
+    select_dependency_target_requested = Signal()
 
     def __init__(self, controller: ProjectController) -> None:
         """Initialize task editor.
@@ -122,6 +126,21 @@ class TaskEditor(QWidget):
 
         dependencies_button_layout.addStretch()
         layout.addLayout(dependencies_button_layout)
+
+        # Dependency editor (initially hidden)
+        self.dependency_editor = DependencyEditorWidget(
+            self.controller, is_branch=False
+        )
+        self.dependency_editor.setVisible(False)
+        self.dependency_editor.select_target_requested.connect(
+            self._on_dependency_select_target
+        )
+        self.dependency_editor.dependency_changed.connect(self._on_dependency_changed)
+        self.dependency_editor.cancelled.connect(self._on_dependency_cancelled)
+        layout.addWidget(self.dependency_editor)
+
+        # Track editing state
+        self._editing_dependency_index: int | None = None  # None = adding new
 
         # Spacer
         layout.addStretch()
@@ -478,42 +497,88 @@ class TaskEditor(QWidget):
         if self.current_task_id is None:
             return
 
-        # Show dialog to select target node
-        dialog = DependencyDialog(self.controller, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            target_node_id = dialog.get_selected_node()
-            source_endpoint = dialog.get_selected_endpoint()
-            target_endpoint = dialog.get_target_endpoint()
+        # Enter dependency editing mode (adding new)
+        self._editing_dependency_index = None
+        self.dependency_editor.clear()
+        self.dependency_editor.setVisible(True)
 
-            if (
-                target_node_id is not None
-                and source_endpoint is not None
-                and target_endpoint is not None
-            ):
-                # Get current dependencies (from pending changes or task)
-                if "dependencies" in self.pending_changes:
-                    current_deps = self.pending_changes["dependencies"].copy()
-                else:
-                    project = self.controller.get_project()
-                    node_id = NodeId(self.current_task_id)
-                    persistent_id = project.dag.node_map[node_id]
-                    persistent_task = project.persistent_tasks[persistent_id]
-                    task = persistent_task.versions[project.dag.current_version_id]
-                    current_deps = task.dependencies.copy()
+        # Disable other controls while editing dependency
+        self.add_dependency_button.setEnabled(False)
+        self.remove_dependency_button.setEnabled(False)
+        self.apply_button.setEnabled(False)
+        self.revert_button.setEnabled(False)
 
-                # Add new dependency
-                new_dep = Dependency(
-                    source_endpoint=source_endpoint,
-                    target_node_id=target_node_id,
-                    target_endpoint=target_endpoint,
-                    constraint_type=ConstraintType.GREATER_EQUAL,
-                )
-                current_deps.append(new_dep)
+    def _on_dependency_select_target(self) -> None:
+        """Handle Select Target button click in dependency editor."""
+        # Emit signal to parent (MainWindow) to enter select-target-node mode
+        self.select_dependency_target_requested.emit()
 
-                # Update pending changes
-                self.pending_changes["dependencies"] = current_deps
-                self._load_dependencies(current_deps)
-                self._update_button_states()
+    def _on_dependency_changed(self) -> None:
+        """Handle dependency editor field changes."""
+        # Could add validation here if needed
+        pass
+
+    def _on_dependency_cancelled(self) -> None:
+        """Handle dependency editing cancelled."""
+        self._editing_dependency_index = None
+        self.dependency_editor.setVisible(False)
+
+        # Re-enable controls
+        self.add_dependency_button.setEnabled(True)
+        self._on_dependency_selection_changed()  # Update remove button state
+        self._update_button_states()
+
+    def set_dependency_target(self, node_id: NodeId) -> None:
+        """Set the target node for the dependency being edited.
+
+        Called from parent window when user selects a node in DAG view.
+
+        Args:
+            node_id: Selected node ID
+        """
+        self.dependency_editor.set_target_node(node_id)
+
+    def finish_dependency_editing(self) -> None:
+        """Finish editing the current dependency and save it."""
+        dependency = self.dependency_editor.get_dependency()
+        if dependency is None:
+            return  # Incomplete dependency
+
+        if self.current_task_id is None:
+            return  # No task loaded
+
+        # Get current dependencies
+        if "dependencies" in self.pending_changes:
+            current_deps = self.pending_changes["dependencies"].copy()
+        else:
+            project = self.controller.get_project()
+            node_id = NodeId(self.current_task_id)
+            persistent_id = project.dag.node_map[node_id]
+            persistent_task = project.persistent_tasks[persistent_id]
+            task = persistent_task.versions[project.dag.current_version_id]
+            current_deps = list(task.dependencies)
+
+        # Add or update dependency
+        if self._editing_dependency_index is None:
+            # Adding new
+            current_deps.append(dependency)
+        else:
+            # Updating existing
+            if 0 <= self._editing_dependency_index < len(current_deps):
+                current_deps[self._editing_dependency_index] = dependency
+
+        # Update pending changes
+        self.pending_changes["dependencies"] = current_deps
+        self._load_dependencies(current_deps)
+
+        # Exit editing mode
+        self._editing_dependency_index = None
+        self.dependency_editor.setVisible(False)
+
+        # Re-enable controls
+        self.add_dependency_button.setEnabled(True)
+        self._on_dependency_selection_changed()
+        self._update_button_states()
 
     def _on_remove_dependency(self) -> None:
         """Remove selected dependency."""
@@ -552,169 +617,3 @@ class TaskEditor(QWidget):
         # TODO: Implement task deletion
         # This will require adding a delete_task method to the controller
         pass
-
-
-class DependencyDialog(QDialog):
-    """Dialog for selecting a dependency target node and endpoint."""
-
-    def __init__(self, controller: ProjectController, parent: QWidget | None = None):
-        """Initialize dependency dialog.
-
-        Args:
-            controller: Project controller instance
-            parent: Parent widget
-        """
-        super().__init__(parent)
-        self.controller = controller
-        self.setWindowTitle("Add Dependency")
-        self.setMinimumWidth(400)
-
-        # Create layout
-        layout = QVBoxLayout()
-
-        # Node selection
-        node_label = QLabel("Depends on node:")
-        layout.addWidget(node_label)
-
-        self.node_list = QListWidget()
-        self.node_list.itemSelectionChanged.connect(self._on_node_selection_changed)
-        layout.addWidget(self.node_list)
-
-        # Endpoint selection
-        endpoint_label = QLabel("Endpoint:")
-        layout.addWidget(endpoint_label)
-
-        self.endpoint_combo = QComboBox()
-        self.endpoint_combo.setEnabled(False)
-        layout.addWidget(self.endpoint_combo)
-
-        # Button box
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-        self.setLayout(layout)
-
-        # Populate node list
-        self._populate_nodes()
-
-    def _populate_nodes(self) -> None:
-        """Populate the list of available nodes."""
-        project = self.controller.get_project()
-
-        # Add all tasks
-        for persistent_id, persistent_task in project.persistent_tasks.items():
-            current_version = project.dag.current_version_id
-            if current_version in persistent_task.versions:
-                task = persistent_task.versions[current_version]
-
-                # Find node ID for this task
-                for node_id, pid in project.dag.node_map.items():
-                    if pid == persistent_id:
-                        # Store node ID as item data
-                        item_text = f"Task: {task.title}"
-                        self.node_list.addItem(item_text)
-                        # Store both node_id and whether it's a task
-                        last_item = self.node_list.item(self.node_list.count() - 1)
-                        if last_item is not None:
-                            last_item.setData(256, (node_id, True))
-                        break
-
-        # Add all branches
-        for persistent_id, persistent_branch in project.persistent_branches.items():
-            current_version = project.dag.current_version_id
-            if current_version in persistent_branch.versions:
-                branch = persistent_branch.versions[current_version]
-
-                # Find node ID for this branch
-                for node_id, pid in project.dag.node_map.items():
-                    if pid == persistent_id:
-                        # Store node ID as item data
-                        item_text = f"Branch: {branch.title}"
-                        self.node_list.addItem(item_text)
-                        # Store both node_id and whether it's a task
-                        last_item = self.node_list.item(self.node_list.count() - 1)
-                        if last_item is not None:
-                            last_item.setData(256, (node_id, False))
-                        break
-
-    def _on_node_selection_changed(self) -> None:
-        """Handle node selection changes."""
-        selected_items = self.node_list.selectedItems()
-        if not selected_items:
-            self.endpoint_combo.setEnabled(False)
-            self.endpoint_combo.clear()
-            return
-
-        # Get node data (node_id, is_task)
-        node_data = selected_items[0].data(256)
-        if node_data is None:
-            return
-
-        _, is_task = node_data
-
-        # Populate endpoint options based on node type
-        self.endpoint_combo.clear()
-        self.endpoint_combo.setEnabled(True)
-
-        if is_task:
-            # Tasks support START and END endpoints
-            self.endpoint_combo.addItem("Start", Endpoint.START)
-            self.endpoint_combo.addItem("End", Endpoint.END)
-        else:
-            # Branches support OCCURRENCE endpoint
-            self.endpoint_combo.addItem("Occurrence", Endpoint.OCCURRENCE)
-
-    def get_selected_node(self) -> NodeId | None:
-        """Get the selected node ID.
-
-        Returns:
-            Selected node ID or None
-        """
-        selected_items = self.node_list.selectedItems()
-        if not selected_items:
-            return None
-
-        node_data = selected_items[0].data(256)
-        if node_data is None:
-            return None
-
-        node_id, _ = node_data
-        return NodeId(node_id) if isinstance(node_id, str) else node_id
-
-    def get_selected_endpoint(self) -> Endpoint | None:
-        """Get the source endpoint (for the current task).
-
-        Returns:
-            Selected endpoint or None
-        """
-        if self.endpoint_combo.currentIndex() < 0:
-            return None
-
-        data = self.endpoint_combo.currentData()
-        return Endpoint(data) if isinstance(data, str) else data
-
-    def get_target_endpoint(self) -> Endpoint | None:
-        """Get the target endpoint (for the dependency target).
-
-        For tasks, this is END (wait for task to complete).
-        For branches, this is OCCURRENCE (wait for branch choice).
-
-        Returns:
-            Target endpoint or None
-        """
-        selected_items = self.node_list.selectedItems()
-        if not selected_items:
-            return None
-
-        node_data = selected_items[0].data(256)
-        if node_data is None:
-            return None
-
-        _, is_task = node_data
-
-        # Return appropriate endpoint based on node type
-        return Endpoint.END if is_task else Endpoint.OCCURRENCE

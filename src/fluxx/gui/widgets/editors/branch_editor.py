@@ -2,9 +2,8 @@
 
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog,
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
@@ -22,12 +21,12 @@ from PySide6.QtWidgets import (
 from fluxx.data.id_generation import generate_possible_world_id
 from fluxx.data.models import (
     BranchId,
-    ConstraintType,
     Dependency,
     NodeId,
     PossibleWorld,
 )
 from fluxx.gui.controller import ProjectController
+from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
 
 
 class BranchEditor(QWidget):
@@ -40,7 +39,13 @@ class BranchEditor(QWidget):
     - Pending changes tracking
     - Validation with inline error messages
     - Apply/Revert/Delete actions
+
+    Signals:
+        select_dependency_target_requested: Emitted when user wants to select
+            a dependency target from the DAG view
     """
+
+    select_dependency_target_requested = Signal()
 
     def __init__(self, controller: ProjectController) -> None:
         """Initialize branch editor.
@@ -143,6 +148,19 @@ class BranchEditor(QWidget):
 
         dependencies_button_layout.addStretch()
         layout.addLayout(dependencies_button_layout)
+
+        # Dependency editor (initially hidden)
+        self.dependency_editor = DependencyEditorWidget(self.controller, is_branch=True)
+        self.dependency_editor.setVisible(False)
+        self.dependency_editor.select_target_requested.connect(
+            self._on_dependency_select_target
+        )
+        self.dependency_editor.dependency_changed.connect(self._on_dependency_changed)
+        self.dependency_editor.cancelled.connect(self._on_dependency_cancelled)
+        layout.addWidget(self.dependency_editor)
+
+        # Track editing state
+        self._editing_dependency_index: int | None = None  # None = adding new
 
         # Spacer
         layout.addStretch()
@@ -422,45 +440,88 @@ class BranchEditor(QWidget):
         if self.current_branch_id is None:
             return
 
-        # Import here to avoid circular dependency
-        from fluxx.gui.widgets.editors.task_editor import DependencyDialog
+        # Enter dependency editing mode (adding new)
+        self._editing_dependency_index = None
+        self.dependency_editor.clear()
+        self.dependency_editor.setVisible(True)
 
-        # Show dialog to select target node
-        dialog = DependencyDialog(self.controller, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            target_node_id = dialog.get_selected_node()
-            source_endpoint = dialog.get_selected_endpoint()
-            target_endpoint = dialog.get_target_endpoint()
+        # Disable other controls while editing dependency
+        self.add_dependency_button.setEnabled(False)
+        self.remove_dependency_button.setEnabled(False)
+        self.apply_button.setEnabled(False)
+        self.revert_button.setEnabled(False)
 
-            if (
-                target_node_id is not None
-                and source_endpoint is not None
-                and target_endpoint is not None
-            ):
-                # Get current dependencies (from pending changes or branch)
-                if "dependencies" in self.pending_changes:
-                    current_deps = self.pending_changes["dependencies"].copy()
-                else:
-                    project = self.controller.get_project()
-                    node_id = NodeId(self.current_branch_id)
-                    persistent_id = project.dag.node_map[node_id]
-                    persistent_branch = project.persistent_branches[persistent_id]
-                    branch = persistent_branch.versions[project.dag.current_version_id]
-                    current_deps = branch.dependencies.copy()
+    def _on_dependency_select_target(self) -> None:
+        """Handle Select Target button click in dependency editor."""
+        # Emit signal to parent (MainWindow) to enter select-target-node mode
+        self.select_dependency_target_requested.emit()
 
-                # Add new dependency
-                new_dep = Dependency(
-                    source_endpoint=source_endpoint,
-                    target_node_id=target_node_id,
-                    target_endpoint=target_endpoint,
-                    constraint_type=ConstraintType.GREATER_EQUAL,
-                )
-                current_deps.append(new_dep)
+    def _on_dependency_changed(self) -> None:
+        """Handle dependency editor field changes."""
+        # Could add validation here if needed
+        pass
 
-                # Update pending changes
-                self.pending_changes["dependencies"] = current_deps
-                self._load_dependencies(current_deps)
-                self._update_button_states()
+    def _on_dependency_cancelled(self) -> None:
+        """Handle dependency editing cancelled."""
+        self._editing_dependency_index = None
+        self.dependency_editor.setVisible(False)
+
+        # Re-enable controls
+        self.add_dependency_button.setEnabled(True)
+        self._on_dependency_selection_changed()  # Update remove button state
+        self._update_button_states()
+
+    def set_dependency_target(self, node_id: NodeId) -> None:
+        """Set the target node for the dependency being edited.
+
+        Called from parent window when user selects a node in DAG view.
+
+        Args:
+            node_id: Selected node ID
+        """
+        self.dependency_editor.set_target_node(node_id)
+
+    def finish_dependency_editing(self) -> None:
+        """Finish editing the current dependency and save it."""
+        dependency = self.dependency_editor.get_dependency()
+        if dependency is None:
+            return  # Incomplete dependency
+
+        if self.current_branch_id is None:
+            return  # No branch loaded
+
+        # Get current dependencies
+        if "dependencies" in self.pending_changes:
+            current_deps = self.pending_changes["dependencies"].copy()
+        else:
+            project = self.controller.get_project()
+            node_id = NodeId(self.current_branch_id)
+            persistent_id = project.dag.node_map[node_id]
+            persistent_branch = project.persistent_branches[persistent_id]
+            branch = persistent_branch.versions[project.dag.current_version_id]
+            current_deps = list(branch.dependencies)
+
+        # Add or update dependency
+        if self._editing_dependency_index is None:
+            # Adding new
+            current_deps.append(dependency)
+        else:
+            # Updating existing
+            if 0 <= self._editing_dependency_index < len(current_deps):
+                current_deps[self._editing_dependency_index] = dependency
+
+        # Update pending changes
+        self.pending_changes["dependencies"] = current_deps
+        self._load_dependencies(current_deps)
+
+        # Exit editing mode
+        self._editing_dependency_index = None
+        self.dependency_editor.setVisible(False)
+
+        # Re-enable controls
+        self.add_dependency_button.setEnabled(True)
+        self._on_dependency_selection_changed()
+        self._update_button_states()
 
     def _on_remove_dependency(self) -> None:
         """Remove selected dependency."""

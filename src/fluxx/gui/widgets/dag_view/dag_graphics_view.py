@@ -1,6 +1,6 @@
 """Graphics view for DAG visualization."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
@@ -20,7 +20,14 @@ class DAGGraphicsView(QGraphicsView):
     - Auto-layout using hierarchical algorithm
     - Click nodes to select
     - Updates when project changes
+    - Select-target-node mode for dependency editing
+
+    Signals:
+        node_selected_for_dependency: Emitted when a node is selected in
+            select-target-node mode
     """
+
+    node_selected_for_dependency = Signal(object)  # Emits NodeId
 
     def __init__(self, controller: ProjectController) -> None:
         """Initialize DAG graphics view.
@@ -46,6 +53,9 @@ class DAGGraphicsView(QGraphicsView):
 
         # Store edge items for later reference
         self.edge_items: list[EdgeItem] = []
+
+        # Select-target-node mode for dependency editing
+        self._select_target_mode: bool = False
 
         # Connect to controller signals
         self.controller.project_changed.connect(self._on_project_changed)
@@ -168,23 +178,47 @@ class DAGGraphicsView(QGraphicsView):
                 self._scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio
             )
 
+    def enter_select_target_mode(self) -> None:
+        """Enter select-target-node mode for dependency editing."""
+        self._select_target_mode = True
+        # Disable panning while in select mode
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        # Change cursor to indicate selection mode
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def exit_select_target_mode(self) -> None:
+        """Exit select-target-node mode."""
+        self._select_target_mode = False
+        # Re-enable panning
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        # Restore default cursor
+        self.unsetCursor()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Handle mouse press to select nodes.
 
         Args:
             event: Mouse event
         """
-        # Let the base class handle the event first
-        super().mousePressEvent(event)
-
         # Check if we clicked on a node
         item = self.itemAt(event.pos())
         if isinstance(item, NodeItem):
-            # Notify controller of selection
-            self.controller.select_node(item.node_id)
+            if self._select_target_mode:
+                # In select-target mode: emit signal and exit mode
+                self.node_selected_for_dependency.emit(item.node_id)
+                self.exit_select_target_mode()
+            else:
+                # Normal mode: notify controller of selection
+                self.controller.select_node(item.node_id)
         else:
-            # Clicked on empty space - clear selection
-            self.controller.select_node(None)
+            # Clicked on empty space
+            if not self._select_target_mode:
+                # Normal mode: clear selection
+                self.controller.select_node(None)
+
+        # Let the base class handle the event (for panning, etc.)
+        if not self._select_target_mode:
+            super().mousePressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent | None) -> None:  # noqa: N802
         """Handle mouse wheel for zooming.
