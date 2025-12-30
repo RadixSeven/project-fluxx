@@ -2,12 +2,14 @@
 name = "project-fluxx"
 version = "0.1.0"
 description = "Project planning that incorporates uncertainty"
+readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=1.26.0",
-    "tqdm>=4.66.0",
     "PyQt6>=6.6.0",
     "pydantic>=2.0.0",
+    "pyomo>=6.7.0",
+    "rapidfuzz>=3.0.0",
 ]
 
 [project.optional-dependencies]
@@ -17,25 +19,19 @@ dev = [
     "ruff>=0.1.0",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
-    "types-tqdm>=4.0",
+    "pytest-qt>=4.0.0",
     "PyQt6-stubs>=6.0",
 ]
+
+[project.scripts]
+fluxx = "fluxx.__main__:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = [
-    "data_loader",
-    "embeddings",
-    "generate_mood_graph_main",
-    "graph",
-    "models",
-    "output",
-    "prune_mood_graph_main",
-    "similarity",
-]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
