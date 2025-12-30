@@ -322,3 +322,81 @@ def test_task_editor_dependency_selection(
     assert not task_editor.remove_dependency_button.isEnabled()
 
     # (No dependencies to select, so button remains disabled)
+
+
+def test_task_editor_shifted_lognormal_distribution(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading and editing shifted lognormal distribution."""
+    from fluxx.data.models import ShiftedLognormal
+
+    # Create task with shifted lognormal distribution
+    task_id = controller.create_task(
+        title="Task with ShiftedLognormal",
+        duration_distribution=ShiftedLognormal(min=1.0, mode=3.0, percentile_95=10.0),
+    )
+
+    # Load task
+    task_editor.load_task(task_id)
+
+    # Verify distribution type selected
+    assert task_editor.distribution_type.currentText() == "Shifted Lognormal"
+
+    # Verify fields are populated
+    assert task_editor.min_field.text() == "1.0"
+    assert task_editor.mode_field.text() == "3.0"
+    assert task_editor.percentile_95_field.text() == "10.0"
+
+    # Change values
+    task_editor.percentile_95_field.setText("15.0")
+
+    # Verify pending changes
+    assert "duration_distribution" in task_editor.pending_changes
+    dist = task_editor.pending_changes["duration_distribution"]
+    assert isinstance(dist, ShiftedLognormal)
+    assert dist.percentile_95 == 15.0
+
+
+def test_task_editor_switch_to_shifted_lognormal(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test switching from triangular to shifted lognormal distribution."""
+    # Create task with triangular distribution
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Switch to shifted lognormal
+    task_editor.distribution_type.setCurrentText("Shifted Lognormal")
+
+    # Verify percentile_95 field now exists for shifted lognormal
+    assert hasattr(task_editor, "percentile_95_field")
+
+
+def test_task_editor_invalid_triangular_distribution(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test validation of invalid triangular distribution."""
+    # Create task with triangular distribution
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Set invalid values (mode > max)
+    task_editor.max_field.setText("1.5")  # Less than mode (2.0)
+
+    # Verify apply button is disabled
+    assert not task_editor.apply_button.isEnabled()
+
+
+def test_task_editor_clear_task(task_editor: TaskEditor) -> None:
+    """Test clearing loaded task."""
+    # Initially no task loaded
+    assert task_editor.current_task_id is None
+
+    # Title field should be empty
+    assert task_editor.title_field.text() == ""
