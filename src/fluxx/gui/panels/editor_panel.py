@@ -1,6 +1,6 @@
 """Right panel containing node editors."""
 
-from PyQt6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from fluxx.data.models import BranchId, NodeId, TaskId
 from fluxx.gui.controller import ProjectController

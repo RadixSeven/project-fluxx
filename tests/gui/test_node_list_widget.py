@@ -1,6 +1,6 @@
 """Tests for NodeListWidget."""
 
-from PyQt6.QtCore import Qt
+from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from fluxx.data.models import (
@@ -382,8 +382,10 @@ def test_node_list_widget_color_coding(qtbot: QtBot) -> None:
     assert task_item is not None
 
     # Check colors
-    assert branch_item.foreground().color() == Qt.GlobalColor.darkGreen
-    assert task_item.foreground().color() == Qt.GlobalColor.blue
+    from PySide6.QtGui import QColor
+
+    assert branch_item.foreground().color() == QColor(Qt.GlobalColor.darkGreen)
+    assert task_item.foreground().color() == QColor(Qt.GlobalColor.blue)
 
 
 def test_node_list_widget_search_preserves_selection(qtbot: QtBot) -> None:

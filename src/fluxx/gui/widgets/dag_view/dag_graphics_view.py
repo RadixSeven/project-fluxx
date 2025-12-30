@@ -1,10 +1,8 @@
 """Graphics view for DAG visualization."""
 
-from typing import Any
-
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QWheelEvent
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QMouseEvent, QWheelEvent
+from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
 from fluxx.data.models import NodeId, Project
 from fluxx.gui.controller import ProjectController
@@ -170,7 +168,7 @@ class DAGGraphicsView(QGraphicsView):
                 self._scene.itemsBoundingRect(), Qt.AspectRatioMode.KeepAspectRatio
             )
 
-    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Handle mouse press to select nodes.
 
         Args:

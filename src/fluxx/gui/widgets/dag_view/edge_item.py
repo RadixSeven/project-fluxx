@@ -1,11 +1,10 @@
 """Edge item for rendering dependencies between nodes."""
 
-from typing import Any
-
-from PyQt6.QtCore import QPointF
-from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import (
     QGraphicsPathItem,
+    QGraphicsSceneHoverEvent,
     QStyleOptionGraphicsItem,
     QWidget,
 )
@@ -91,14 +90,14 @@ class EdgeItem(QGraphicsPathItem):
     def paint(
         self,
         painter: QPainter | None,
-        option: QStyleOptionGraphicsItem | None,
+        option: QStyleOptionGraphicsItem,
         widget: QWidget | None = None,
     ) -> None:
         """Paint the edge.
 
         Args:
             painter: Painter to use
-            option: Style options
+            option: Style options (always provided by Qt framework)
             widget: Widget being painted on
         """
         if painter is None:
@@ -168,7 +167,7 @@ class EdgeItem(QGraphicsPathItem):
         arrow_color = self._hover_color if self._is_hovered else self._base_color
         painter.fillPath(arrow_path, arrow_color)
 
-    def hoverEnterEvent(self, event: Any) -> None:  # noqa: N802
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
         """Handle hover enter.
 
         Args:
@@ -178,7 +177,7 @@ class EdgeItem(QGraphicsPathItem):
         self.update()
         super().hoverEnterEvent(event)
 
-    def hoverLeaveEvent(self, event: Any) -> None:  # noqa: N802
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
         """Handle hover leave.
 
         Args:

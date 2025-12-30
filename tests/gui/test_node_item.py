@@ -1,6 +1,6 @@
 """Tests for NodeItem graphics items."""
 
-from PyQt6.QtWidgets import QGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem
 
 from fluxx.data.models import (
     Branch,
@@ -100,10 +100,13 @@ def test_node_item_selected_state() -> None:
 
 def test_node_item_paint_none_painter() -> None:
     """Test paint with None painter does nothing."""
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+
     node = NodeItem(NodeId("task_1"), "Test")
 
-    # Should not raise exception
-    node.paint(None, None, None)
+    # Should not raise exception when painter is None
+    option = QStyleOptionGraphicsItem()
+    node.paint(None, option, None)
 
 
 def test_task_node_item_initialization() -> None:

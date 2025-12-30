@@ -1,6 +1,6 @@
 """Control bar for DAG panel."""
 
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from fluxx.gui.controller import ProjectController
 

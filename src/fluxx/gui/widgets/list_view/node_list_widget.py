@@ -1,7 +1,7 @@
 """Node list widget for filterable list view of all tasks and branches."""
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,

@@ -36,33 +36,42 @@ def test_main_window_initialization(window: MainWindow) -> None:
 
 def test_menu_bar_creation(window: MainWindow) -> None:
     """Test that menu bar is created with correct menus."""
+    from typing import cast
+
+    from PySide6.QtWidgets import QMenu
+
     menubar = window.menuBar()
     assert menubar is not None
 
     # Check File menu
-    file_menu = None
-    edit_menu = None
+    file_menu_found = False
+    edit_menu_found = False
     for action in menubar.actions():
-        if action.text() == "&File":
-            file_menu = action.menu()
-        elif action.text() == "&Edit":
-            edit_menu = action.menu()
+        text = action.text()
+        if text == "&File":
+            # Cast needed: PySide6 stubs incorrectly type menu() as returning QObject
+            file_menu = cast(QMenu | None, action.menu())
+            # Check File menu actions immediately while menu is valid
+            if file_menu is not None:
+                file_actions = [a.text() for a in file_menu.actions()]
+                assert "&New" in file_actions
+                assert "&Open..." in file_actions
+                assert "&Save" in file_actions
+                assert "Save &As..." in file_actions
+                assert "E&xit" in file_actions
+                file_menu_found = True
+        elif text == "&Edit":
+            # Cast needed: PySide6 stubs incorrectly type menu() as returning QObject
+            edit_menu = cast(QMenu | None, action.menu())
+            # Check Edit menu actions immediately while menu is valid
+            if edit_menu is not None:
+                edit_actions = [a.text() for a in edit_menu.actions()]
+                assert "&Undo" in edit_actions
+                assert "&Redo" in edit_actions
+                edit_menu_found = True
 
-    assert file_menu is not None
-    assert edit_menu is not None
-
-    # Check File menu actions
-    file_actions = [action.text() for action in file_menu.actions()]
-    assert "&New" in file_actions
-    assert "&Open..." in file_actions
-    assert "&Save" in file_actions
-    assert "Save &As..." in file_actions
-    assert "E&xit" in file_actions
-
-    # Check Edit menu actions
-    edit_actions = [action.text() for action in edit_menu.actions()]
-    assert "&Undo" in edit_actions
-    assert "&Redo" in edit_actions
+    assert file_menu_found
+    assert edit_menu_found
 
 
 def test_window_title_updates_on_new_project(window: MainWindow) -> None:
@@ -424,7 +433,7 @@ def test_close_event_cancel(window: MainWindow, qtbot: "QtBot") -> None:
     window._check_unsaved_changes = MagicMock(return_value=False)  # type: ignore[method-assign]
 
     # Create close event
-    from PyQt6.QtGui import QCloseEvent
+    from PySide6.QtGui import QCloseEvent
 
     event = QCloseEvent()
 

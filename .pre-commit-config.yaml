@@ -19,5 +19,12 @@ repos:
     rev: v1.18.2
     hooks:
       - id: mypy
-        args: [--strict, --ignore-missing-imports]
-        additional_dependencies: [tokenize-rt==3.2.0, pydantic, PyQt6-stubs, pytest]
+        args: [--strict]
+        additional_dependencies:
+          - tokenize-rt==3.2.0
+          - pydantic
+          - PySide6-stubs
+          - pytest
+          - pytest-qt
+          - types-networkx
+          - rapidfuzz

@@ -1,10 +1,14 @@
 """Graphics items for rendering DAG nodes."""
 
-from typing import Any
-
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QBrush, QColor, QPainter, QPen
-from PyQt6.QtWidgets import QGraphicsItem, QGraphicsRectItem
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtWidgets import (
+    QGraphicsItem,
+    QGraphicsRectItem,
+    QGraphicsSceneHoverEvent,
+    QStyleOptionGraphicsItem,
+    QWidget,
+)
 
 from fluxx.data.models import Branch, NodeId, Task
 
@@ -59,15 +63,15 @@ class NodeItem(QGraphicsRectItem):
     def paint(
         self,
         painter: QPainter | None,
-        option: Any,
-        widget: Any = None,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
     ) -> None:
         """Paint the node.
 
         Args:
             painter: QPainter instance
-            option: Style option (unused)
-            widget: Widget being painted on (unused)
+            option: Style option
+            widget: Widget being painted on
         """
         if painter is None:
             return
@@ -97,7 +101,7 @@ class NodeItem(QGraphicsRectItem):
             self.title,
         )
 
-    def hoverEnterEvent(self, event: Any) -> None:  # noqa: N802
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
         """Handle hover enter.
 
         Args:
@@ -107,7 +111,7 @@ class NodeItem(QGraphicsRectItem):
         self.update()
         super().hoverEnterEvent(event)
 
-    def hoverLeaveEvent(self, event: Any) -> None:  # noqa: N802
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
         """Handle hover leave.
 
         Args:

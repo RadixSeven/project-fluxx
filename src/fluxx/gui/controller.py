@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from fluxx.data import (
     add_branch,
@@ -52,10 +52,10 @@ class ProjectController(QObject):
     """
 
     # Qt signals
-    project_changed = pyqtSignal(Project)
-    selection_changed = pyqtSignal(object)  # Optional[NodeId]
-    file_path_changed = pyqtSignal(object)  # Optional[Path]
-    modified_changed = pyqtSignal(bool)
+    project_changed = Signal(Project)
+    selection_changed = Signal(object)  # Optional[NodeId]
+    file_path_changed = Signal(object)  # Optional[Path]
+    modified_changed = Signal(bool)
 
     def __init__(self) -> None:
         """Initialize the controller with an empty project."""

@@ -3,7 +3,7 @@
 from collections import defaultdict
 
 import networkx as nx
-from PyQt6.QtCore import QPointF
+from PySide6.QtCore import QPointF
 
 from fluxx.data.models import NodeId, Project
 
@@ -28,7 +28,7 @@ def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
         return {}
 
     # Build networkx graph from dependencies
-    graph = nx.DiGraph()
+    graph: nx.DiGraph[NodeId] = nx.DiGraph()
 
     # Add all nodes
     for node_id in project.dag.node_map:

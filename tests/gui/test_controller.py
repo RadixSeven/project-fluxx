@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from PyQt6.QtCore import QObject
+from PySide6.QtCore import QObject
 from pytestqt.qtbot import QtBot
 
 from fluxx.data.models import (

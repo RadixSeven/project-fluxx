@@ -1,7 +1,7 @@
 """Tests for EdgeItem graphics item."""
 
-from PyQt6.QtCore import QPointF
-from PyQt6.QtGui import QColor
+from PySide6.QtCore import QPointF
+from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
 from fluxx.data.models import NodeId
@@ -105,6 +105,8 @@ def test_edge_item_pen_width_hovered() -> None:
 
 def test_edge_item_paint_none_painter() -> None:
     """Test paint with None painter does nothing."""
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+
     edge = EdgeItem(
         NodeId("task_1"),
         NodeId("task_2"),
@@ -112,8 +114,9 @@ def test_edge_item_paint_none_painter() -> None:
         QPointF(100, 100),
     )
 
-    # Should not raise exception
-    edge.paint(None, None, None)
+    # Should not raise exception when painter is None
+    option = QStyleOptionGraphicsItem()
+    edge.paint(None, option, None)
 
 
 def test_edge_item_draw_arrow_zero_length() -> None:

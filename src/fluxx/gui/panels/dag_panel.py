@@ -1,6 +1,6 @@
 """Left panel containing DAG visualization and list view."""
 
-from PyQt6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.panels.control_bar import ControlBar

@@ -56,7 +56,7 @@ format:
 
 type-check:
 	@echo "==> Running mypy type checker..."
-	mypy --strict --ignore-missing-imports $(SRC_DIR) $(TEST_DIR)
+	mypy --strict $(SRC_DIR) $(TEST_DIR)
 
 all_checks: format lint type-check test coverage
 	@echo ""
