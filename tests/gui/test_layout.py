@@ -34,7 +34,8 @@ def test_layout_single_task() -> None:
 
     node_id = NodeId(task_id)
     assert node_id in positions
-    assert positions[node_id].y() == 0  # First layer
+    # Horizontal layout: x increases with time
+    assert positions[node_id].x() >= 0  # Should be at some x position
 
 
 def test_layout_two_tasks_no_dependency() -> None:
@@ -58,9 +59,8 @@ def test_layout_two_tasks_no_dependency() -> None:
 
     assert node_id1 in positions
     assert node_id2 in positions
-    # Both should be at layer 0
-    assert positions[node_id1].y() == 0
-    assert positions[node_id2].y() == 0
+    # Both should be at same x position (layer 0) since no dependencies
+    assert positions[node_id1].x() == positions[node_id2].x()
 
 
 def test_layout_two_tasks_with_dependency() -> None:
@@ -77,11 +77,11 @@ def test_layout_two_tasks_with_dependency() -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    # Add dependency: Task 1 depends on Task 2
+    # Add dependency: Task 1.start >= Task 2.end (Task 1 starts after Task 2 ends)
     dep = Dependency(
-        source_endpoint=Endpoint.END,
+        source_endpoint=Endpoint.START,
         target_node_id=NodeId(task_id2),
-        target_endpoint=Endpoint.START,
+        target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     controller.add_dependency(NodeId(task_id1), dep)
@@ -95,8 +95,8 @@ def test_layout_two_tasks_with_dependency() -> None:
     assert node_id1 in positions
     assert node_id2 in positions
 
-    # Task 1 depends on Task 2, so Task 1 should be at a higher layer
-    assert positions[node_id1].y() > positions[node_id2].y()
+    # Task 1 starts after Task 2 ends, so Task 1 should be further right
+    assert positions[node_id1].x() > positions[node_id2].x()
 
 
 def test_layout_three_tasks_chain() -> None:
@@ -117,17 +117,18 @@ def test_layout_three_tasks_chain() -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    # Task 1 -> Task 2 -> Task 3
+    # Chain: Task 1.start >= Task 2.end, Task 2.start >= Task 3.end
+    # This creates a sequence: Task 3 -> Task 2 -> Task 1
     dep12 = Dependency(
-        source_endpoint=Endpoint.END,
+        source_endpoint=Endpoint.START,
         target_node_id=NodeId(task_id2),
-        target_endpoint=Endpoint.START,
+        target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     dep23 = Dependency(
-        source_endpoint=Endpoint.END,
+        source_endpoint=Endpoint.START,
         target_node_id=NodeId(task_id3),
-        target_endpoint=Endpoint.START,
+        target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
@@ -145,6 +146,41 @@ def test_layout_three_tasks_chain() -> None:
     assert node_id2 in positions
     assert node_id3 in positions
 
-    # Check layer ordering
-    assert positions[node_id1].y() > positions[node_id2].y()
-    assert positions[node_id2].y() > positions[node_id3].y()
+    # Check layer ordering (time flows left to right)
+    assert positions[node_id1].x() > positions[node_id2].x()
+    assert positions[node_id2].x() > positions[node_id3].x()
+
+
+def test_layout_parent_child_tasks() -> None:
+    """Test layout with parent and child tasks.
+
+    This test verifies that the layout can handle parent-child relationships,
+    which create valid cycles in the node-based graph but not in the endpoint-based
+    dependency graph.
+    """
+    controller = ProjectController()
+
+    # Create a parent task by converting a leaf
+    parent_id = controller.create_task(
+        title="Parent Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Convert to parent (creates child with dependencies)
+    child_id = controller.convert_to_parent(parent_id, "Child Task")
+
+    project = controller.get_project()
+    positions = compute_dag_layout(project)
+
+    parent_node_id = NodeId(parent_id)
+    child_node_id = NodeId(child_id)
+
+    # Both nodes should have positions
+    assert parent_node_id in positions
+    assert child_node_id in positions
+
+    # Parent and child should not crash the layout
+    # (they create cycles in node graph but not endpoint graph)
+    # The specific positioning depends on implementation, but both should exist
+    assert positions[parent_node_id] is not None
+    assert positions[child_node_id] is not None

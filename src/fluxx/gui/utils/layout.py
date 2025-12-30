@@ -5,17 +5,21 @@ from collections import defaultdict
 import networkx as nx
 from PySide6.QtCore import QPointF
 
-from fluxx.data.models import NodeId, Project
+from fluxx.data.models import Endpoint, NodeId, Project
 
 
 def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
     """Compute positions for all nodes in the DAG using hierarchical layout.
 
+    Uses endpoint-based dependency graph to handle parent-child relationships correctly.
+    Layout is horizontal (left-to-right) to match conventional time diagrams.
+
     Algorithm:
-    1. Build directed graph from dependencies
-    2. Topological sort to assign layers (y-coordinates)
-    3. Within each layer, distribute nodes horizontally
-    4. Return dict mapping node_id to QPointF position
+    1. Build endpoint-based directed graph from dependencies
+    2. Topological sort on endpoints to assign layers (x-coordinates)
+    3. Map endpoint layers back to node layers (max of endpoint layers)
+    4. Within each layer, distribute nodes vertically
+    5. Return dict mapping node_id to QPointF position
 
     Args:
         project: Project instance
@@ -27,110 +31,142 @@ def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
     if not project.dag.node_map:
         return {}
 
-    # Build networkx graph from dependencies
-    graph: nx.DiGraph[NodeId] = nx.DiGraph()
+    # Build endpoint-based networkx graph
+    # Each node (task/branch) has multiple endpoint nodes in the graph
+    graph: nx.DiGraph[tuple[NodeId, Endpoint]] = nx.DiGraph()
 
-    # Add all nodes
-    for node_id in project.dag.node_map:
-        graph.add_node(node_id)
-
-    # Add edges from dependencies
-    # Dependencies are stored on tasks and branches
     current_version = project.dag.current_version_id
 
-    # Add task dependencies
+    # Add task endpoints and dependencies
     for persistent_id, persistent_task in project.persistent_tasks.items():
         if current_version not in persistent_task.versions:
             continue
 
         task = persistent_task.versions[current_version]
-        source_node_id = None
 
         # Find the node_id for this persistent_id
-        for node_id, pid in project.dag.node_map.items():
+        source_node_id = None
+        for nid, pid in project.dag.node_map.items():
             if pid == persistent_id:
-                source_node_id = node_id
+                source_node_id = nid
                 break
 
         if source_node_id is None:
             continue
 
-        # Add edges for dependencies
-        for dep in task.dependencies:
-            # If this task has a dependency on another node,
-            # the other node must complete first.
-            # Edge goes from dependency target to this task (target -> source)
-            graph.add_edge(dep.target_node_id, source_node_id)
+        # Add endpoint nodes
+        graph.add_node((source_node_id, Endpoint.START))
+        graph.add_node((source_node_id, Endpoint.END))
 
-    # Add branch dependencies
+        # Add implicit dependency: task.start -> task.end
+        graph.add_edge((source_node_id, Endpoint.START), (source_node_id, Endpoint.END))
+
+        # Add explicit dependencies
+        for dep in task.dependencies:
+            # Dependency: source[source_endpoint] >= target[target_endpoint]
+            # Creates edge: target[target_endpoint] -> source[source_endpoint]
+            graph.add_edge(
+                (dep.target_node_id, dep.target_endpoint),
+                (source_node_id, dep.source_endpoint),
+            )
+
+    # Add branch endpoints and dependencies
     for persistent_id, persistent_branch in project.persistent_branches.items():
         if current_version not in persistent_branch.versions:
             continue
 
         branch = persistent_branch.versions[current_version]
-        source_node_id = None
 
         # Find the node_id for this persistent_id
-        for node_id, pid in project.dag.node_map.items():
+        source_node_id = None
+        for nid, pid in project.dag.node_map.items():
             if pid == persistent_id:
-                source_node_id = node_id
+                source_node_id = nid
                 break
 
         if source_node_id is None:
             continue
 
-        # Add edges for dependencies
-        for dep in branch.dependencies:
-            # If this branch has a dependency on another node,
-            # the other node must complete first.
-            # Edge goes from dependency target to this branch (target -> source)
-            graph.add_edge(dep.target_node_id, source_node_id)
+        # Add occurrence endpoint node
+        graph.add_node((source_node_id, Endpoint.OCCURRENCE))
 
-    # Compute layers using topological sort
-    # Nodes with no incoming edges are at layer 0
-    # Each node is at max(predecessor_layers) + 1
-    layers: dict[NodeId, int] = {}
+        # Add possible world endpoint nodes and implicit dependencies
+        for pw in branch.possible_worlds:
+            pw_node = (NodeId(pw.id), Endpoint.OCCURRENCE)
+            graph.add_node(pw_node)
+            # Implicit: occurrence -> possible_world
+            graph.add_edge((source_node_id, Endpoint.OCCURRENCE), pw_node)
+
+        # Add explicit dependencies
+        for dep in branch.dependencies:
+            # Dependency: source[source_endpoint] >= target[target_endpoint]
+            # Creates edge: target[target_endpoint] -> source[source_endpoint]
+            graph.add_edge(
+                (dep.target_node_id, dep.target_endpoint),
+                (source_node_id, dep.source_endpoint),
+            )
+
+    # Compute endpoint layers using topological sort
+    endpoint_layers: dict[tuple[NodeId, Endpoint], int] = {}
 
     try:
-        # Try topological sort (works if DAG is acyclic)
-        for node_id in nx.topological_sort(graph):
-            predecessors = list(graph.predecessors(node_id))
+        # Topological sort on endpoint graph
+        for endpoint in nx.topological_sort(graph):
+            predecessors = list(graph.predecessors(endpoint))
             if not predecessors:
-                layers[node_id] = 0
+                endpoint_layers[endpoint] = 0
             else:
-                layers[node_id] = max(layers[pred] for pred in predecessors) + 1
-    except nx.NetworkXError:
+                endpoint_layers[endpoint] = (
+                    max(endpoint_layers[pred] for pred in predecessors) + 1
+                )
+    except (nx.NetworkXError, nx.NetworkXUnfeasible):
         # Graph has cycles - fall back to simple layout
-        # Assign all nodes to layer 0
-        for node_id in graph.nodes():
-            layers[node_id] = 0
+        for endpoint in graph.nodes():
+            endpoint_layers[endpoint] = 0
+
+    # Map node layers: position each node based on its START endpoint layer
+    # (for tasks) or OCCURRENCE endpoint layer (for branches)
+    node_layers: dict[NodeId, int] = {}
+    for endpoint_tuple, layer in endpoint_layers.items():
+        node_id: NodeId = endpoint_tuple[0]
+        endpoint_type: Endpoint = endpoint_tuple[1]
+        # Position tasks at their START layer, branches at their OCCURRENCE layer
+        if endpoint_type == Endpoint.START or endpoint_type == Endpoint.OCCURRENCE:
+            if node_id not in node_layers:
+                node_layers[node_id] = layer
+            else:
+                # If we've seen this node before (shouldn't happen for start/occurrence)
+                # take the max
+                node_layers[node_id] = max(node_layers[node_id], layer)
 
     # Group nodes by layer
     nodes_by_layer: dict[int, list[NodeId]] = defaultdict(list)
-    for node_id, layer in layers.items():
-        nodes_by_layer[layer].append(node_id)
+    for node_id, layer in node_layers.items():
+        # Only include nodes that are in the current DAG
+        if node_id in project.dag.node_map:
+            nodes_by_layer[layer].append(node_id)
 
-    # Compute positions
+    # Compute positions (horizontal layout: x increases with layer)
     positions: dict[NodeId, QPointF] = {}
 
     # Layout constants
     node_width = 200
     node_height = 80
-    horizontal_spacing = 50
-    vertical_spacing = 100
+    horizontal_spacing = 150  # Space between layers (horizontal)
+    vertical_spacing = 50  # Space between nodes in same layer (vertical)
 
     for layer_num, node_ids in nodes_by_layer.items():
-        # Y position based on layer
-        y = layer_num * (node_height + vertical_spacing)
+        # X position based on layer (time flows left to right)
+        x = layer_num * (node_width + horizontal_spacing)
 
-        # X positions: center the layer horizontally
-        layer_width = (
-            len(node_ids) * node_width + (len(node_ids) - 1) * horizontal_spacing
+        # Y positions: center the layer vertically
+        layer_height = (
+            len(node_ids) * node_height + (len(node_ids) - 1) * vertical_spacing
         )
-        start_x = -layer_width / 2
+        start_y = -layer_height / 2
 
         for i, node_id in enumerate(node_ids):
-            x = start_x + i * (node_width + horizontal_spacing)
+            y = start_y + i * (node_height + vertical_spacing)
             positions[node_id] = QPointF(x, y)
 
     return positions
