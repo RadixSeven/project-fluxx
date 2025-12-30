@@ -166,7 +166,7 @@ class Task(BaseModel):
     )
 
     # Duration distribution (for leaf tasks only)
-    duration_distribution: DurationDistribution | None = Field(
+    duration_distribution: Triangular | ShiftedLognormal | None = Field(
         default=None,
         description="Duration distribution for leaf tasks (work-hours)",
     )

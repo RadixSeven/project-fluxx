@@ -24,8 +24,10 @@ from fluxx.data.models import (
     PersistentTask,
     PossibleWorld,
     Project,
+    ShiftedLognormal,
     Task,
     TaskId,
+    Triangular,
     WorkerId,
 )
 from fluxx.data.validation import validate_dag, validate_dependency
@@ -82,25 +84,19 @@ def _finalize_dag_operation(
     )
 
     # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
+    updated_project = project.model_copy(
+        update={
+            "metadata": project.metadata.model_copy(
+                update={"last_modified": datetime.now(UTC)}
+            ),
+            "dag": project.dag.model_copy(
+                update={"current_version_id": new_version_id}
+            ),
+            "persistent_tasks": new_persistent_tasks,
+            "persistent_branches": new_persistent_branches,
+            "history_events": project.history_events + [event],
+            "current_event_id": event_id,
+        }
     )
 
     # Validate the updated project
@@ -117,7 +113,7 @@ def add_task(
     title: str,
     description: str,
     parent_id: TaskId | None = None,
-    duration_distribution: DurationDistribution | None = None,
+    duration_distribution: Triangular | ShiftedLognormal | None = None,
     allowed_workers: list[WorkerId] | None = None,
 ) -> tuple[Project, TaskId]:
     """Add a new task to the project.
@@ -216,27 +212,19 @@ def add_task(
     )
 
     # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(
-            update={"current_version_id": new_version_id, "node_map": new_node_map}
-        ),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
+    updated_project = project.model_copy(
+        update={
+            "metadata": project.metadata.model_copy(
+                update={"last_modified": datetime.now(UTC)}
+            ),
+            "dag": project.dag.model_copy(
+                update={"current_version_id": new_version_id, "node_map": new_node_map}
+            ),
+            "persistent_tasks": new_persistent_tasks,
+            "persistent_branches": new_persistent_branches,
+            "history_events": project.history_events + [event],
+            "current_event_id": event_id,
+        }
     )
 
     # Validate the updated project
@@ -335,27 +323,19 @@ def add_branch(
     )
 
     # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(
-            update={"current_version_id": new_version_id, "node_map": new_node_map}
-        ),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
+    updated_project = project.model_copy(
+        update={
+            "metadata": project.metadata.model_copy(
+                update={"last_modified": datetime.now(UTC)}
+            ),
+            "dag": project.dag.model_copy(
+                update={"current_version_id": new_version_id, "node_map": new_node_map}
+            ),
+            "persistent_tasks": new_persistent_tasks,
+            "persistent_branches": new_persistent_branches,
+            "history_events": project.history_events + [event],
+            "current_event_id": event_id,
+        }
     )
 
     # Validate the updated project

@@ -26,12 +26,13 @@ from fluxx.data.models import (
     DAGId,
     DAGVersionId,
     Dependency,
-    DurationDistribution,
     NodeId,
     PossibleWorld,
     Project,
     ProjectMetadata,
+    ShiftedLognormal,
     TaskId,
+    Triangular,
     Worker,
     WorkerId,
 )
@@ -213,7 +214,7 @@ class ProjectController(QObject):
         title: str,
         description: str = "",
         parent_id: TaskId | None = None,
-        duration_distribution: DurationDistribution | None = None,
+        duration_distribution: Triangular | ShiftedLognormal | None = None,
         allowed_workers: list[WorkerId] | None = None,
     ) -> TaskId:
         """Create a new task.

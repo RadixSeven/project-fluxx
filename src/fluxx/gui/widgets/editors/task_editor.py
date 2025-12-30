@@ -223,12 +223,17 @@ class TaskEditor(QWidget):
 
         if distribution is None:
             self.distribution_type.setCurrentText("None")
+            self._clear_distribution_params()
         elif isinstance(distribution, Triangular):
             self.distribution_type.setCurrentText("Triangular")
             self._setup_triangular_fields(distribution)
         elif isinstance(distribution, ShiftedLognormal):
             self.distribution_type.setCurrentText("Shifted Lognormal")
             self._setup_lognormal_fields(distribution)
+        else:
+            # Fallback for unknown or base class instance
+            self.distribution_type.setCurrentText("None")
+            self._clear_distribution_params()
 
         self.distribution_type.blockSignals(False)
 
