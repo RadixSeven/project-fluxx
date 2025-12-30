@@ -9,7 +9,7 @@ def test_main_window_creation(qtbot: QtBot) -> None:
     """Test creating the main window."""
     window = MainWindow()
     qtbot.addWidget(window)
-    assert window.windowTitle() == "Project Fluxx"
+    assert window.windowTitle() == "Project Fluxx - Untitled"
 
 
 def test_main_window_geometry(qtbot: QtBot) -> None:

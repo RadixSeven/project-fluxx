@@ -1,0 +1,352 @@
+"""Central controller managing Project state and coordinating all GUI operations."""
+
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from PyQt6.QtCore import QObject, pyqtSignal
+
+from fluxx.data import (
+    add_branch,
+    add_dependency,
+    add_task,
+    can_redo,
+    can_undo,
+    load_project,
+    redo,
+    remove_dependency,
+    save_project,
+    undo,
+    update_branch,
+    update_task,
+)
+from fluxx.data.models import (
+    DAG,
+    BranchId,
+    DAGId,
+    DAGVersionId,
+    Dependency,
+    DurationDistribution,
+    NodeId,
+    PossibleWorld,
+    Project,
+    ProjectMetadata,
+    TaskId,
+    WorkerId,
+)
+
+
+class ProjectController(QObject):
+    """Controller managing all Project state and operations.
+
+    This is the central coordinator that all GUI widgets interact with.
+    It maintains the current Project state, handles all modifications,
+    and emits signals when state changes occur.
+
+    Signals:
+        project_changed: Emitted when the Project instance changes
+        selection_changed: Emitted when the selected node changes
+        file_path_changed: Emitted when the current file path changes
+        modified_changed: Emitted when the modified state changes
+    """
+
+    # Qt signals
+    project_changed = pyqtSignal(Project)
+    selection_changed = pyqtSignal(object)  # Optional[NodeId]
+    file_path_changed = pyqtSignal(object)  # Optional[Path]
+    modified_changed = pyqtSignal(bool)
+
+    def __init__(self) -> None:
+        """Initialize the controller with an empty project."""
+        super().__init__()
+        self._project: Project | None = None
+        self._file_path: Path | None = None
+        self._modified: bool = False
+        self._selected_node_id: NodeId | None = None
+
+        # Create default empty project
+        self.new_project("Untitled")
+
+    def get_project(self) -> Project:
+        """Get the current project.
+
+        Returns:
+            Current Project instance
+
+        Raises:
+            RuntimeError: If no project is loaded (should never happen)
+        """
+        if self._project is None:
+            raise RuntimeError("No project loaded")
+        return self._project
+
+    def get_file_path(self) -> Path | None:
+        """Get the current file path.
+
+        Returns:
+            Path to current file, or None if not saved
+        """
+        return self._file_path
+
+    def is_modified(self) -> bool:
+        """Check if project has unsaved changes.
+
+        Returns:
+            True if project has been modified since last save
+        """
+        return self._modified
+
+    def get_selected_node_id(self) -> NodeId | None:
+        """Get the currently selected node ID.
+
+        Returns:
+            NodeId of selected node, or None if no selection
+        """
+        return self._selected_node_id
+
+    def _set_project(self, project: Project, mark_modified: bool = True) -> None:
+        """Set the current project and emit signals.
+
+        Args:
+            project: New project instance
+            mark_modified: Whether to mark project as modified
+        """
+        self._project = project
+
+        if mark_modified and not self._modified:
+            self._modified = True
+            self.modified_changed.emit(True)
+
+        self.project_changed.emit(project)
+
+    def _set_file_path(self, path: Path | None) -> None:
+        """Set the current file path and emit signal.
+
+        Args:
+            path: New file path, or None to clear
+        """
+        self._file_path = path
+        self.file_path_changed.emit(path)
+
+    def _clear_modified(self) -> None:
+        """Clear the modified flag and emit signal."""
+        if self._modified:
+            self._modified = False
+            self.modified_changed.emit(False)
+
+    # File operations
+
+    def new_project(self, name: str) -> None:
+        """Create a new empty project.
+
+        Args:
+            name: Name for the new project
+        """
+        now = datetime.now(UTC)
+        metadata = ProjectMetadata(
+            name=name,
+            created=now,
+            last_modified=now,
+        )
+        dag = DAG(
+            id=DAGId(f"dag_{now.timestamp()}"),
+            current_version_id=DAGVersionId(f"v_{now.timestamp()}"),
+        )
+
+        project = Project(
+            metadata=metadata,
+            dag=dag,
+            workers=[],
+        )
+
+        self._project = project
+        self._set_file_path(None)
+        self._clear_modified()
+        self._selected_node_id = None
+        self.project_changed.emit(project)
+        self.selection_changed.emit(None)
+
+    def open_project(self, path: Path) -> None:
+        """Open a project from a file.
+
+        Args:
+            path: Path to project file
+
+        Raises:
+            Exception: If file cannot be loaded
+        """
+        project = load_project(path)
+        self._project = project
+        self._set_file_path(path)
+        self._clear_modified()
+        self._selected_node_id = None
+        self.project_changed.emit(project)
+        self.selection_changed.emit(None)
+
+    def save_project(self) -> None:
+        """Save project to current file.
+
+        Raises:
+            ValueError: If no file path is set (use save_project_as first)
+        """
+        if self._file_path is None:
+            raise ValueError("No file path set - use save_project_as")
+
+        save_project(self.get_project(), self._file_path)
+        self._clear_modified()
+
+    def save_project_as(self, path: Path) -> None:
+        """Save project to a new file.
+
+        Args:
+            path: Path to save project to
+        """
+        save_project(self.get_project(), path)
+        self._set_file_path(path)
+        self._clear_modified()
+
+    # Node operations
+
+    def create_task(
+        self,
+        title: str,
+        description: str = "",
+        parent_id: TaskId | None = None,
+        duration_distribution: DurationDistribution | None = None,
+        allowed_workers: list[WorkerId] | None = None,
+    ) -> TaskId:
+        """Create a new task.
+
+        Args:
+            title: Task title
+            description: Task description
+            parent_id: Parent node ID (for subtasks)
+            duration_distribution: Duration distribution (for leaf tasks)
+            allowed_workers: List of allowed worker IDs
+
+        Returns:
+            ID of created task
+        """
+        project, task_id = add_task(
+            self.get_project(),
+            title=title,
+            description=description,
+            parent_id=parent_id,
+            duration_distribution=duration_distribution,
+            allowed_workers=allowed_workers or [],
+        )
+        self._set_project(project)
+        return task_id
+
+    def update_task(self, task_id: TaskId, **kwargs: Any) -> None:
+        """Update a task's properties.
+
+        Args:
+            task_id: ID of task to update
+            **kwargs: Fields to update (title, description, etc.)
+        """
+        project = update_task(self.get_project(), task_id, **kwargs)
+        self._set_project(project)
+
+    def create_branch(
+        self,
+        title: str,
+        description: str = "",
+        possible_worlds: list[PossibleWorld] | None = None,
+    ) -> BranchId:
+        """Create a new branch.
+
+        Args:
+            title: Branch title
+            description: Branch description
+            possible_worlds: List of possible worlds
+
+        Returns:
+            ID of created branch
+        """
+        project, branch_id = add_branch(
+            self.get_project(),
+            title=title,
+            description=description,
+            possible_worlds=possible_worlds or [],
+        )
+        self._set_project(project)
+        return branch_id
+
+    def update_branch(self, branch_id: BranchId, **kwargs: Any) -> None:
+        """Update a branch's properties.
+
+        Args:
+            branch_id: ID of branch to update
+            **kwargs: Fields to update (title, description, possible_worlds)
+        """
+        project = update_branch(self.get_project(), branch_id, **kwargs)
+        self._set_project(project)
+
+    def add_dependency(self, source_node_id: NodeId, dependency: Dependency) -> None:
+        """Add a dependency to a node.
+
+        Args:
+            source_node_id: Source node ID
+            dependency: Dependency to add
+        """
+        project = add_dependency(self.get_project(), source_node_id, dependency)
+        self._set_project(project)
+
+    def remove_dependency(self, source_node_id: NodeId, dependency: Dependency) -> None:
+        """Remove a dependency from a node.
+
+        Args:
+            source_node_id: Source node ID
+            dependency: Dependency to remove
+        """
+        project = remove_dependency(self.get_project(), source_node_id, dependency)
+        self._set_project(project)
+
+    # History operations
+
+    def can_undo(self) -> bool:
+        """Check if undo is available.
+
+        Returns:
+            True if undo is possible
+        """
+        return can_undo(self.get_project())
+
+    def can_redo(self) -> bool:
+        """Check if redo is available.
+
+        Returns:
+            True if redo is possible
+        """
+        return can_redo(self.get_project())
+
+    def undo(self) -> None:
+        """Undo the last operation.
+
+        Raises:
+            UndoError: If there's nothing to undo
+        """
+        project = undo(self.get_project())
+        self._set_project(project)
+
+    def redo(self) -> None:
+        """Redo the next operation.
+
+        Raises:
+            UndoError: If there's nothing to redo
+        """
+        project = redo(self.get_project())
+        self._set_project(project)
+
+    # Selection
+
+    def select_node(self, node_id: NodeId | None) -> None:
+        """Select a node.
+
+        Args:
+            node_id: Node ID to select, or None to clear selection
+        """
+        if self._selected_node_id != node_id:
+            self._selected_node_id = node_id
+            self.selection_changed.emit(node_id)
