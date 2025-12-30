@@ -4,7 +4,7 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
-from fluxx.data.models import NodeId
+from fluxx.data.models import ConstraintType, NodeId
 from fluxx.gui.widgets.dag_view.edge_item import EdgeItem
 
 
@@ -21,7 +21,26 @@ def test_edge_item_initialization() -> None:
     assert edge.target_id == target_id
     assert edge.source_pos == source_pos
     assert edge.target_pos == target_pos
+    assert edge.constraint_type == ConstraintType.GREATER_EQUAL
     assert edge._is_hovered is False
+
+
+def test_edge_item_initialization_with_constraint() -> None:
+    """Test EdgeItem initialization with explicit constraint type."""
+    source_id = NodeId("task_1")
+    target_id = NodeId("task_2")
+    source_pos = QPointF(100, 100)
+    target_pos = QPointF(300, 200)
+
+    edge = EdgeItem(
+        source_id,
+        target_id,
+        source_pos,
+        target_pos,
+        constraint_type=ConstraintType.EQUAL,
+    )
+
+    assert edge.constraint_type == ConstraintType.EQUAL
 
 
 def test_edge_item_path_creation() -> None:

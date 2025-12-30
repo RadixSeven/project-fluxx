@@ -163,7 +163,13 @@ class DAGGraphicsView(QGraphicsView):
                 target_pos = target_item.pos()
 
                 # Create edge item
-                edge = EdgeItem(node_id, dep.target_node_id, source_pos, target_pos)
+                edge = EdgeItem(
+                    node_id,
+                    dep.target_node_id,
+                    source_pos,
+                    target_pos,
+                    dep.constraint_type,
+                )
                 self._scene.addItem(edge)
                 self.edge_items.append(edge)
 

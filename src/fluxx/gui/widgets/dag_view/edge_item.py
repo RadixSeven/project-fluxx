@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from fluxx.data.models import NodeId
+from fluxx.data.models import ConstraintType, NodeId
 
 
 class EdgeItem(QGraphicsPathItem):
@@ -24,6 +24,7 @@ class EdgeItem(QGraphicsPathItem):
         target_id: NodeId,
         source_pos: QPointF,
         target_pos: QPointF,
+        constraint_type: ConstraintType = ConstraintType.GREATER_EQUAL,
     ) -> None:
         """Initialize edge item.
 
@@ -32,12 +33,14 @@ class EdgeItem(QGraphicsPathItem):
             target_id: Target node ID
             source_pos: Source node center position
             target_pos: Target node center position
+            constraint_type: Type of constraint (affects arrow direction)
         """
         super().__init__()
         self.source_id = source_id
         self.target_id = target_id
         self.source_pos = source_pos
         self.target_pos = target_pos
+        self.constraint_type = constraint_type
 
         # Hover state
         self._is_hovered = False
@@ -119,14 +122,28 @@ class EdgeItem(QGraphicsPathItem):
         self._draw_arrow(painter)
 
     def _draw_arrow(self, painter: QPainter) -> None:
-        """Draw an arrowhead at the target end.
+        """Draw an arrowhead at the end of the edge.
+
+        For GREATER_EQUAL constraints, the arrow points from target to source
+        (arrowhead at source). For EQUAL, it currently points from source to
+        target (arrowhead at target).
 
         Args:
             painter: Painter to use
         """
-        # Calculate arrow direction
-        dx = self.target_pos.x() - self.source_pos.x()
-        dy = self.target_pos.y() - self.source_pos.y()
+        # Determine arrowhead position and direction
+        if self.constraint_type == ConstraintType.GREATER_EQUAL:
+            # Arrow points FROM target TO source (arrowhead at source)
+            head_pos = self.source_pos
+            tail_pos = self.target_pos
+        else:
+            # Arrow points FROM source TO target (arrowhead at target)
+            head_pos = self.target_pos
+            tail_pos = self.source_pos
+
+        # Calculate arrow direction (from tail to head)
+        dx = head_pos.x() - tail_pos.x()
+        dy = head_pos.y() - tail_pos.y()
 
         # Normalize
         length = (dx * dx + dy * dy) ** 0.5
@@ -139,10 +156,10 @@ class EdgeItem(QGraphicsPathItem):
         # Arrow size
         arrow_size = 10.0
 
-        # Arrow tip position (slightly before target to avoid overlapping node)
+        # Arrow tip position (slightly before head node to avoid overlapping)
         tip_offset = 30.0  # Half the node width
-        tip_x = self.target_pos.x() - dx * tip_offset
-        tip_y = self.target_pos.y() - dy * tip_offset
+        tip_x = head_pos.x() - dx * tip_offset
+        tip_y = head_pos.y() - dy * tip_offset
 
         # Calculate arrow wing points
         # Perpendicular vector
