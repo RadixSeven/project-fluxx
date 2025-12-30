@@ -223,14 +223,19 @@ The application window is divided into two main panels:
 
 ### 4.2 DAG Panel
 
-#### 4.2.1 History Display
+#### 4.2.1 Control Bar
 
-Located at the top of the DAG panel (above the control bar):
-- Shows most recent history event
-- Dropdown button to show history tree view for navigation
-- User selects which historical DAG version to view/edit
+Located above the DAG view, contains:
+- **History Widget**: Small widget showing most recent history event with dropdown for history tree navigation
+  - Displays brief description of current history state
+  - Click dropdown to show history tree view for navigation
+  - User can select which historical DAG version to view/edit
+- **View Mode Toggle**: Radio buttons to switch between DAG display and list display
+- **Add Root Node**: Button to create a new node with no parent
+- **View Simulations**: Button to open simulation management (displays in editor panel)
+- **Edit Workers**: Button to open worker list editor (displays in editor panel)
 
-**Keyboard Shortcuts**:
+**Keyboard Shortcuts** (for history navigation):
 - **CTRL-Z**: Undo (navigate to parent history node)
 - **CTRL-Y**: Redo (navigate to child with most recent leaf descendant)
 
@@ -238,15 +243,7 @@ Located at the top of the DAG panel (above the control bar):
 - When editor control has focus: CTRL-Z/Y operate on the control
 - When no control has focus or no unapplied changes: CTRL-Z/Y operate on history
 
-#### 4.2.2 Control Bar
-
-Located above the DAG view (below history display), contains:
-- **View Mode Toggle**: Radio buttons to switch between DAG display and list display
-- **Add Root Node**: Button to create a new node with no parent
-- **View Simulations**: Button to open simulation management (displays in editor panel)
-- **Edit Workers**: Button to open worker list editor (displays in editor panel)
-
-#### 4.2.3 DAG Display Mode
+#### 4.2.2 DAG Display Mode
 
 **Layout**:
 - Auto-laid-out graph of nodes and dependencies
@@ -276,7 +273,7 @@ Located above the DAG view (below history display), contains:
 - Click on a possible world box to select its parent branch (opens in editor panel)
   - Exception: When in select-target-node mode, clicking selects it as dependency target
 
-#### 4.2.4 List Display Mode
+#### 4.2.3 List Display Mode
 
 **Layout**:
 - List of all nodes with titles
