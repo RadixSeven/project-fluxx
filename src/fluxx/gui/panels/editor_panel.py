@@ -2,8 +2,9 @@
 
 from PyQt6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
-from fluxx.data.models import NodeId
+from fluxx.data.models import NodeId, TaskId
 from fluxx.gui.controller import ProjectController
+from fluxx.gui.widgets.editors.task_editor import TaskEditor
 
 
 class EditorPanel(QWidget):
@@ -15,8 +16,6 @@ class EditorPanel(QWidget):
       - TaskEditor when task is selected
       - BranchEditor when branch is selected
       - WorkerEditor in workers mode
-
-    Currently a placeholder for Phase 3 implementation.
     """
 
     def __init__(self, controller: ProjectController) -> None:
@@ -40,14 +39,18 @@ class EditorPanel(QWidget):
         self.empty_widget.setLayout(empty_layout)
         self.stack.addWidget(self.empty_widget)
 
-        # Create placeholder editor widget
-        self.editor_widget = QWidget()
-        editor_layout = QVBoxLayout()
-        editor_label = QLabel("Editor - Coming Soon")
-        editor_label.setStyleSheet("font-size: 16px; padding: 20px;")
-        editor_layout.addWidget(editor_label)
-        self.editor_widget.setLayout(editor_layout)
-        self.stack.addWidget(self.editor_widget)
+        # Create task editor widget
+        self.task_editor = TaskEditor(controller)
+        self.stack.addWidget(self.task_editor)
+
+        # Create placeholder for branch editor
+        self.branch_editor_widget = QWidget()
+        branch_layout = QVBoxLayout()
+        branch_label = QLabel("Branch Editor - Coming Soon")
+        branch_label.setStyleSheet("font-size: 16px; padding: 20px;")
+        branch_layout.addWidget(branch_label)
+        self.branch_editor_widget.setLayout(branch_layout)
+        self.stack.addWidget(self.branch_editor_widget)
 
         # Main layout
         layout = QVBoxLayout()
@@ -77,6 +80,22 @@ class EditorPanel(QWidget):
             # Show empty state
             self.stack.setCurrentWidget(self.empty_widget)
         else:
-            # Show placeholder editor
-            # In Phase 3, this will switch to TaskEditor or BranchEditor
-            self.stack.setCurrentWidget(self.editor_widget)
+            # Determine if it's a task or branch
+            project = self.controller.get_project()
+
+            if selected_node_id not in project.dag.node_map:
+                self.stack.setCurrentWidget(self.empty_widget)
+                return
+
+            persistent_id = project.dag.node_map[selected_node_id]
+
+            if persistent_id in project.persistent_tasks:
+                # Show task editor
+                self.task_editor.load_task(TaskId(str(selected_node_id)))
+                self.stack.setCurrentWidget(self.task_editor)
+            elif persistent_id in project.persistent_branches:
+                # Show branch editor (placeholder for now)
+                self.stack.setCurrentWidget(self.branch_editor_widget)
+            else:
+                # Unknown node type
+                self.stack.setCurrentWidget(self.empty_widget)
