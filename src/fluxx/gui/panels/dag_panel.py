@@ -1,20 +1,19 @@
 """Left panel containing DAG visualization and list view."""
 
-from PyQt6.QtWidgets import QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from fluxx.gui.controller import ProjectController
+from fluxx.gui.panels.control_bar import ControlBar
 from fluxx.gui.widgets.dag_view.dag_graphics_view import DAGGraphicsView
+from fluxx.gui.widgets.list_view.node_list_widget import NodeListWidget
 
 
 class DAGPanel(QWidget):
     """Left panel showing DAG visualization or list view.
 
-    This panel will contain:
-    - Control bar with history label, view toggle, and Add Root Node button
+    This panel contains:
+    - Control bar with history label and view toggle button
     - Stacked widget switching between DAG graphics view and list view
-
-    Currently showing DAGGraphicsView (Phase 2).
-    Control bar and list view will be added in later phases.
     """
 
     def __init__(self, controller: ProjectController) -> None:
@@ -26,11 +25,36 @@ class DAGPanel(QWidget):
         super().__init__()
         self.controller = controller
 
+        # Create control bar
+        self.control_bar = ControlBar(controller)
+        self.control_bar.view_toggle_button.clicked.connect(self._switch_view)
+
+        # Create stacked widget for views
+        self.view_stack = QStackedWidget()
+
         # Create DAG graphics view
         self.dag_view = DAGGraphicsView(controller)
+        self.view_stack.addWidget(self.dag_view)
+
+        # Create list view
+        self.list_view = NodeListWidget(controller)
+        self.view_stack.addWidget(self.list_view)
+
+        # Start with DAG view
+        self.view_stack.setCurrentWidget(self.dag_view)
 
         # Layout
         layout = QVBoxLayout()
-        layout.addWidget(self.dag_view)
+        layout.addWidget(self.control_bar)
+        layout.addWidget(self.view_stack)
         layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
+
+    def _switch_view(self) -> None:
+        """Switch between DAG and List views."""
+        current_view = self.control_bar.get_current_view()
+
+        if current_view == "list":
+            self.view_stack.setCurrentWidget(self.list_view)
+        else:
+            self.view_stack.setCurrentWidget(self.dag_view)
