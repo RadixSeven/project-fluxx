@@ -1,8 +1,14 @@
 """Edge item for rendering dependencies between nodes."""
 
+from typing import Any
+
 from PyQt6.QtCore import QPointF
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPen
-from PyQt6.QtWidgets import QGraphicsPathItem, QStyleOptionGraphicsItem, QWidget
+from PyQt6.QtWidgets import (
+    QGraphicsPathItem,
+    QStyleOptionGraphicsItem,
+    QWidget,
+)
 
 from fluxx.data.models import NodeId
 
@@ -34,8 +40,16 @@ class EdgeItem(QGraphicsPathItem):
         self.source_pos = source_pos
         self.target_pos = target_pos
 
+        # Hover state
+        self._is_hovered = False
+
+        # Enable hover events
+        self.setAcceptHoverEvents(True)
+
         # Set visual properties
-        pen = QPen(QColor(100, 100, 100))
+        self._base_color = QColor(100, 100, 100)
+        self._hover_color = QColor(50, 100, 200)  # Blue when hovered
+        pen = QPen(self._base_color)
         pen.setWidth(2)
         self.setPen(pen)
 
@@ -90,6 +104,15 @@ class EdgeItem(QGraphicsPathItem):
         if painter is None:
             return
 
+        # Update pen color based on hover state
+        if self._is_hovered:
+            pen = QPen(self._hover_color)
+            pen.setWidth(3)
+        else:
+            pen = QPen(self._base_color)
+            pen.setWidth(2)
+        self.setPen(pen)
+
         # Draw the curved line
         super().paint(painter, option, widget)
 
@@ -141,4 +164,26 @@ class EdgeItem(QGraphicsPathItem):
         arrow_path.lineTo(wing2_x, wing2_y)
         arrow_path.closeSubpath()
 
-        painter.fillPath(arrow_path, QColor(100, 100, 100))
+        # Use hover color if hovered
+        arrow_color = self._hover_color if self._is_hovered else self._base_color
+        painter.fillPath(arrow_path, arrow_color)
+
+    def hoverEnterEvent(self, event: Any) -> None:  # noqa: N802
+        """Handle hover enter.
+
+        Args:
+            event: Hover event
+        """
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event: Any) -> None:  # noqa: N802
+        """Handle hover leave.
+
+        Args:
+            event: Hover event
+        """
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
