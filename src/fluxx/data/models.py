@@ -36,11 +36,12 @@ class ShiftedLognormal(DurationDistribution):
     """Shifted lognormal distribution.
 
     A lognormal distribution with minimum shifted from 0 to a specified value.
+    All durations are measured in work-hours.
     """
 
-    min: float = Field(description="Minimum duration")
-    mode: float = Field(description="Most likely duration")
-    percentile_95: float = Field(description="95th percentile duration")
+    min: float = Field(description="Minimum duration (work-hours)")
+    mode: float = Field(description="Most likely duration (work-hours)")
+    percentile_95: float = Field(description="95th percentile duration (work-hours)")
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "ShiftedLognormal":
@@ -53,11 +54,14 @@ class ShiftedLognormal(DurationDistribution):
 
 
 class Triangular(DurationDistribution):
-    """Triangular distribution."""
+    """Triangular distribution.
 
-    min: float = Field(description="Minimum duration")
-    mode: float = Field(description="Most likely duration")
-    max: float = Field(description="Maximum duration")
+    All durations are measured in work-hours.
+    """
+
+    min: float = Field(description="Minimum duration (work-hours)")
+    mode: float = Field(description="Most likely duration (work-hours)")
+    max: float = Field(description="Maximum duration (work-hours)")
 
     @model_validator(mode="after")
     def validate_parameters(self) -> "Triangular":
@@ -148,7 +152,8 @@ class Task(BaseModel):
 
     # Duration distribution (for leaf tasks only)
     duration_distribution: DurationDistribution | None = Field(
-        default=None, description="Duration distribution for leaf tasks"
+        default=None,
+        description="Duration distribution for leaf tasks (work-hours)",
     )
 
     # Dependencies
@@ -174,7 +179,8 @@ class Task(BaseModel):
         default=None, description="Worker ID who was actually assigned"
     )
     actual_duration: float | None = Field(
-        default=None, description="Actual duration taken. If set, task is done"
+        default=None,
+        description="Actual duration taken in work-hours. If set, task is done",
     )
 
 

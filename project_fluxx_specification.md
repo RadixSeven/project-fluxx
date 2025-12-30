@@ -23,13 +23,15 @@ The system has two types of nodes:
 
 ### 2.2 Duration Distributions
 
-Leaf tasks must have a duration distribution. Initial implementations will support:
+Leaf tasks must have a duration distribution. **All durations are measured in work-hours**.
 
-1. **Shifted Lognormal**: Specified by min, mode, and 95th percentile (fixed percentile)
+Initial implementations will support:
+
+1. **Shifted Lognormal**: Specified by min, mode, and 95th percentile (fixed percentile), all in work-hours
    - A shifted lognormal is a lognormal whose minimum is shifted from 0 to some other value by adding a constant
-   - If $L$ is a lognormally distributed random variable, $S = L + 5$ is a shifted lognormal with a minimum of 5
+   - If $L$ is a lognormally distributed random variable, $S = L + 5$ is a shifted lognormal with a minimum of 5 work-hours
 
-2. **Triangular**: Specified by min, mode, and max
+2. **Triangular**: Specified by min, mode, and max, all in work-hours
 
 Additional distributions will be added over time.
 
@@ -85,7 +87,7 @@ Task {
   # actual_duration can only be set if actual_start_time is set
   actual_start_time: optional datetime
   actual_assignee: optional worker id
-  actual_duration: optional duration
+  actual_duration: optional float (work-hours)
 }
 ```
 
@@ -127,9 +129,11 @@ Worker {
   name: string
   worker_id: optional string (for distinguishing same-named workers)
   description: optional string
-  hours_per_workday: float
+  hours_per_workday: float  # Used to convert work-hours to calendar days
 }
 ```
+
+The `hours_per_workday` field is used to convert task durations (measured in work-hours) to calendar time. For example, if a worker has `hours_per_workday = 6.0` and a task has a duration of 12 work-hours, the task will take 2 workdays for that worker to complete.
 
 ### 3.4 Duration Distribution Schemas
 

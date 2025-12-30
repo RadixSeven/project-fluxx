@@ -223,19 +223,19 @@ class TaskEditor(QWidget):
 
         # Create fields
         self.min_field = QLineEdit()
-        self.min_field.setPlaceholderText("Minimum")
+        self.min_field.setPlaceholderText("Minimum (work-hours)")
         self.min_field.textChanged.connect(self._on_distribution_param_changed)
-        self.distribution_params_layout.addRow("Min:", self.min_field)
+        self.distribution_params_layout.addRow("Min (work-hours):", self.min_field)
 
         self.mode_field = QLineEdit()
-        self.mode_field.setPlaceholderText("Most likely")
+        self.mode_field.setPlaceholderText("Most likely (work-hours)")
         self.mode_field.textChanged.connect(self._on_distribution_param_changed)
-        self.distribution_params_layout.addRow("Mode:", self.mode_field)
+        self.distribution_params_layout.addRow("Mode (work-hours):", self.mode_field)
 
         self.max_field = QLineEdit()
-        self.max_field.setPlaceholderText("Maximum")
+        self.max_field.setPlaceholderText("Maximum (work-hours)")
         self.max_field.textChanged.connect(self._on_distribution_param_changed)
-        self.distribution_params_layout.addRow("Max:", self.max_field)
+        self.distribution_params_layout.addRow("Max (work-hours):", self.max_field)
 
         # Populate if distribution provided (block signals to avoid triggering changes)
         if distribution is not None:
@@ -264,21 +264,23 @@ class TaskEditor(QWidget):
 
         # Create fields
         self.min_field = QLineEdit()
-        self.min_field.setPlaceholderText("Minimum")
+        self.min_field.setPlaceholderText("Minimum (work-hours)")
         self.min_field.textChanged.connect(self._on_distribution_param_changed)
-        self.distribution_params_layout.addRow("Min:", self.min_field)
+        self.distribution_params_layout.addRow("Min (work-hours):", self.min_field)
 
         self.mode_field = QLineEdit()
-        self.mode_field.setPlaceholderText("Most likely")
+        self.mode_field.setPlaceholderText("Most likely (work-hours)")
         self.mode_field.textChanged.connect(self._on_distribution_param_changed)
-        self.distribution_params_layout.addRow("Mode:", self.mode_field)
+        self.distribution_params_layout.addRow("Mode (work-hours):", self.mode_field)
 
         self.percentile_95_field = QLineEdit()
-        self.percentile_95_field.setPlaceholderText("95th percentile")
+        self.percentile_95_field.setPlaceholderText("95th percentile (work-hours)")
         self.percentile_95_field.textChanged.connect(
             self._on_distribution_param_changed
         )
-        self.distribution_params_layout.addRow("95th %:", self.percentile_95_field)
+        self.distribution_params_layout.addRow(
+            "95th % (work-hours):", self.percentile_95_field
+        )
 
         # Populate if distribution provided (block signals to avoid triggering changes)
         if distribution is not None:
