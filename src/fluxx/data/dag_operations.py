@@ -16,9 +16,11 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     DurationDistribution,
+    EventId,
     EventType,
     NodeId,
     PersistentBranch,
+    PersistentObjectId,
     PersistentTask,
     PossibleWorld,
     Project,
@@ -33,6 +35,81 @@ class DAGOperationError(Exception):
     """Raised when a DAG operation fails."""
 
     pass
+
+
+def _finalize_dag_operation(
+    project: Project,
+    new_version_id: DAGVersionId,
+    event_id: EventId,
+    event_type: EventType,
+    affected_nodes: list[NodeId],
+    new_persistent_tasks: dict[PersistentObjectId, PersistentTask],
+    new_persistent_branches: dict[PersistentObjectId, PersistentBranch],
+    operation_name: str,
+) -> Project:
+    """Create and validate a new project version after a DAG operation.
+
+    This helper function handles the common steps of:
+    1. Creating a DAGEvent
+    2. Creating an updated Project with new persistent objects
+    3. Validating the updated DAG
+    4. Returning the validated project
+
+    Args:
+        project: The original project
+        new_version_id: The new DAG version ID
+        event_id: The event ID for this operation
+        event_type: The type of event being created
+        affected_nodes: List of node IDs affected by this operation
+        new_persistent_tasks: Updated persistent tasks dictionary
+        new_persistent_branches: Updated persistent branches dictionary
+        operation_name: Name of the operation (for error messages)
+
+    Returns:
+        The validated updated project
+
+    Raises:
+        DAGOperationError: If validation fails
+    """
+    # Create event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now(UTC),
+        parent_event_id=project.current_event_id,
+        event_type=event_type,
+        affected_nodes=affected_nodes,
+        resulting_dag_version=new_version_id,
+    )
+
+    # Create updated project
+    updated_project = Project(
+        **project.model_dump(
+            exclude={
+                "dag",
+                "persistent_tasks",
+                "persistent_branches",
+                "history_events",
+                "current_event_id",
+                "metadata",
+            }
+        ),
+        metadata=project.metadata.model_copy(
+            update={"last_modified": datetime.now(UTC)}
+        ),
+        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
+        persistent_tasks=new_persistent_tasks,
+        persistent_branches=new_persistent_branches,
+        history_events=project.history_events + [event],
+        current_event_id=event_id,
+    )
+
+    # Validate the updated project
+    try:
+        validate_dag(updated_project)
+    except Exception as e:
+        raise DAGOperationError(f"Failed to {operation_name}: {e}") from e
+
+    return updated_project
 
 
 def add_task(
@@ -373,45 +450,16 @@ def add_dependency(
             id=pid, versions=new_versions_branch
         )
 
-    # Create event
-    event = DAGEvent(
-        id=event_id,
-        timestamp=datetime.now(UTC),
-        parent_event_id=project.current_event_id,
+    return _finalize_dag_operation(
+        project=project,
+        new_version_id=new_version_id,
+        event_id=event_id,
         event_type=EventType.NODE_MODIFIED,
         affected_nodes=[source_node_id],
-        resulting_dag_version=new_version_id,
+        new_persistent_tasks=new_persistent_tasks,
+        new_persistent_branches=new_persistent_branches,
+        operation_name="add dependency",
     )
-
-    # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
-    )
-
-    # Validate the updated project for cycles
-    try:
-        validate_dag(updated_project)
-    except Exception as e:
-        raise DAGOperationError(f"Failed to add dependency: {e}") from e
-
-    return updated_project
 
 
 def update_task(
@@ -520,45 +568,16 @@ def update_task(
             id=pid, versions=new_versions_branch
         )
 
-    # Create event
-    event = DAGEvent(
-        id=event_id,
-        timestamp=datetime.now(UTC),
-        parent_event_id=project.current_event_id,
+    return _finalize_dag_operation(
+        project=project,
+        new_version_id=new_version_id,
+        event_id=event_id,
         event_type=EventType.NODE_MODIFIED,
         affected_nodes=[node_id],
-        resulting_dag_version=new_version_id,
+        new_persistent_tasks=new_persistent_tasks,
+        new_persistent_branches=new_persistent_branches,
+        operation_name="update task",
     )
-
-    # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
-    )
-
-    # Validate the updated project
-    try:
-        validate_dag(updated_project)
-    except Exception as e:
-        raise DAGOperationError(f"Failed to update task: {e}") from e
-
-    return updated_project
 
 
 def update_branch(
@@ -651,45 +670,16 @@ def update_branch(
             id=pid, versions=new_versions_branch
         )
 
-    # Create event
-    event = DAGEvent(
-        id=event_id,
-        timestamp=datetime.now(UTC),
-        parent_event_id=project.current_event_id,
+    return _finalize_dag_operation(
+        project=project,
+        new_version_id=new_version_id,
+        event_id=event_id,
         event_type=EventType.NODE_MODIFIED,
         affected_nodes=[node_id],
-        resulting_dag_version=new_version_id,
+        new_persistent_tasks=new_persistent_tasks,
+        new_persistent_branches=new_persistent_branches,
+        operation_name="update branch",
     )
-
-    # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
-    )
-
-    # Validate the updated project
-    try:
-        validate_dag(updated_project)
-    except Exception as e:
-        raise DAGOperationError(f"Failed to update branch: {e}") from e
-
-    return updated_project
 
 
 def remove_dependency(
@@ -766,42 +756,13 @@ def remove_dependency(
             id=pid, versions=new_versions_branch
         )
 
-    # Create event
-    event = DAGEvent(
-        id=event_id,
-        timestamp=datetime.now(UTC),
-        parent_event_id=project.current_event_id,
+    return _finalize_dag_operation(
+        project=project,
+        new_version_id=new_version_id,
+        event_id=event_id,
         event_type=EventType.NODE_MODIFIED,
         affected_nodes=[source_node_id],
-        resulting_dag_version=new_version_id,
+        new_persistent_tasks=new_persistent_tasks,
+        new_persistent_branches=new_persistent_branches,
+        operation_name="remove dependency",
     )
-
-    # Create updated project
-    updated_project = Project(
-        **project.model_dump(
-            exclude={
-                "dag",
-                "persistent_tasks",
-                "persistent_branches",
-                "history_events",
-                "current_event_id",
-                "metadata",
-            }
-        ),
-        metadata=project.metadata.model_copy(
-            update={"last_modified": datetime.now(UTC)}
-        ),
-        dag=project.dag.model_copy(update={"current_version_id": new_version_id}),
-        persistent_tasks=new_persistent_tasks,
-        persistent_branches=new_persistent_branches,
-        history_events=project.history_events + [event],
-        current_event_id=event_id,
-    )
-
-    # Validate the updated project
-    try:
-        validate_dag(updated_project)
-    except Exception as e:
-        raise DAGOperationError(f"Failed to remove dependency: {e}") from e
-
-    return updated_project
