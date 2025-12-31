@@ -144,6 +144,16 @@ class MainWindow(QMainWindow):
         self.add_sibling_action.setEnabled(False)
         edit_menu.addAction(self.add_sibling_action)
 
+        # Simulation menu
+        simulation_menu = menubar.addMenu("&Simulation")
+        assert simulation_menu is not None  # addMenu() always returns a menu
+
+        # Run Simulation
+        run_simulation_action = QAction("&Run Simulation...", self)
+        run_simulation_action.setShortcut("Ctrl+R")
+        run_simulation_action.triggered.connect(self._on_run_simulation)
+        simulation_menu.addAction(run_simulation_action)
+
     def _create_panels(self) -> None:
         """Create two-panel layout with splitter."""
         # Create panels
@@ -498,3 +508,41 @@ class MainWindow(QMainWindow):
                 "Error",
                 f"Failed to add sibling: {e}",
             )
+
+    def _on_run_simulation(self) -> None:
+        """Handle Run Simulation menu action."""
+        from fluxx.gui.simulation import SimulationDialog
+
+        # Create and show simulation dialog
+        dialog = SimulationDialog(self.controller.get_project(), self)
+
+        # Connect to results signal
+        dialog.simulation_completed.connect(self._on_simulation_completed)
+
+        # Show dialog (modal)
+        try:
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Simulation Error",
+                f"Failed to run simulation: {e}",
+            )
+
+    def _on_simulation_completed(self, samples: list[object]) -> None:
+        """Handle simulation completion.
+
+        Args:
+            samples: List of Sample objects from simulation
+        """
+        from typing import cast
+
+        from fluxx.data.models import Sample
+        from fluxx.gui.simulation import SimulationResultsDialog
+
+        # Cast samples list (we know it contains Sample objects from signal)
+        sample_list = cast(list[Sample], samples)
+
+        # Show results in a new dialog
+        results_dialog = SimulationResultsDialog(sample_list, self)
+        results_dialog.show()
