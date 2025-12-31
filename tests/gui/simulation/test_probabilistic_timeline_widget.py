@@ -29,6 +29,7 @@ def simple_timeline_data() -> TimelineData:
     # Create statistics for two tasks
     task_a_stats = TaskStatistics(
         task_id=TaskId("A"),
+        task_title="Task A",
         occurrence_fraction=1.0,
         time_statistics=TimeStatistics(
             min_start_time=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
@@ -40,6 +41,7 @@ def simple_timeline_data() -> TimelineData:
 
     task_b_stats = TaskStatistics(
         task_id=TaskId("B"),
+        task_title="Task B",
         occurrence_fraction=0.8,
         time_statistics=TimeStatistics(
             min_start_time=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
@@ -66,6 +68,7 @@ def timeline_data_with_dependencies() -> TimelineData:
     """Create timeline data with dependencies."""
     task_a_stats = TaskStatistics(
         task_id=TaskId("A"),
+        task_title="Task A",
         occurrence_fraction=1.0,
         time_statistics=TimeStatistics(
             min_start_time=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
@@ -77,6 +80,7 @@ def timeline_data_with_dependencies() -> TimelineData:
 
     task_b_stats = TaskStatistics(
         task_id=TaskId("B"),
+        task_title="Task B",
         occurrence_fraction=1.0,
         time_statistics=TimeStatistics(
             min_start_time=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
@@ -256,6 +260,7 @@ def test_widget_handles_single_task(qtbot: QtBot) -> None:
         task_statistics={
             TaskId("A"): TaskStatistics(
                 task_id=TaskId("A"),
+                task_title="Task A",
                 occurrence_fraction=1.0,
                 time_statistics=TimeStatistics(
                     min_start_time=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
@@ -285,6 +290,7 @@ def test_widget_with_task_without_time_stats(qtbot: QtBot) -> None:
         task_statistics={
             TaskId("A"): TaskStatistics(
                 task_id=TaskId("A"),
+                task_title="Task A",
                 occurrence_fraction=0.0,
                 time_statistics=None,  # No time stats
             ),

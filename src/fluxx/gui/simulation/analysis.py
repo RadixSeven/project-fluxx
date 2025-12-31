@@ -184,6 +184,7 @@ class TaskStatistics:
     """Statistics for a single task across all samples."""
 
     task_id: TaskId
+    task_title: str  # Human-readable task name
     occurrence_fraction: float  # 0.0 to 1.0
     time_statistics: TimeStatistics | None  # None if never occurred
 
@@ -454,7 +455,10 @@ def compute_time_statistics(
 
 
 def calculate_task_statistics(
-    sample_times_list: list[SampleTaskTimes], num_samples: int, percentile: float
+    sample_times_list: list[SampleTaskTimes],
+    num_samples: int,
+    percentile: float,
+    task_titles: dict[TaskId, str],
 ) -> dict[TaskId, TaskStatistics]:
     """Calculate statistics for all tasks across samples.
 
@@ -462,6 +466,7 @@ def calculate_task_statistics(
         sample_times_list: Per-sample task times (includes leaf and parent tasks)
         num_samples: Total number of samples (for occurrence fraction)
         percentile: Percentile for inner markers (e.g., 90.0)
+        task_titles: Mapping from task ID to human-readable task title
 
     Returns:
         Dictionary mapping task ID to its statistics
@@ -487,8 +492,12 @@ def calculate_task_statistics(
         else:
             time_stats = None
 
+        # Get task title, fallback to ID if not found
+        task_title = task_titles.get(task_id, str(task_id))
+
         result[task_id] = TaskStatistics(
             task_id=task_id,
+            task_title=task_title,
             occurrence_fraction=occurrence_fraction,
             time_statistics=time_stats,
         )
@@ -525,10 +534,14 @@ def extract_timeline_data(
     # Add parent task times
     add_parent_task_times(sample_times_list, project)
 
+    # Build task titles mapping from project
+    all_tasks = get_all_tasks_from_project(project)
+    task_titles = {task.id: task.title for task in all_tasks}
+
     # Calculate statistics for all tasks
     num_samples = len(samples)
     task_statistics = calculate_task_statistics(
-        sample_times_list, num_samples, percentile
+        sample_times_list, num_samples, percentile, task_titles
     )
 
     # Find earliest and latest times for axis scaling

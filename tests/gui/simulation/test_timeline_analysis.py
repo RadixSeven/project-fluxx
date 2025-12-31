@@ -706,15 +706,22 @@ def test_calculate_task_statistics() -> None:
         ),
     ]
 
-    stats = calculate_task_statistics(sample_times_list, num_samples=2, percentile=90.0)
+    # Create task titles mapping
+    task_titles = {TaskId("A"): "Task A", TaskId("B"): "Task B"}
+
+    stats = calculate_task_statistics(
+        sample_times_list, num_samples=2, percentile=90.0, task_titles=task_titles
+    )
 
     # A occurs in 2/2 samples
     assert TaskId("A") in stats
+    assert stats[TaskId("A")].task_title == "Task A"
     assert stats[TaskId("A")].occurrence_fraction == 1.0
     assert stats[TaskId("A")].time_statistics is not None
 
     # B occurs in 1/2 samples
     assert TaskId("B") in stats
+    assert stats[TaskId("B")].task_title == "Task B"
     assert stats[TaskId("B")].occurrence_fraction == 0.5
     assert stats[TaskId("B")].time_statistics is not None
 

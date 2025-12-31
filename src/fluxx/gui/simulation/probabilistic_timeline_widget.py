@@ -167,7 +167,7 @@ class ProbabilisticTimelineWidget(QWidget):
 
         # Add occurrence fraction label
         occurrence_pct = stats_typed.occurrence_fraction * 100
-        label = f"{str(task_id)} ({occurrence_pct:.0f}%)"
+        label = f"{stats_typed.task_title} ({occurrence_pct:.0f}%)"
         self.ax.text(
             min_start,
             y_position,
@@ -302,7 +302,7 @@ class ProbabilisticTimelineWidget(QWidget):
         """
         # Set y-axis labels
         y_ticks = list(range(len(sorted_tasks)))
-        y_labels = [str(tid) for tid, _ in reversed(sorted_tasks)]
+        y_labels = [stats.task_title for _, stats in reversed(sorted_tasks)]
 
         self.ax.set_yticks(y_ticks)
         self.ax.set_yticklabels(y_labels)
