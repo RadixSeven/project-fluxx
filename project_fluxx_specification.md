@@ -937,6 +937,7 @@ When a run fails:
 - Inner markers: (1-P)th percentile start to Pth percentile end
 - Arrows show dependency relationships
 - Branch outcomes are implicit in the occurrence fraction.
+- Branch nodes are not shown in the probabilistic timeline; their outcomes are revealed through the occurrence fractions of tasks that depend on them.
 
 ## 9. History System
 
