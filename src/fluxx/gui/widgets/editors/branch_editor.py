@@ -585,6 +585,29 @@ class BranchEditor(QWidget):
             and not self.pending_changes["title"].strip()
         )
 
+    def is_dirty(self) -> bool:
+        """Check if the editor has unsaved changes.
+
+        Returns:
+            True if there are pending changes
+        """
+        return len(self.pending_changes) > 0
+
+    def apply_changes(self) -> bool:
+        """Apply pending changes.
+
+        Returns:
+            True if changes were applied successfully
+        """
+        if not self.is_dirty():
+            return True
+        self._on_apply()
+        return not self.is_dirty()
+
+    def revert_changes(self) -> None:
+        """Revert pending changes."""
+        self._on_revert()
+
     def _on_apply(self) -> None:
         """Apply pending changes to the branch."""
         if self.current_branch_id is None:

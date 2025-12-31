@@ -67,9 +67,21 @@ class ProjectController(QObject):
         self._file_path: Path | None = None
         self._modified: bool = False
         self._selected_node_id: NodeId | None = None
+        self._selection_validator: Any = None
 
         # Create default empty project
         self.new_project("Untitled")
+
+    def set_selection_validator(self, validator: Any) -> None:
+        """Set a validator function to check if selection can be changed.
+
+        The validator should take (new_node_id) and return True if selection
+        can proceed, False otherwise.
+
+        Args:
+            validator: Validator function or None
+        """
+        self._selection_validator = validator
 
     def get_project(self) -> Project:
         """Get the current project.
@@ -527,5 +539,7 @@ class ProjectController(QObject):
             node_id: Node ID to select, or None to clear selection
         """
         if self._selected_node_id != node_id:
+            if self._selection_validator and not self._selection_validator(node_id):
+                return
             self._selected_node_id = node_id
             self.selection_changed.emit(node_id)

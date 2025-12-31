@@ -1,6 +1,6 @@
 """Right panel containing node editors."""
 
-from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QMessageBox, QStackedWidget, QVBoxLayout, QWidget
 
 from fluxx.data.models import BranchId, NodeId, TaskId
 from fluxx.gui.controller import ProjectController
@@ -62,6 +62,9 @@ class EditorPanel(QWidget):
         # Connect to controller signals
         self.controller.selection_changed.connect(self._on_selection_changed)
 
+        # Register selection validator
+        self.controller.set_selection_validator(self._check_unsaved_changes)
+
         # Initialize view
         self._update_view()
 
@@ -72,6 +75,54 @@ class EditorPanel(QWidget):
             node_id: Selected node ID or None
         """
         self._update_view()
+
+    def _check_unsaved_changes(self, new_node_id: NodeId | None) -> bool:
+        """Check for unsaved changes in the current editor.
+
+        Args:
+            new_node_id: The ID of the node being navigated to
+
+        Returns:
+            True if it's safe to proceed, False to cancel navigation
+        """
+        current_widget = self.stack.currentWidget()
+
+        # Only task and branch editors have unsaved changes tracking
+        if current_widget not in (self.task_editor, self.branch_editor):
+            return True
+
+        # Need to cast to use is_dirty/apply_changes/revert_changes
+        # which are common to TaskEditor and BranchEditor
+        editor: TaskEditor | BranchEditor = current_widget  # type: ignore
+
+        if not editor.is_dirty():
+            return True
+
+        # Ask user
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Unsaved Changes")
+        msg.setText("The current node has unsaved changes.")
+        msg.setInformativeText(
+            "Do you want to apply them before leaving? "
+            "If you don't apply, changes will be lost."
+        )
+
+        apply_button = msg.addButton("Apply", QMessageBox.ButtonRole.AcceptRole)
+        revert_button = msg.addButton("Revert", QMessageBox.ButtonRole.DestructiveRole)
+        msg.addButton(QMessageBox.StandardButton.Cancel)
+
+        msg.setDefaultButton(apply_button)
+        msg.exec()
+
+        clicked_button = msg.clickedButton()
+
+        if clicked_button == apply_button:
+            return editor.apply_changes()
+        elif clicked_button == revert_button:
+            editor.revert_changes()
+            return True
+        else:  # Cancel
+            return False
 
     def _update_view(self) -> None:
         """Update the displayed editor based on selection."""
