@@ -226,7 +226,7 @@ class ProjectController(QObject):
             description: Task description
             parent_id: Parent node ID (for subtasks)
             duration_distribution: Duration distribution (for leaf tasks)
-            allowed_workers: List of allowed worker IDs
+            allowed_workers: List of allowed worker IDs (None means all workers allowed)
 
         Returns:
             ID of created task
@@ -237,7 +237,7 @@ class ProjectController(QObject):
             description=description,
             parent_id=parent_id,
             duration_distribution=duration_distribution,
-            allowed_workers=allowed_workers or [],
+            allowed_workers=allowed_workers,
         )
         self._set_project(project)
         return task_id

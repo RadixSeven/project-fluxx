@@ -191,8 +191,9 @@ def is_worker_allowed_for_task(task: Task, worker_id: WorkerId) -> bool:
     Returns:
         True if worker is allowed (or no whitelist exists), False otherwise
     """
-    # If no whitelist (None or empty list), all workers are allowed
-    if task.allowed_workers is None or len(task.allowed_workers) == 0:
+    # If no whitelist (None), all workers are allowed
+    # Note: Empty lists are normalized to None by the Task model validator
+    if task.allowed_workers is None:
         return True
 
     # Otherwise, worker must be in whitelist

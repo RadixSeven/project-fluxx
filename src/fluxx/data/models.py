@@ -179,12 +179,30 @@ class Task(BaseModel):
     # Worker constraints
     allowed_workers: list[WorkerId] | None = Field(
         default=None,
-        description="Whitelist of worker IDs. If None, all workers are allowed",
+        description=(
+            "Whitelist of worker IDs. If None, all workers are allowed. "
+            "Empty lists are automatically normalized to None. "
+            "Use get_allowed_worker_ids() method to access this field safely."
+        ),
     )
     excluded_worker_tasks: list[TaskId] = Field(
         default_factory=list,
         description="Task IDs whose assignees cannot be assigned to this task",
     )
+
+    @field_validator("allowed_workers")
+    @classmethod
+    def normalize_allowed_workers(
+        cls, v: list[WorkerId] | None
+    ) -> list[WorkerId] | None:
+        """Normalize empty list to None for consistent semantics.
+
+        Both None and empty list mean "all workers allowed", but we normalize
+        to None for uniform internal representation.
+        """
+        if v is not None and len(v) == 0:
+            return None
+        return v
 
     # Completion tracking
     actual_start_time: str | None = Field(
@@ -197,6 +215,23 @@ class Task(BaseModel):
         default=None,
         description="Actual duration taken in work-hours. If set, task is done",
     )
+
+    def get_allowed_worker_ids(self, all_workers: list[WorkerId]) -> list[WorkerId]:
+        """Get the list of workers allowed to work on this task.
+
+        Args:
+            all_workers: Complete list of available worker IDs
+
+        Returns:
+            List of worker IDs allowed for this task.
+            Returns all_workers if no restriction, or the whitelist if restricted.
+        """
+        # None means "all workers allowed" (empty lists are normalized to None)
+        if self.allowed_workers is None:
+            return all_workers
+
+        # Otherwise return the restricted whitelist
+        return self.allowed_workers
 
 
 class Branch(BaseModel):
