@@ -514,3 +514,16 @@ def test_multiple_workers_same_task_completion_time(
     state.worker_states[WorkerId("w2")].available_time = completion_time
 
     assert state.get_next_event_time() == completion_time
+
+
+def test_is_task_reachable_nonexistent_task(
+    simple_project: Project, start_date: datetime, base_workers: list[Worker]
+) -> None:
+    """Test is_task_reachable with a nonexistent task ID."""
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Task that doesn't exist in the project
+    nonexistent_task = TaskId("nonexistent")
+
+    # Should return False for nonexistent tasks
+    assert not state.is_task_reachable(nonexistent_task)

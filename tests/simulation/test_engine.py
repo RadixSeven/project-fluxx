@@ -173,6 +173,28 @@ def test_sample_task_duration_no_distribution() -> None:
         sample_task_duration(task, rng)
 
 
+def test_sample_task_duration_unknown_distribution() -> None:
+    """Test error when task has an unknown distribution type."""
+    from typing import cast
+
+    # Create a task with a valid distribution first
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Then directly assign a bogus distribution using cast to bypass type checking
+    # This simulates a corrupted state or future distribution type not yet handled
+    task.duration_distribution = cast(Triangular, "not a distribution")
+
+    rng = np.random.default_rng(seed=42)
+
+    with pytest.raises(ValueError, match="Unknown distribution type"):
+        sample_task_duration(task, rng)
+
+
 def test_sample_in_progress_task_remaining_duration() -> None:
     """Test sampling remaining duration for in-progress task."""
     task = Task(
@@ -827,19 +849,15 @@ def test_create_failed_sample_with_branch() -> None:
 
 
 def test_run_single_sample_advance_exception() -> None:
-    """Test simulation handling advance_to_next_event ValueError."""
-    # This is difficult to trigger naturally since advance_to_next_event
-    # only raises ValueError when there's no next event, which detect_deadlock
-    # should catch first. But we can test the error path by creating a scenario
-    # where the simulation gets stuck.
+    """Test simulation handling advance_to_next_event ValueError using mocking."""
+    from unittest.mock import patch
 
-    # Create a minimal project that will trigger the exception path
+    # Create a simple project with one task
     task = Task(
         id=TaskId("t1"),
         title="Task 1",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
-        allowed_workers=[WorkerId("w1")],
     )
 
     version_id = DAGVersionId("v1")
@@ -867,14 +885,19 @@ def test_run_single_sample_advance_exception() -> None:
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
 
-    # No workers - will cause deadlock
-    workers: list[Worker] = []
+    workers = [Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)]
     rng = np.random.default_rng(seed=42)
 
-    sample = run_single_sample(project, workers, start, 0, rng)
+    # Mock advance_to_next_event to raise ValueError
+    # This tests the defensive error handling path
+    with patch("fluxx.simulation.engine.advance_to_next_event") as mock_advance:
+        mock_advance.side_effect = ValueError("No next event")
 
-    # Should fail
-    assert len(sample.failed_tasks) > 0
+        sample = run_single_sample(project, workers, start, 0, rng)
+
+        # Should handle the ValueError and return a failed sample
+        assert len(sample.failed_tasks) > 0
+        assert TaskId("t1") in sample.failed_tasks
 
 
 def test_all_tasks_completed_with_unchosen_possible_world() -> None:

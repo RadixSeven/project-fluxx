@@ -927,3 +927,18 @@ def test_get_eligible_tasks_skips_old_version_tasks(
     # Should only include t1 (t2 depends on t1, old task isn't in current version)
     assert len(eligible) == 1
     assert eligible[0].id == TaskId("t1")
+
+
+def test_is_branch_eligible_nonexistent_branch(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_branch_eligible with a nonexistent branch ID."""
+    from fluxx.simulation.scheduler import is_branch_eligible
+
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Branch that doesn't exist in the project
+    nonexistent_branch = BranchId("nonexistent")
+
+    # Should return False for nonexistent branches
+    assert not is_branch_eligible(nonexistent_branch, state)

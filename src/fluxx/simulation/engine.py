@@ -468,9 +468,9 @@ def run_single_sample(
         try:
             advance_to_next_event(state)
         except ValueError:
-            # No next event and no actions - deadlock
-            # This should be caught by detect_deadlock above, but we handle it
-            # defensively in case of logic errors
+            # Defensive: No next event and no actions - deadlock
+            # This should always be caught by detect_deadlock above,
+            # but we handle it defensively in case of logic errors.
             return create_failed_sample(sample_id, state)
 
 
