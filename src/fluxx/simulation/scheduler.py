@@ -74,12 +74,15 @@ def is_branch_node(node_id: NodeId, state: SimulationState) -> bool:
     return persistent_id in state.project.persistent_branches
 
 
-def is_dependency_satisfied(dep: Dependency, state: SimulationState) -> bool:
+def is_dependency_satisfied(
+    dep: Dependency, state: SimulationState, source_task: Task | None = None
+) -> bool:
     """Check if a single dependency is satisfied.
 
     Args:
         dep: The dependency to check
         state: Current simulation state
+        source_task: The task that has this dependency (needed for parent task logic)
 
     Returns:
         True if the dependency is satisfied, False otherwise
@@ -108,12 +111,43 @@ def is_dependency_satisfied(dep: Dependency, state: SimulationState) -> bool:
     if is_task_node(target_node_id, state):
         task_id = TaskId(node_str)
 
+        # Get the task to check if it's a parent task
+        try:
+            target_task = state.get_task(task_id)
+        except KeyError:
+            return False
+
+        # Handle parent task dependencies specially
+        is_parent_task = len(target_task.children) > 0
+
         if is_dependency_on_task_end(dep):
-            # Task must be completed
-            return state.is_task_completed(task_id)
+            if is_parent_task:
+                # Parent task END: satisfied when all children complete
+                return all(
+                    state.is_task_completed(child_id)
+                    for child_id in target_task.children
+                )
+            else:
+                # Regular task must be completed
+                return state.is_task_completed(task_id)
         elif is_dependency_on_task_start(dep):
-            # Task must have started (in progress or completed)
-            return state.has_task_started(task_id)
+            if is_parent_task:
+                # Parent task START depends on whether source is a child or not
+                # If source is a child: always satisfied (children can start freely)
+                # If source is not a child: satisfied when any child has started
+                if source_task and source_task.parent_id == task_id:
+                    # Source is a child of this parent - always satisfied
+                    # This allows children to start, which causes parent to "start"
+                    return True
+                else:
+                    # Source is not a child - parent starts when first child starts
+                    return any(
+                        state.has_task_started(child_id)
+                        for child_id in target_task.children
+                    )
+            else:
+                # Regular task must have started (in progress or completed)
+                return state.has_task_started(task_id)
         else:
             # Unknown endpoint for task
             return False
@@ -138,7 +172,10 @@ def are_all_dependencies_satisfied(task: Task, state: SimulationState) -> bool:
     Returns:
         True if all dependencies are satisfied, False otherwise
     """
-    return all(is_dependency_satisfied(dep, state) for dep in task.dependencies)
+    return all(
+        is_dependency_satisfied(dep, state, source_task=task)
+        for dep in task.dependencies
+    )
 
 
 # Worker eligibility functions
@@ -230,10 +267,11 @@ def is_task_eligible(task: Task, state: SimulationState) -> bool:
     """Check if a task is eligible to start.
 
     A task is eligible if:
-    1. It has not already been completed
-    2. It is not currently in progress
-    3. All its dependencies are satisfied
-    4. At least one eligible worker is available
+    1. It is not a parent task (parent tasks are never executed directly)
+    2. It has not already been completed
+    3. It is not currently in progress
+    4. All its dependencies are satisfied
+    5. At least one eligible worker is available
 
     Args:
         task: The task to check
@@ -243,6 +281,11 @@ def is_task_eligible(task: Task, state: SimulationState) -> bool:
         True if task can start, False otherwise
     """
     task_id = task.id
+
+    # Parent tasks (tasks with children) are never executed directly
+    # Their start/end times are determined by their children
+    if len(task.children) > 0:
+        return False
 
     # Must not be completed
     if state.is_task_completed(task_id):

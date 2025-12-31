@@ -245,28 +245,32 @@ class SimulationState:
         return True
 
     def all_tasks_completed(self) -> bool:
-        """Check if all reachable tasks have been completed.
+        """Check if all reachable leaf tasks have been completed.
 
-        Only counts tasks that are reachable given the current branch resolutions.
-        Tasks that depend on unchosen possible worlds are not counted.
+        Only counts leaf tasks (tasks without children) that are reachable given
+        the current branch resolutions. Parent tasks are not counted because they
+        are never executed directly - their completion is implicit when all their
+        children complete. Tasks that depend on unchosen possible worlds are not
+        counted.
 
         Returns:
-            True if all reachable tasks are completed, False otherwise
+            True if all reachable leaf tasks are completed, False otherwise
         """
-        # Get all reachable task node IDs from the node map
-        reachable_task_ids: set[TaskId] = set()
+        # Get all reachable leaf task node IDs from the node map
+        reachable_leaf_task_ids: set[TaskId] = set()
         for node_id, persistent_id in self.project.dag.node_map.items():
             # Check if this is a task (not a branch)
             if persistent_id in self.project.persistent_tasks:
                 # Check if task exists in current version
                 persistent_task = self.project.persistent_tasks[persistent_id]
                 if self.project.dag.current_version_id in persistent_task.versions:
+                    task = persistent_task.versions[self.project.dag.current_version_id]
                     task_id = TaskId(str(node_id))
-                    # Only count if reachable
-                    if self.is_task_reachable(task_id):
-                        reachable_task_ids.add(task_id)
+                    # Only count leaf tasks (not parent tasks) that are reachable
+                    if len(task.children) == 0 and self.is_task_reachable(task_id):
+                        reachable_leaf_task_ids.add(task_id)
 
-        return reachable_task_ids == self.completed_tasks
+        return reachable_leaf_task_ids == self.completed_tasks
 
     def get_next_event_time(self) -> datetime | None:
         """Get the time of the next scheduled event (task completion).
