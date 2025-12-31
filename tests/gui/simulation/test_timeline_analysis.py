@@ -21,6 +21,7 @@ from fluxx.data.models import (
     Triangular,
 )
 from fluxx.gui.simulation.analysis import (
+    DependencyInfo,
     SampleTaskTimes,
     add_parent_task_times,
     calculate_task_statistics,
@@ -810,3 +811,113 @@ def test_extract_timeline_data_invalid_percentile(
     """Test that invalid percentile raises error."""
     with pytest.raises(ValueError, match="Percentile must be between"):
         extract_timeline_data(simple_samples, simple_project, percentile=0.0)
+
+
+def test_extract_timeline_data_dependencies() -> None:
+    """Test that dependencies are properly extracted with source info."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    version_id = DAGVersionId("v1")
+
+    # Create task A with dependency on task B
+    dep_a = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId("B"),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    task_a = Task(
+        id=TaskId("A"),
+        title="Task A",
+        description="",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[dep_a],
+    )
+
+    task_b = Task(
+        id=TaskId("B"),
+        title="Task B",
+        description="",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Create persistent tasks
+    persistent_tasks = {
+        PersistentObjectId("pa"): PersistentTask(
+            id=PersistentObjectId("pa"),
+            versions={version_id: task_a},
+        ),
+        PersistentObjectId("pb"): PersistentTask(
+            id=PersistentObjectId("pb"),
+            versions={version_id: task_b},
+        ),
+    }
+
+    # Create DAG
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            NodeId("A"): PersistentObjectId("pa"),
+            NodeId("B"): PersistentObjectId("pb"),
+        },
+    )
+
+    # Create project
+    project = Project(
+        metadata=ProjectMetadata(
+            name="Dependency Test",
+            created=datetime.now(UTC),
+            last_modified=datetime.now(UTC),
+        ),
+        dag=dag,
+        persistent_tasks=persistent_tasks,
+    )
+
+    # Create samples
+    samples = [
+        Sample(
+            sample_id=SampleId(0),
+            events=[
+                TaskEvent(
+                    node_id=NodeId("A"),
+                    event_type="start",
+                    timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
+                    details={},
+                ),
+                TaskEvent(
+                    node_id=NodeId("A"),
+                    event_type="complete",
+                    timestamp=datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
+                    details={},
+                ),
+                TaskEvent(
+                    node_id=NodeId("B"),
+                    event_type="start",
+                    timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
+                    details={},
+                ),
+                TaskEvent(
+                    node_id=NodeId("B"),
+                    event_type="complete",
+                    timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
+                    details={},
+                ),
+            ],
+            failed_tasks=[],
+        ),
+    ]
+
+    timeline_data = extract_timeline_data(samples, project, percentile=90.0)
+
+    # Should have one dependency
+    assert len(timeline_data.dependencies) == 1
+
+    # Check dependency info
+    dep_info = timeline_data.dependencies[0]
+    assert isinstance(dep_info, DependencyInfo)
+    assert dep_info.source_task_id == TaskId("A")
+    assert dep_info.dependency.target_node_id == NodeId("B")
+    assert dep_info.dependency.source_endpoint == Endpoint.START
+    assert dep_info.dependency.target_endpoint == Endpoint.END

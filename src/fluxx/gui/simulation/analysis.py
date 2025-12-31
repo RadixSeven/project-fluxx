@@ -189,11 +189,19 @@ class TaskStatistics:
 
 
 @dataclass
+class DependencyInfo:
+    """Dependency with source task information for visualization."""
+
+    source_task_id: TaskId
+    dependency: Dependency
+
+
+@dataclass
 class TimelineData:
     """Complete data for probabilistic timeline visualization."""
 
     task_statistics: dict[TaskId, TaskStatistics]
-    dependencies: list[Dependency]  # From project (filtered to visible tasks)
+    dependencies: list[DependencyInfo]  # Dependencies with source task info
     percentile: float  # e.g., 90.0
     earliest_time: datetime  # For axis scaling
     latest_time: datetime
@@ -542,14 +550,17 @@ def extract_timeline_data(
         latest_time = max(all_times)
 
     # Collect dependencies from all tasks that occurred
-    dependencies: list[Dependency] = []
+    dependencies: list[DependencyInfo] = []
     all_tasks = get_all_tasks_from_project(project)
     occurred_task_ids = set(task_statistics.keys())
 
     for task in all_tasks:
         if task.id in occurred_task_ids:
-            # Include this task's dependencies
-            dependencies.extend(task.dependencies)
+            # Include this task's dependencies with source info
+            for dep in task.dependencies:
+                dependencies.append(
+                    DependencyInfo(source_task_id=task.id, dependency=dep)
+                )
 
     return TimelineData(
         task_statistics=task_statistics,
