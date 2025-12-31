@@ -544,5 +544,7 @@ class MainWindow(QMainWindow):
         sample_list = cast(list[Sample], samples)
 
         # Show results in a new dialog
-        results_dialog = SimulationResultsDialog(sample_list, self)
+        results_dialog = SimulationResultsDialog(
+            sample_list, self.controller.get_project(), parent=self
+        )
         results_dialog.show()
