@@ -201,23 +201,72 @@ class SimulationState:
             if worker_state.current_task is None
         ]
 
-    def all_tasks_completed(self) -> bool:
-        """Check if all tasks in the project have been completed.
+    def is_task_reachable(self, task_id: TaskId) -> bool:
+        """Check if a task is reachable given current branch resolutions.
+
+        A task is reachable if all of its dependencies on specific possible worlds
+        point to worlds that were actually chosen.
+
+        Args:
+            task_id: ID of the task to check
 
         Returns:
-            True if all tasks are completed, False otherwise
+            True if the task is reachable, False otherwise
         """
-        # Get all task node IDs from the node map
-        all_task_ids: set[TaskId] = set()
+        from fluxx.data.models import BranchId, PossibleWorldId
+
+        try:
+            task = self.get_task(task_id)
+        except KeyError:
+            # Task doesn't exist
+            return False
+
+        # Check all dependencies
+        for dep in task.dependencies:
+            target_str = str(dep.target_node_id)
+
+            # Check if this is a possible world reference (format: "branch_id:world_id")
+            if ":" in target_str:
+                # Extract branch and world IDs
+                branch_id_str, world_id_str = target_str.split(":", 1)
+                branch_id = BranchId(branch_id_str)
+                world_id = PossibleWorldId(world_id_str)
+
+                # Check if branch was resolved
+                if branch_id not in self.resolved_branches:
+                    # Branch not yet resolved - task is still potentially reachable
+                    continue
+
+                # Check if the branch was resolved to a different world
+                if self.resolved_branches[branch_id] != world_id:
+                    # Task depends on a world that wasn't chosen - unreachable
+                    return False
+
+        return True
+
+    def all_tasks_completed(self) -> bool:
+        """Check if all reachable tasks have been completed.
+
+        Only counts tasks that are reachable given the current branch resolutions.
+        Tasks that depend on unchosen possible worlds are not counted.
+
+        Returns:
+            True if all reachable tasks are completed, False otherwise
+        """
+        # Get all reachable task node IDs from the node map
+        reachable_task_ids: set[TaskId] = set()
         for node_id, persistent_id in self.project.dag.node_map.items():
             # Check if this is a task (not a branch)
             if persistent_id in self.project.persistent_tasks:
                 # Check if task exists in current version
                 persistent_task = self.project.persistent_tasks[persistent_id]
                 if self.project.dag.current_version_id in persistent_task.versions:
-                    all_task_ids.add(TaskId(str(node_id)))
+                    task_id = TaskId(str(node_id))
+                    # Only count if reachable
+                    if self.is_task_reachable(task_id):
+                        reachable_task_ids.add(task_id)
 
-        return all_task_ids == self.completed_tasks
+        return reachable_task_ids == self.completed_tasks
 
     def get_next_event_time(self) -> datetime | None:
         """Get the time of the next scheduled event (task completion).

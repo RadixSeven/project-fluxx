@@ -6,7 +6,6 @@ designed to be small and focused for easy testing.
 """
 
 from dataclasses import dataclass
-from enum import Enum
 
 import numpy as np
 
@@ -23,20 +22,22 @@ from fluxx.data.models import (
 from fluxx.simulation.state import SimulationState
 
 
-class ActionType(str, Enum):
-    """Type of action that can be taken in simulation."""
+@dataclass
+class StartTaskAction:
+    """Action to start a task."""
 
-    START_TASK = "start_task"
-    RESOLVE_BRANCH = "resolve_branch"
+    task_id: TaskId
 
 
 @dataclass
-class Action:
-    """Action to take in simulation (start task or resolve branch)."""
+class ResolveBranchAction:
+    """Action to resolve a branch."""
 
-    action_type: ActionType
-    task_id: TaskId | None = None
-    branch_id: BranchId | None = None
+    branch_id: BranchId
+
+
+# Union type for actions
+Action = StartTaskAction | ResolveBranchAction
 
 
 # Dependency checking functions
@@ -323,6 +324,52 @@ def get_unresolved_branches(state: SimulationState) -> list[BranchId]:
     return unresolved
 
 
+def is_branch_eligible(branch_id: BranchId, state: SimulationState) -> bool:
+    """Check if a branch is eligible to be resolved.
+
+    A branch is eligible if all of its dependencies are satisfied.
+
+    Args:
+        branch_id: The branch ID to check
+        state: Current simulation state
+
+    Returns:
+        True if branch can be resolved, False otherwise
+    """
+    # Get the branch
+    from fluxx.simulation.engine import get_branch
+
+    try:
+        branch = get_branch(branch_id, state)
+    except KeyError:
+        return False
+
+    # Check all dependencies
+    return all(is_dependency_satisfied(dep, state) for dep in branch.dependencies)
+
+
+def get_eligible_branches(state: SimulationState) -> list[BranchId]:
+    """Get all branches that are eligible to be resolved.
+
+    A branch is eligible if it hasn't been resolved and all its dependencies
+    are satisfied.
+
+    Args:
+        state: Current simulation state
+
+    Returns:
+        List of eligible branch IDs
+    """
+    eligible: list[BranchId] = []
+
+    unresolved = get_unresolved_branches(state)
+    for branch_id in unresolved:
+        if is_branch_eligible(branch_id, state):
+            eligible.append(branch_id)
+
+    return eligible
+
+
 # Action selection
 
 
@@ -331,7 +378,7 @@ def select_next_action(
 ) -> Action | None:
     """Select the next action to take in the simulation.
 
-    Randomly chooses between eligible tasks and unresolved branches.
+    Randomly chooses between eligible tasks and eligible branches.
     Returns None if no actions are possible.
 
     Args:
@@ -342,18 +389,16 @@ def select_next_action(
         Action to take, or None if no actions possible
     """
     eligible_tasks = get_eligible_tasks(state)
-    unresolved_branches = get_unresolved_branches(state)
+    eligible_branches = get_eligible_branches(state)
 
     # Combine all possible actions
     actions: list[Action] = []
 
     for task in eligible_tasks:
-        actions.append(Action(action_type=ActionType.START_TASK, task_id=task.id))
+        actions.append(StartTaskAction(task_id=task.id))
 
-    for branch_id in unresolved_branches:
-        actions.append(
-            Action(action_type=ActionType.RESOLVE_BRANCH, branch_id=branch_id)
-        )
+    for branch_id in eligible_branches:
+        actions.append(ResolveBranchAction(branch_id=branch_id))
 
     # If no actions possible, return None
     if not actions:
@@ -396,9 +441,9 @@ def detect_deadlock(state: SimulationState) -> bool:
 
     Deadlock occurs when:
     1. All workers are idle (no tasks in progress)
-    2. There are still uncompleted tasks
+    2. There are still uncompleted reachable tasks
     3. No tasks are eligible to start
-    4. No branches need resolution
+    4. No branches are eligible for resolution
 
     Args:
         state: Current simulation state
@@ -410,12 +455,12 @@ def detect_deadlock(state: SimulationState) -> bool:
     if not are_all_workers_idle(state):
         return False
 
-    # There must be uncompleted tasks
+    # There must be uncompleted reachable tasks
     if not are_tasks_remaining(state):
         return False
 
     # No actions should be possible
     eligible_tasks = get_eligible_tasks(state)
-    unresolved_branches = get_unresolved_branches(state)
+    eligible_branches = get_eligible_branches(state)
 
-    return len(eligible_tasks) == 0 and len(unresolved_branches) == 0
+    return len(eligible_tasks) == 0 and len(eligible_branches) == 0

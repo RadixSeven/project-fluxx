@@ -29,7 +29,8 @@ from fluxx.data.models import (
     WorkerId,
 )
 from fluxx.simulation.scheduler import (
-    ActionType,
+    ResolveBranchAction,
+    StartTaskAction,
     are_all_dependencies_satisfied,
     are_all_workers_idle,
     are_tasks_remaining,
@@ -693,7 +694,7 @@ def test_select_next_action_task(
     action = select_next_action(state, rng)
 
     assert action is not None
-    assert action.action_type == ActionType.START_TASK
+    assert isinstance(action, StartTaskAction)
     assert action.task_id == TaskId("t1")
 
 
@@ -727,7 +728,7 @@ def test_select_next_action_branch(
     action = select_next_action(state, rng)
 
     assert action is not None
-    assert action.action_type == ActionType.RESOLVE_BRANCH
+    assert isinstance(action, ResolveBranchAction)
     assert action.branch_id == BranchId("b1")
 
 
