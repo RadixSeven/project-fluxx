@@ -87,6 +87,9 @@ def test_dependency_editor_initialization_task(
     # Add button should be disabled initially (no target selected)
     assert not task_dependency_editor.add_button.isEnabled()
 
+    # Default target endpoint should be END (index 1)
+    assert task_dependency_editor.target_endpoint_combo.currentIndex() == 1
+
 
 def test_dependency_editor_initialization_branch(
     branch_dependency_editor: DependencyEditorWidget,
@@ -271,7 +274,7 @@ def test_dependency_editor_clear(
     assert "<Not selected>" in task_dependency_editor.target_display.text()
     assert task_dependency_editor.source_endpoint_combo.currentIndex() == 0
     assert task_dependency_editor.constraint_type_combo.currentIndex() == 0
-    assert task_dependency_editor.target_endpoint_combo.currentIndex() == 0
+    assert task_dependency_editor.target_endpoint_combo.currentIndex() == 1
 
 
 def test_dependency_editor_signals(

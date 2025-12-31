@@ -102,6 +102,7 @@ class DependencyEditorWidget(QWidget):
         self.target_endpoint_combo.addItem("Start", Endpoint.START)
         self.target_endpoint_combo.addItem("End", Endpoint.END)
         self.target_endpoint_combo.addItem("Occurrence", Endpoint.OCCURRENCE)
+        self.target_endpoint_combo.setCurrentIndex(1)
         self.target_endpoint_combo.currentIndexChanged.connect(self._on_field_changed)
         group_layout.addWidget(target_endpoint_label)
         group_layout.addWidget(self.target_endpoint_combo)
@@ -179,7 +180,7 @@ class DependencyEditorWidget(QWidget):
                 if (
                     self.target_endpoint_combo.currentData() == Endpoint.OCCURRENCE
                 ):  # Reset if was occurrence
-                    self.target_endpoint_combo.setCurrentIndex(0)
+                    self.target_endpoint_combo.setCurrentIndex(1)
 
         elif persistent_id in project.persistent_branches:
             persistent_branch = project.persistent_branches[persistent_id]
@@ -271,7 +272,7 @@ class DependencyEditorWidget(QWidget):
             self.source_endpoint_combo.setCurrentIndex(0)
 
         self.constraint_type_combo.setCurrentIndex(0)
-        self.target_endpoint_combo.setCurrentIndex(0)
+        self.target_endpoint_combo.setCurrentIndex(1)
 
         # Disable Add button when cleared
         self.add_button.setEnabled(False)
