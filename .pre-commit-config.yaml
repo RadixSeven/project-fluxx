@@ -19,7 +19,8 @@ repos:
     rev: v1.18.2
     hooks:
       - id: mypy
-        args: [--strict]
+        pass_filenames: false
+        args: [--strict, src/fluxx, tests]
         additional_dependencies:
           - tokenize-rt==3.2.0
           - pydantic
@@ -28,3 +29,4 @@ repos:
           - pytest-qt
           - types-networkx
           - rapidfuzz
+          - numpy

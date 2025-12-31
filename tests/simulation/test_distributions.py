@@ -160,3 +160,36 @@ def test_rejection_sampling_deterministic() -> None:
     sample2 = sample_with_rejection(dist, rng2, threshold)
 
     assert sample1 == sample2
+
+
+def test_estimate_mean_unknown_distribution() -> None:
+    """Test that estimate_mean raises error for unknown distribution type."""
+    import pytest
+
+    from fluxx.data.models import DurationDistribution
+
+    # Create a mock unknown distribution
+    class UnknownDistribution(DurationDistribution):
+        value: float = 1.0
+
+    unknown_dist = UnknownDistribution(value=5.0)
+
+    with pytest.raises(ValueError, match="Unknown distribution type"):
+        estimate_mean(unknown_dist)
+
+
+def test_sample_with_rejection_unknown_distribution() -> None:
+    """Test that sample_with_rejection raises error for unknown distribution."""
+    import pytest
+
+    from fluxx.data.models import DurationDistribution
+
+    # Create a mock unknown distribution
+    class UnknownDistribution(DurationDistribution):
+        value: float = 1.0
+
+    unknown_dist = UnknownDistribution(value=5.0)
+    rng = np.random.default_rng(seed=123)
+
+    with pytest.raises(ValueError, match="Unknown distribution type"):
+        sample_with_rejection(unknown_dist, rng, 0.0)

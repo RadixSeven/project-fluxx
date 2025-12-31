@@ -121,3 +121,55 @@ def test_main_returns_app_exit_code(
         result = main()
 
     assert result == 42
+
+
+def test_main_create_project_error(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Test main() when creating a new project fails."""
+    mock_app, mock_window, mock_msgbox = mock_qt
+    new_file = tmp_path / "new_project.fluxx"
+
+    # Mock save_project_as to raise an exception
+    mock_window.controller.save_project_as.side_effect = RuntimeError("Save failed")
+
+    with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
+        mock_parse.return_value = MagicMock(file=str(new_file))
+        result = main()
+
+    # Should show error dialog
+    mock_msgbox.critical.assert_called_once()
+    assert "Error Creating Project" in mock_msgbox.critical.call_args[0][1]
+    assert "Save failed" in mock_msgbox.critical.call_args[0][2]
+    # Should still show window
+    mock_window.show.assert_called_once()
+    assert result == 0
+
+
+def test_main_open_project_unexpected_error(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Test main() when opening a project encounters unexpected error."""
+    mock_app, mock_window, mock_msgbox = mock_qt
+    existing_file = tmp_path / "test.fluxx"
+    existing_file.touch()
+
+    # Mock open_project to raise an unexpected exception
+    # (not FileFormatError/VersionError)
+    mock_window.controller.open_project.side_effect = RuntimeError("Unexpected error")
+
+    with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
+        mock_parse.return_value = MagicMock(file=str(existing_file))
+        result = main()
+
+    # Should show error dialog
+    mock_msgbox.critical.assert_called_once()
+    assert "Error Opening Project" in mock_msgbox.critical.call_args[0][1]
+    assert "Unexpected error" in mock_msgbox.critical.call_args[0][2]
+    # Should still show window
+    mock_window.show.assert_called_once()
+    assert result == 0

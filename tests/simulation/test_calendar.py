@@ -197,3 +197,31 @@ def test_add_work_hours_multiple_weeks() -> None:
     two_weeks_later = add_work_hours(monday, 80.0, 8.0)
     expected = datetime(2024, 1, 12, 17, 0, 0, tzinfo=UTC)  # Friday Jan 12, 5 PM
     assert two_weeks_later == expected
+
+
+def test_add_work_hours_before_work_starts() -> None:
+    """Test adding work hours when starting before work starts."""
+    # Monday 7 AM (before work) + 4 hours = Monday 1 PM
+    # Should move to 9 AM first, then add 4 hours
+    monday_early = datetime(2024, 1, 1, 7, 0, 0, tzinfo=UTC)
+    result = add_work_hours(monday_early, 4.0, 8.0)
+    assert result == datetime(2024, 1, 1, 13, 0, 0, tzinfo=UTC)
+
+
+def test_add_work_hours_after_work_ends() -> None:
+    """Test adding work hours when starting after work ends."""
+    # Monday 6 PM (after 8-hour workday ends at 5 PM) + 2 hours = Tuesday 11 AM
+    # Should move to next workday (Tuesday 9 AM), then add 2 hours
+    monday_late = datetime(2024, 1, 1, 18, 0, 0, tzinfo=UTC)
+    result = add_work_hours(monday_late, 2.0, 8.0)
+    assert result == datetime(2024, 1, 2, 11, 0, 0, tzinfo=UTC)
+
+
+def test_calculate_work_hours_start_before_work_starts() -> None:
+    """Test calculating work hours when start is before work starts."""
+    # Monday 7 AM to Monday 1 PM
+    # Work starts at 9 AM, so actual work hours are 9 AM to 1 PM = 4 hours
+    start = datetime(2024, 1, 1, 7, 0, 0, tzinfo=UTC)
+    end = datetime(2024, 1, 1, 13, 0, 0, tzinfo=UTC)
+    hours = calculate_work_hours_between(start, end, 8.0)
+    assert abs(hours - 4.0) < 0.01

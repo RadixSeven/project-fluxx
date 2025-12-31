@@ -1163,3 +1163,86 @@ def test_task_missing_current_version_in_worker_check(
 
     # Should pass - validation skips tasks not in current version
     validate_dag(project)
+
+
+def test_cycle_detection_visits_isolated_end_endpoint(
+    base_project: Project,
+) -> None:
+    """Test that cycle detection visits END endpoints separately from START.
+
+    This ensures line 160 in validation.py (dfs for END endpoint) is covered.
+    We create a scenario where:
+    - Task X's START is visited during another task's DFS
+    - Task X's END is in the graph (has outgoing edges) but wasn't visited yet
+    - So when we iterate to task X, START is already black, but END needs DFS
+    """
+    # Task ordering matters - we'll visit them alphabetically: a, b, x
+    # Task A depends on X.start, so DFS from A will visit X.start
+    task_a = Task(
+        id=TaskId("a"),
+        title="Task A",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.END,
+                target_node_id=NodeId("x"),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+    # Task X: Its START will be visited by A's DFS, but END has separate edges
+    task_x = Task(
+        id=TaskId("x"),
+        title="Task X",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.END,
+                target_node_id=NodeId("b"),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+    # Task B: endpoint for X
+    task_b = Task(
+        id=TaskId("b"),
+        title="Task B",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("pa"): PersistentTask(
+            id=PersistentObjectId("pa"),
+            versions={base_project.dag.current_version_id: task_a},
+        ),
+        PersistentObjectId("px"): PersistentTask(
+            id=PersistentObjectId("px"),
+            versions={base_project.dag.current_version_id: task_x},
+        ),
+        PersistentObjectId("pb"): PersistentTask(
+            id=PersistentObjectId("pb"),
+            versions={base_project.dag.current_version_id: task_b},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    NodeId("a"): PersistentObjectId("pa"),
+                    NodeId("x"): PersistentObjectId("px"),
+                    NodeId("b"): PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+    )
+
+    # Should pass - no cycle, ensures END endpoint DFS is triggered separately
+    validate_dag(project)
