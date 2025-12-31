@@ -898,6 +898,192 @@ def test_is_dependency_satisfied_task_unknown_endpoint(
     assert not is_dependency_satisfied(dep, state)
 
 
+def test_is_dependency_satisfied_task_not_found(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test dependency on task that doesn't exist in current version returns False."""
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Create a task that exists in persistent_tasks but NOT in current version
+    old_version = DAGVersionId("v0")
+    old_task = Task(
+        id=TaskId("old_task"),
+        title="Old Task",
+        description="Task only in old version",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    persistent_old = PersistentTask(
+        id=PersistentObjectId("pt_old"),
+        versions={old_version: old_task},  # Only in old version, not current
+    )
+
+    # Add to project
+    state.project.dag.node_map[NodeId("old_task")] = PersistentObjectId("pt_old")
+    state.project.persistent_tasks[PersistentObjectId("pt_old")] = persistent_old
+
+    # Now is_task_node() will return True, but get_task() will raise KeyError
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId("old_task"),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    # Should return False because get_task() will raise KeyError
+    assert not is_dependency_satisfied(dep, state)
+
+
+def test_is_dependency_satisfied_parent_task_end_incomplete(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test parent task END dependency is not satisfied when children incomplete."""
+    # Create parent task with children
+    parent_task = Task(
+        id=TaskId("parent"),
+        title="Parent",
+        description="Parent task",
+        duration_distribution=None,
+        children=[TaskId("child1"), TaskId("child2")],
+    )
+
+    child1 = Task(
+        id=TaskId("child1"),
+        title="Child 1",
+        description="First child",
+        parent_id=TaskId("parent"),
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    child2 = Task(
+        id=TaskId("child2"),
+        title="Child 2",
+        description="Second child",
+        parent_id=TaskId("parent"),
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    project = Project(
+        metadata=ProjectMetadata(
+            name="Test",
+            created=datetime(2024, 1, 1, tzinfo=UTC),
+            last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                NodeId("parent"): PersistentObjectId("pp"),
+                NodeId("child1"): PersistentObjectId("pc1"),
+                NodeId("child2"): PersistentObjectId("pc2"),
+            },
+        ),
+        persistent_tasks={
+            PersistentObjectId("pp"): PersistentTask(
+                id=PersistentObjectId("pp"), versions={version_id: parent_task}
+            ),
+            PersistentObjectId("pc1"): PersistentTask(
+                id=PersistentObjectId("pc1"), versions={version_id: child1}
+            ),
+            PersistentObjectId("pc2"): PersistentTask(
+                id=PersistentObjectId("pc2"), versions={version_id: child2}
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Dependency on parent task END
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId("parent"),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    # No children completed - dependency not satisfied
+    assert not is_dependency_satisfied(dep, state)
+
+    # Complete child1 but not child2 - still not satisfied
+    state.completed_tasks.add(TaskId("child1"))
+    assert not is_dependency_satisfied(dep, state)
+
+
+def test_is_dependency_satisfied_parent_task_end_complete(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test parent task END dependency is satisfied when all children complete."""
+    # Create parent task with children
+    parent_task = Task(
+        id=TaskId("parent"),
+        title="Parent",
+        description="Parent task",
+        duration_distribution=None,
+        children=[TaskId("child1"), TaskId("child2")],
+    )
+
+    child1 = Task(
+        id=TaskId("child1"),
+        title="Child 1",
+        description="First child",
+        parent_id=TaskId("parent"),
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    child2 = Task(
+        id=TaskId("child2"),
+        title="Child 2",
+        description="Second child",
+        parent_id=TaskId("parent"),
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    project = Project(
+        metadata=ProjectMetadata(
+            name="Test",
+            created=datetime(2024, 1, 1, tzinfo=UTC),
+            last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                NodeId("parent"): PersistentObjectId("pp"),
+                NodeId("child1"): PersistentObjectId("pc1"),
+                NodeId("child2"): PersistentObjectId("pc2"),
+            },
+        ),
+        persistent_tasks={
+            PersistentObjectId("pp"): PersistentTask(
+                id=PersistentObjectId("pp"), versions={version_id: parent_task}
+            ),
+            PersistentObjectId("pc1"): PersistentTask(
+                id=PersistentObjectId("pc1"), versions={version_id: child1}
+            ),
+            PersistentObjectId("pc2"): PersistentTask(
+                id=PersistentObjectId("pc2"), versions={version_id: child2}
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Dependency on parent task END
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=NodeId("parent"),
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    # Complete both children - dependency satisfied
+    state.completed_tasks.add(TaskId("child1"))
+    state.completed_tasks.add(TaskId("child2"))
+    assert is_dependency_satisfied(dep, state)
+
+
 def test_get_eligible_tasks_skips_old_version_tasks(
     simple_project: Project, base_workers: list[Worker], start_date: datetime
 ) -> None:
