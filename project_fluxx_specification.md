@@ -924,17 +924,19 @@ When a run fails:
    - (1-P)th percentile start time (e.g., if P=90%, show 10th percentile start)
    - Pth percentile end time
    - This shows the range where the task is likely to occur
+   - The horizontal axis represents time. The placement
+     on the timeline tells when that part of the task is likely to occur.
 3. Draw dependency arrows:
    - Equality: double-ended arrow
    - Greater-than-or-equal: arrow from earlier to later (in time)
-4. Branch points create sub-diagrams for each possible world's tasks
+4. Each task has a fraction to indicate what fraction of samples it occurred in.
 
 **Visual Encoding**:
 - Box represents task temporal uncertainty
 - Outer boundaries: minimum start to maximum end
 - Inner markers: (1-P)th percentile start to Pth percentile end
 - Arrows show dependency relationships
-- Branch outcomes create parallel sub-diagrams
+- Branch outcomes are implicit in the occurrence fraction.
 
 ## 9. History System
 
