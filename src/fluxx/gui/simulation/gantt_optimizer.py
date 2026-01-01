@@ -16,7 +16,7 @@ from pyomo.environ import (  # type: ignore[import-untyped]
     minimize,
 )
 
-from fluxx.data.models import Endpoint, TaskId
+from fluxx.data.models import Endpoint, Project, TaskId
 from fluxx.gui.simulation.gantt_analysis import (
     GanttStatistics,
     TaskVariantKey,
@@ -46,7 +46,64 @@ class GanttSchedule:
     error_message: str | None = None  # Only set if status != "optimal"
 
 
-def optimize_gantt_schedule(statistics: GanttStatistics) -> GanttSchedule:
+def _compute_parent_schedules(
+    variant_schedules: dict[TaskVariantKey, GanttVariantSchedule],
+    project: "Project",
+    world_sequences: set[WorldSequence],
+) -> dict[TaskVariantKey, GanttVariantSchedule]:
+    """Compute parent task schedules from optimized children.
+
+    Args:
+        variant_schedules: Already optimized leaf task schedules
+        project: Project with task hierarchy information
+        world_sequences: All world sequences that occurred
+
+    Returns:
+        Additional parent task schedules
+    """
+    from fluxx.gui.simulation.analysis import get_all_tasks_from_project
+
+    # Get all tasks and identify parent tasks
+    all_tasks = get_all_tasks_from_project(project)
+    parent_tasks = [task for task in all_tasks if task.children]
+
+    parent_schedules: dict[TaskVariantKey, GanttVariantSchedule] = {}
+
+    # For each parent task and world sequence, compute from children
+    for parent_task in parent_tasks:
+        for world_seq in world_sequences:
+            # Find child schedules in this world sequence
+            child_schedules = []
+            for child_node_id in parent_task.children:
+                child_task_id = TaskId(str(child_node_id))
+                child_variant_key = TaskVariantKey(child_task_id, world_seq)
+                if child_variant_key in variant_schedules:
+                    child_schedules.append(variant_schedules[child_variant_key])
+
+            # Only create parent schedule if we have child schedules
+            if child_schedules:
+                # Parent spans from earliest child start to latest child end
+                parent_start = min(sched.start_time for sched in child_schedules)
+                parent_end = max(sched.end_time for sched in child_schedules)
+                parent_duration_hours = (
+                    parent_end - parent_start
+                ).total_seconds() / 3600
+
+                parent_variant_key = TaskVariantKey(parent_task.id, world_seq)
+                parent_schedules[parent_variant_key] = GanttVariantSchedule(
+                    variant_key=parent_variant_key,
+                    task_title=parent_task.title,
+                    start_time=parent_start,
+                    duration_hours=parent_duration_hours,
+                    end_time=parent_end,
+                )
+
+    return parent_schedules
+
+
+def optimize_gantt_schedule(
+    statistics: GanttStatistics, project: "Project"
+) -> GanttSchedule:
     """Solve linear programming problem for conservative Gantt chart.
 
     Variables (all in calendar hours from project start):
@@ -57,7 +114,6 @@ def optimize_gantt_schedule(statistics: GanttStatistics) -> GanttSchedule:
         1. start[variant] >= percentile_start_hours[variant]
         2. duration[variant] >= percentile_duration_hours[variant]
         3. Dependency constraints (varies by type and endpoint)
-        4. Parent task constraints (children determine parent bounds)
 
     Objective:
         Minimize: sum(start[variant]) + sum(duration[variant])
@@ -65,6 +121,7 @@ def optimize_gantt_schedule(statistics: GanttStatistics) -> GanttSchedule:
 
     Args:
         statistics: GanttStatistics with percentile start/duration data
+        project: Project with task hierarchy information
 
     Returns:
         GanttSchedule with optimized start times and durations
@@ -222,6 +279,13 @@ def optimize_gantt_schedule(statistics: GanttStatistics) -> GanttSchedule:
                     duration_hours=duration_hours,
                     end_time=end_time,
                 )
+
+            # Compute parent task schedules from optimized children
+            parent_schedules = _compute_parent_schedules(
+                variant_schedules, project, statistics.world_sequences
+            )
+            # Merge parent schedules into variant_schedules
+            variant_schedules.update(parent_schedules)
 
             return GanttSchedule(
                 variant_schedules=variant_schedules,

@@ -108,8 +108,14 @@ class GanttChartWidget(QWidget):
         # Draw dependency arrows
         self._draw_dependencies(y_positions)
 
-        # Format time axis (x-axis)
-        self._format_time_axis()
+        # Compute date range for x-axis limits
+        all_start_times = [sched.start_time for _, sched in sorted_variants]
+        all_end_times = [sched.end_time for _, sched in sorted_variants]
+        earliest_time = min(all_start_times)
+        latest_time = max(all_end_times)
+
+        # Format time axis (x-axis) with proper limits
+        self._format_time_axis(earliest_time, latest_time)
 
         # Format task axis (y-axis)
         self.ax.set_yticks(range(len(task_labels)))
@@ -208,8 +214,15 @@ class GanttChartWidget(QWidget):
                 },
             )
 
-    def _format_time_axis(self) -> None:
-        """Format the time axis with appropriate date formatting."""
+    def _format_time_axis(self, earliest_time: datetime, latest_time: datetime) -> None:
+        """Format the time axis with appropriate date formatting.
+
+        Args:
+            earliest_time: Earliest task start time
+            latest_time: Latest task end time
+        """
+        from datetime import timedelta
+
         # Use date formatter
         date_formatter = mdates.DateFormatter("%Y-%m-%d")  # type: ignore[no-untyped-call]
         self.ax.xaxis.set_major_formatter(date_formatter)
@@ -219,6 +232,18 @@ class GanttChartWidget(QWidget):
 
         # Set locator for better tick spacing
         self.ax.xaxis.set_major_locator(mdates.AutoDateLocator())  # type: ignore[no-untyped-call]
+
+        # Set axis limits with some padding
+        duration = latest_time - earliest_time
+        days = duration.total_seconds() / 86400
+        padding = timedelta(days=max(1, days * 0.05))
+        start_date = earliest_time - padding
+        end_date = latest_time + padding
+
+        self.ax.set_xlim(
+            mdates.date2num(start_date),  # type: ignore[no-untyped-call]
+            mdates.date2num(end_date),  # type: ignore[no-untyped-call]
+        )
 
     def _show_error(self, message: str) -> None:
         """Show error message instead of Gantt chart.

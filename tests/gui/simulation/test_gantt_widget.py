@@ -5,11 +5,16 @@ from datetime import UTC, datetime, timedelta
 from pytestqt.qtbot import QtBot
 
 from fluxx.data.models import (
+    DAG,
     ConstraintType,
+    DAGId,
+    DAGVersionId,
     Dependency,
     Endpoint,
     NodeId,
     PossibleWorldId,
+    Project,
+    ProjectMetadata,
     TaskId,
 )
 from fluxx.gui.simulation.analysis import DependencyInfo
@@ -184,6 +189,19 @@ def test_gantt_widget_integration_with_optimization() -> None:
     """Test full integration: statistics -> optimization -> widget."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
+    # Create minimal project
+    version_id = DAGVersionId("v1")
+    dag = DAG(id=DAGId("dag1"), current_version_id=version_id, node_map={})
+    project = Project(
+        metadata=ProjectMetadata(
+            name="Test",
+            created=datetime.now(UTC),
+            last_modified=datetime.now(UTC),
+        ),
+        dag=dag,
+        persistent_tasks={},
+    )
+
     variant_key = TaskVariantKey(TaskId("task1"), ())
     task_stats = {
         variant_key: GanttTaskStatistics(
@@ -204,7 +222,7 @@ def test_gantt_widget_integration_with_optimization() -> None:
     )
 
     # Optimize
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, project)
 
     # Should be optimal
     assert schedule.optimization_status == "optimal"

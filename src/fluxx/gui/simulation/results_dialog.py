@@ -68,7 +68,7 @@ class SimulationResultsDialog(QDialog):
         gantt_statistics = extract_gantt_statistics(
             self.samples, self.project, percentile=0.97
         )
-        gantt_schedule = optimize_gantt_schedule(gantt_statistics)
+        gantt_schedule = optimize_gantt_schedule(gantt_statistics, self.project)
         self.gantt_widget = GanttChartWidget(
             gantt_schedule, gantt_statistics.dependencies
         )

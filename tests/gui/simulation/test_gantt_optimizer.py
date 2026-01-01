@@ -2,12 +2,19 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from fluxx.data.models import (
+    DAG,
     ConstraintType,
+    DAGId,
+    DAGVersionId,
     Dependency,
     Endpoint,
     NodeId,
     PossibleWorldId,
+    Project,
+    ProjectMetadata,
     TaskId,
 )
 from fluxx.gui.simulation.analysis import DependencyInfo
@@ -21,7 +28,27 @@ from fluxx.gui.simulation.gantt_optimizer import (
 )
 
 
-def test_optimize_simple_single_task() -> None:
+@pytest.fixture
+def simple_project() -> Project:
+    """Create a minimal project for testing."""
+    version_id = DAGVersionId("v1")
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={},
+    )
+    return Project(
+        metadata=ProjectMetadata(
+            name="Test Project",
+            created=datetime.now(UTC),
+            last_modified=datetime.now(UTC),
+        ),
+        dag=dag,
+        persistent_tasks={},
+    )
+
+
+def test_optimize_simple_single_task(simple_project: Project) -> None:
     """Test optimization with a single task."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
     variant_key = TaskVariantKey(TaskId("task1"), ())
@@ -44,7 +71,7 @@ def test_optimize_simple_single_task() -> None:
         world_sequences={()},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
     assert len(schedule.variant_schedules) == 1
@@ -57,7 +84,7 @@ def test_optimize_simple_single_task() -> None:
     assert task_schedule.end_time == project_start + timedelta(hours=2)
 
 
-def test_optimize_linear_chain() -> None:
+def test_optimize_linear_chain(simple_project: Project) -> None:
     """Test optimization with linear chain: A -> B -> C."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
@@ -120,7 +147,7 @@ def test_optimize_linear_chain() -> None:
         world_sequences={()},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
     assert len(schedule.variant_schedules) == 3
@@ -140,7 +167,7 @@ def test_optimize_linear_chain() -> None:
     assert sched_c.start_time >= sched_b.end_time
 
 
-def test_optimize_parallel_tasks() -> None:
+def test_optimize_parallel_tasks(simple_project: Project) -> None:
     """Test optimization with parallel tasks: A -> C, B -> C."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
@@ -202,7 +229,7 @@ def test_optimize_parallel_tasks() -> None:
         world_sequences={()},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
 
@@ -215,7 +242,7 @@ def test_optimize_parallel_tasks() -> None:
     assert sched_c.start_time >= sched_b.end_time
 
 
-def test_optimize_respects_percentile_constraints() -> None:
+def test_optimize_respects_percentile_constraints(simple_project: Project) -> None:
     """Test that optimization respects percentile start/duration minimums."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
     variant_key = TaskVariantKey(TaskId("task1"), ())
@@ -242,7 +269,7 @@ def test_optimize_respects_percentile_constraints() -> None:
         world_sequences={()},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
     task_schedule = schedule.variant_schedules[variant_key]
@@ -254,7 +281,7 @@ def test_optimize_respects_percentile_constraints() -> None:
     assert task_schedule.duration_hours >= percentile_duration
 
 
-def test_optimize_with_different_world_sequences() -> None:
+def test_optimize_with_different_world_sequences(simple_project: Project) -> None:
     """Test optimization with multiple world sequences (different task variants)."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
@@ -290,7 +317,7 @@ def test_optimize_with_different_world_sequences() -> None:
         world_sequences={world_a, world_b},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
     assert len(schedule.variant_schedules) == 2
@@ -304,7 +331,9 @@ def test_optimize_with_different_world_sequences() -> None:
     assert schedule.variant_schedules[variant_b].duration_hours == 3.0
 
 
-def test_optimize_dependency_only_applies_to_matching_world_sequence() -> None:
+def test_optimize_dependency_only_applies_to_matching_world_sequence(
+    simple_project: Project,
+) -> None:
     """Test that dependencies only apply within the same world sequence."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
@@ -353,13 +382,13 @@ def test_optimize_dependency_only_applies_to_matching_world_sequence() -> None:
         world_sequences={world_a, world_b},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     # Should still be optimal because dependency doesn't apply across world sequences
     assert schedule.optimization_status == "optimal"
 
 
-def test_optimize_all_dependency_endpoint_combinations() -> None:
+def test_optimize_all_dependency_endpoint_combinations(simple_project: Project) -> None:
     """Test all four dependency endpoint combinations."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
@@ -431,7 +460,7 @@ def test_optimize_all_dependency_endpoint_combinations() -> None:
         world_sequences={()},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
     assert len(schedule.variant_schedules) == 8
@@ -462,7 +491,7 @@ def test_optimize_all_dependency_endpoint_combinations() -> None:
     )
 
 
-def test_optimize_empty_statistics() -> None:
+def test_optimize_empty_statistics(simple_project: Project) -> None:
     """Test optimization with no tasks."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
 
@@ -474,13 +503,13 @@ def test_optimize_empty_statistics() -> None:
         world_sequences={()},
     )
 
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
 
     assert schedule.optimization_status == "optimal"
     assert len(schedule.variant_schedules) == 0
 
 
-def test_optimize_returns_error_on_exception() -> None:
+def test_optimize_returns_error_on_exception(simple_project: Project) -> None:
     """Test that optimization returns error status on exception."""
     # This is hard to test without mocking, but we can at least verify
     # the error handling structure exists
@@ -506,5 +535,5 @@ def test_optimize_returns_error_on_exception() -> None:
     )
 
     # This should work normally
-    schedule = optimize_gantt_schedule(statistics)
+    schedule = optimize_gantt_schedule(statistics, simple_project)
     assert schedule.optimization_status in ("optimal", "error")
