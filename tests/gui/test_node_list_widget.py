@@ -107,14 +107,32 @@ def test_node_list_widget_loads_branches(qtbot: QtBot) -> None:
     widget = NodeListWidget(controller)
     qtbot.addWidget(widget)
 
-    # Should show branch
-    assert widget.node_list.count() == 1
+    # Should show branch + 2 possible worlds = 3 items
+    assert widget.node_list.count() == 3
 
-    # Check item
-    item = widget.node_list.item(0)
-    assert item is not None
-    assert item.text() == "[Branch] Branch One"
-    assert item.data(Qt.ItemDataRole.UserRole) == branch_id
+    # Check branch item (should be sorted alphabetically)
+    # After sorting: "Branch One", "World A (from Branch One)",
+    #  "World B (from Branch One)"
+    branch_item = widget.node_list.item(0)
+    assert branch_item is not None
+    assert branch_item.text() == "[Branch] Branch One"
+    assert branch_item.data(Qt.ItemDataRole.UserRole) == branch_id
+
+    # Check possible world items
+    pw_a_item = widget.node_list.item(1)
+    assert pw_a_item is not None
+    assert pw_a_item.text() == "[PossibleWorld] World A (from Branch One)"
+    # Data should be tuple (branch_id, pw_id) - but PySide6 converts to list
+    pw_a_data = pw_a_item.data(Qt.ItemDataRole.UserRole)
+    assert isinstance(pw_a_data, (tuple, list))
+    assert pw_a_data[0] == branch_id
+
+    pw_b_item = widget.node_list.item(2)
+    assert pw_b_item is not None
+    assert pw_b_item.text() == "[PossibleWorld] World B (from Branch One)"
+    pw_b_data = pw_b_item.data(Qt.ItemDataRole.UserRole)
+    assert isinstance(pw_b_data, (tuple, list))
+    assert pw_b_data[0] == branch_id
 
 
 def test_node_list_widget_loads_mixed_nodes(qtbot: QtBot) -> None:
@@ -150,14 +168,16 @@ def test_node_list_widget_loads_mixed_nodes(qtbot: QtBot) -> None:
     widget = NodeListWidget(controller)
     qtbot.addWidget(widget)
 
-    # Should show both
-    assert widget.node_list.count() == 2
+    # Should show task + branch + possible world = 3 items
+    assert widget.node_list.count() == 3
 
     # Check items are sorted by title
+    # Alphabetically: "Branch Beta", "Task Alpha", "World A (from Branch Beta)"
     items = [widget.node_list.item(i) for i in range(widget.node_list.count())]
     texts = [item.text() for item in items if item is not None]
     assert texts[0] == "[Branch] Branch Beta"
     assert texts[1] == "[Task] Task Alpha"
+    assert texts[2] == "[PossibleWorld] World A (from Branch Beta)"
 
 
 def test_node_list_widget_search_filters_nodes(qtbot: QtBot) -> None:
@@ -374,18 +394,22 @@ def test_node_list_widget_color_coding(qtbot: QtBot) -> None:
     widget = NodeListWidget(controller)
     qtbot.addWidget(widget)
 
-    # Get items
-    branch_item = widget.node_list.item(0)  # Sorted alphabetically
+    # Get items (should be 3: branch, task, possible world)
+    # Sorted alphabetically: "Branch", "Task", "World A (from Branch)"
+    branch_item = widget.node_list.item(0)
     task_item = widget.node_list.item(1)
+    pw_item = widget.node_list.item(2)
 
     assert branch_item is not None
     assert task_item is not None
+    assert pw_item is not None
 
     # Check colors
     from PySide6.QtGui import QColor
 
-    assert branch_item.foreground().color() == QColor(Qt.GlobalColor.darkGreen)
+    assert branch_item.foreground().color() == QColor(Qt.GlobalColor.darkYellow)
     assert task_item.foreground().color() == QColor(Qt.GlobalColor.blue)
+    assert pw_item.foreground().color() == QColor(Qt.GlobalColor.darkGreen)
 
 
 def test_node_list_widget_search_preserves_selection(qtbot: QtBot) -> None:

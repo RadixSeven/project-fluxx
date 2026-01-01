@@ -16,8 +16,9 @@ def test_layout_empty_dag() -> None:
     controller = ProjectController()
     project = controller.get_project()
 
-    positions = compute_dag_layout(project)
-    assert positions == {}
+    layout = compute_dag_layout(project)
+    assert layout.node_positions == {}
+    assert layout.possible_world_positions == {}
 
 
 def test_layout_single_task() -> None:
@@ -30,7 +31,8 @@ def test_layout_single_task() -> None:
     )
 
     project = controller.get_project()
-    positions = compute_dag_layout(project)
+    layout = compute_dag_layout(project)
+    positions = layout.node_positions
 
     node_id = NodeId(task_id)
     assert node_id in positions
@@ -52,7 +54,8 @@ def test_layout_two_tasks_no_dependency() -> None:
     )
 
     project = controller.get_project()
-    positions = compute_dag_layout(project)
+    layout = compute_dag_layout(project)
+    positions = layout.node_positions
 
     node_id1 = NodeId(task_id1)
     node_id2 = NodeId(task_id2)
@@ -87,7 +90,8 @@ def test_layout_two_tasks_with_dependency() -> None:
     controller.add_dependency(NodeId(task_id1), dep)
 
     project = controller.get_project()
-    positions = compute_dag_layout(project)
+    layout = compute_dag_layout(project)
+    positions = layout.node_positions
 
     node_id1 = NodeId(task_id1)
     node_id2 = NodeId(task_id2)
@@ -136,7 +140,8 @@ def test_layout_three_tasks_chain() -> None:
     controller.add_dependency(NodeId(task_id2), dep23)
 
     project = controller.get_project()
-    positions = compute_dag_layout(project)
+    layout = compute_dag_layout(project)
+    positions = layout.node_positions
 
     node_id1 = NodeId(task_id1)
     node_id2 = NodeId(task_id2)
@@ -170,7 +175,8 @@ def test_layout_parent_child_tasks() -> None:
     child_id = controller.convert_to_parent(parent_id, "Child Task")
 
     project = controller.get_project()
-    positions = compute_dag_layout(project)
+    layout = compute_dag_layout(project)
+    positions = layout.node_positions
 
     parent_node_id = NodeId(parent_id)
     child_node_id = NodeId(child_id)

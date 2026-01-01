@@ -1,14 +1,19 @@
 """Graphics view for DAG visualization."""
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QMouseEvent, QWheelEvent
-from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
+from PySide6.QtGui import QMouseEvent, QPen, QWheelEvent
+from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsScene, QGraphicsView
 
-from fluxx.data.models import NodeId, Project
+from fluxx.data.models import NodeId, PossibleWorldId, Project
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.utils.layout import compute_dag_layout
 from fluxx.gui.widgets.dag_view.edge_item import EdgeItem
-from fluxx.gui.widgets.dag_view.node_item import BranchNodeItem, NodeItem, TaskNodeItem
+from fluxx.gui.widgets.dag_view.node_item import (
+    BranchNodeItem,
+    NodeItem,
+    PossibleWorldItem,
+    TaskNodeItem,
+)
 
 
 class DAGGraphicsView(QGraphicsView):
@@ -49,7 +54,12 @@ class DAGGraphicsView(QGraphicsView):
         self.setRenderHint(self.renderHints() | self.renderHints())
 
         # Store node items for later reference
-        self.node_items: dict[NodeId, NodeItem] = {}
+        self.node_items: dict[NodeId, NodeItem | BranchNodeItem] = {}
+
+        # Store possible world items for later reference
+        self.possible_world_items: dict[
+            tuple[NodeId, PossibleWorldId], PossibleWorldItem
+        ] = {}
 
         # Store edge items for later reference
         self.edge_items: list[EdgeItem] = []
@@ -91,17 +101,20 @@ class DAGGraphicsView(QGraphicsView):
         # Clear scene
         self._scene.clear()
         self.node_items.clear()
+        self.possible_world_items.clear()
         self.edge_items.clear()
 
         project = self.controller.get_project()
         current_version = project.dag.current_version_id
 
         # Compute layout
-        positions = compute_dag_layout(project)
+        layout = compute_dag_layout(project)
+        positions = layout.node_positions
+        pw_positions = layout.possible_world_positions
 
         # Create node items
         for node_id, persistent_id in project.dag.node_map.items():
-            item: NodeItem | None = None
+            item: NodeItem | BranchNodeItem | None = None
 
             # Check if it's a task or branch
             if persistent_id in project.persistent_tasks:
@@ -129,6 +142,48 @@ class DAGGraphicsView(QGraphicsView):
             # Add to scene and store reference
             self._scene.addItem(item)
             self.node_items[node_id] = item
+
+        # Create possible world items for branches
+        for node_id, persistent_id in project.dag.node_map.items():
+            if persistent_id in project.persistent_branches:
+                persistent_branch = project.persistent_branches[persistent_id]
+                if current_version not in persistent_branch.versions:
+                    continue
+                branch = persistent_branch.versions[current_version]
+
+                # Create item for each possible world
+                for pw in branch.possible_worlds:
+                    pw_id = PossibleWorldId(pw.id)
+                    pw_key = (node_id, pw_id)
+
+                    if pw_key in pw_positions:
+                        pw_item = PossibleWorldItem(node_id, branch, pw)
+                        pw_item.setPos(pw_positions[pw_key])
+                        self._scene.addItem(pw_item)
+                        self.possible_world_items[pw_key] = pw_item
+
+                        # Draw line from branch to possible world
+                        if node_id in self.node_items:
+                            branch_item = self.node_items[node_id]
+                            # Get center of branch circle
+                            branch_pos = branch_item.pos()
+                            branch_center_x = branch_pos.x() + 10  # radius
+                            branch_center_y = branch_pos.y() + 10  # radius
+
+                            # Get left edge of possible world box
+                            pw_pos = pw_item.pos()
+                            pw_left_x = pw_pos.x()
+                            pw_center_y = pw_pos.y() + 30  # half of height (60/2)
+
+                            # Draw line
+                            line = QGraphicsLineItem(
+                                branch_center_x,
+                                branch_center_y,
+                                pw_left_x,
+                                pw_center_y,
+                            )
+                            line.setPen(QPen(Qt.GlobalColor.gray, 2))
+                            self._scene.addItem(line)
 
         # Create edges for dependencies
         for node_id, persistent_id in project.dag.node_map.items():
@@ -206,9 +261,19 @@ class DAGGraphicsView(QGraphicsView):
         Args:
             event: Mouse event
         """
-        # Check if we clicked on a node
+        # Check if we clicked on a node or possible world
         item = self.itemAt(event.pos())
-        if isinstance(item, NodeItem):
+
+        if isinstance(item, PossibleWorldItem):
+            if self._select_target_mode:
+                # In select-target mode: emit signal for possible world and exit mode
+                # Note: Dependencies can target possible worlds
+                self.node_selected_for_dependency.emit(NodeId(item.possible_world.id))
+                self.exit_select_target_mode()
+            else:
+                # Normal mode: select parent branch (per spec 5.2.2)
+                self.controller.select_node(item.node_id)
+        elif isinstance(item, NodeItem):
             if self._select_target_mode:
                 # In select-target mode: emit signal and exit mode
                 self.node_selected_for_dependency.emit(item.node_id)

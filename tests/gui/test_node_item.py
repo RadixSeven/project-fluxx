@@ -173,7 +173,7 @@ def test_branch_node_item_colors() -> None:
 
     node = BranchNodeItem(NodeId(branch.id), branch)
 
-    # Verify branch-specific colors are set (orange)
+    # Verify branch-specific colors are set (orange) - updated for circle rendering
     assert node._base_color.red() == 255
-    assert node._base_color.green() == 220
-    assert node._base_color.blue() == 180
+    assert node._base_color.green() == 200
+    assert node._base_color.blue() == 150

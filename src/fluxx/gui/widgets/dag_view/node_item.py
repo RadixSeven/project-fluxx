@@ -3,6 +3,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
+    QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsRectItem,
     QGraphicsSceneHoverEvent,
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from fluxx.data.models import Branch, NodeId, Task
+from fluxx.data.models import Branch, NodeId, PossibleWorld, Task
 
 
 class NodeItem(QGraphicsRectItem):
@@ -147,13 +148,12 @@ class TaskNodeItem(NodeItem):
         self._selected_color = QColor(100, 150, 255)  # Bright blue
 
 
-class BranchNodeItem(NodeItem):
-    """Graphics item for rendering a branch node.
+class BranchNodeItem(QGraphicsEllipseItem):
+    """Graphics item for rendering a branch occurrence point as a dot.
 
     Displays:
-    - Branch title
-    - Number of possible worlds
-    - Light orange background
+    - Small circle representing the branch occurrence point
+    - Light orange fill
     """
 
     def __init__(self, node_id: NodeId, branch: Branch) -> None:
@@ -163,11 +163,113 @@ class BranchNodeItem(NodeItem):
             node_id: Node ID
             branch: Branch instance
         """
-        super().__init__(node_id, branch.title)
+        # Create small circle (diameter 20 pixels)
+        diameter = 20.0
+        super().__init__(0, 0, diameter, diameter)
+        self.node_id = node_id
         self.branch = branch
+        self.title = branch.title
+
+        # Make item selectable
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+
+        # Enable hover events
+        self.setAcceptHoverEvents(True)
 
         # Branch-specific styling
-        self._base_color = QColor(255, 220, 180)  # Light orange
-        self._hover_color = QColor(255, 235, 200)  # Lighter orange
-        self._selected_color = QColor(255, 180, 100)  # Bright orange
+        self._base_color = QColor(255, 200, 150)  # Light orange
+        self._hover_color = QColor(255, 220, 180)  # Lighter orange
+        self._selected_color = QColor(255, 150, 80)  # Bright orange
         self._border_color = QColor(200, 150, 100)
+
+        self._is_hovered = False
+
+    def paint(
+        self,
+        painter: QPainter | None,
+        option: QStyleOptionGraphicsItem,
+        widget: QWidget | None = None,
+    ) -> None:
+        """Paint the branch occurrence point as a dot.
+
+        Args:
+            painter: QPainter instance
+            option: Style option
+            widget: Widget being painted on
+        """
+        if painter is None:
+            return
+
+        # Determine colors based on state
+        if self.isSelected():
+            fill_color = self._selected_color
+            border_width = 3.0
+        elif self._is_hovered:
+            fill_color = self._hover_color
+            border_width = 2.0
+        else:
+            fill_color = self._base_color
+            border_width = 2.0
+
+        # Draw circle
+        painter.setBrush(QBrush(fill_color))
+        painter.setPen(QPen(self._border_color, border_width))
+        painter.drawEllipse(self.rect())
+
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        """Handle hover enter.
+
+        Args:
+            event: Hover event
+        """
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        """Handle hover leave.
+
+        Args:
+            event: Hover event
+        """
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
+
+class PossibleWorldItem(NodeItem):
+    """Graphics item for rendering a possible world box.
+
+    Displays:
+    - Possible world title
+    - Light green background
+    - Connected to parent branch occurrence point
+    """
+
+    def __init__(
+        self,
+        node_id: NodeId,
+        branch: Branch,
+        possible_world: PossibleWorld,
+        width: float = 180,
+        height: float = 60,
+    ) -> None:
+        """Initialize possible world item.
+
+        Args:
+            node_id: Parent branch node ID
+            branch: Parent branch instance
+            possible_world: Possible world instance
+            width: Box width in pixels
+            height: Box height in pixels
+        """
+        super().__init__(node_id, possible_world.title, width, height)
+        self.branch = branch
+        self.possible_world = possible_world
+
+        # Possible world-specific styling
+        self._base_color = QColor(200, 255, 200)  # Light green
+        self._hover_color = QColor(220, 255, 220)  # Lighter green
+        self._selected_color = QColor(150, 255, 150)  # Bright green
+        self._border_color = QColor(100, 200, 100)

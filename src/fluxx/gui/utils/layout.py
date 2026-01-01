@@ -1,14 +1,28 @@
 """DAG layout algorithms for node positioning."""
 
 from collections import defaultdict
+from dataclasses import dataclass
 
 import networkx as nx
 from PySide6.QtCore import QPointF
 
-from fluxx.data.models import Endpoint, NodeId, Project
+from fluxx.data.models import Endpoint, NodeId, PossibleWorldId, Project
 
 
-def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
+@dataclass
+class DAGLayout:
+    """Layout information for DAG visualization.
+
+    Attributes:
+        node_positions: Positions for task and branch nodes
+        possible_world_positions: Positions for possible world boxes
+    """
+
+    node_positions: dict[NodeId, QPointF]
+    possible_world_positions: dict[tuple[NodeId, PossibleWorldId], QPointF]
+
+
+def compute_dag_layout(project: Project) -> DAGLayout:
     """Compute positions for all nodes in the DAG using hierarchical layout.
 
     Uses endpoint-based dependency graph to handle parent-child relationships correctly.
@@ -19,17 +33,18 @@ def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
     2. Topological sort on endpoints to assign layers (x-coordinates)
     3. Map endpoint layers back to node layers (max of endpoint layers)
     4. Within each layer, distribute nodes vertically
-    5. Return dict mapping node_id to QPointF position
+    5. Position possible worlds to the right of their parent branches
+    6. Return DAGLayout with node and possible world positions
 
     Args:
         project: Project instance
 
     Returns:
-        Dictionary mapping NodeId to QPointF position in scene coordinates
+        DAGLayout with node positions and possible world positions
     """
     # Handle empty DAG
     if not project.dag.node_map:
-        return {}
+        return DAGLayout(node_positions={}, possible_world_positions={})
 
     # Build endpoint-based networkx graph
     # Each node (task/branch) has multiple endpoint nodes in the graph
@@ -148,12 +163,15 @@ def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
 
     # Compute positions (horizontal layout: x increases with layer)
     positions: dict[NodeId, QPointF] = {}
+    possible_world_positions: dict[tuple[NodeId, PossibleWorldId], QPointF] = {}
 
     # Layout constants
     node_width = 200
     node_height = 80
     horizontal_spacing = 150  # Space between layers (horizontal)
     vertical_spacing = 50  # Space between nodes in same layer (vertical)
+    pw_horizontal_offset = 100  # Offset from branch to possible worlds
+    pw_vertical_spacing = 40  # Vertical spacing between possible worlds
 
     for layer_num, node_ids in nodes_by_layer.items():
         # X position based on layer (time flows left to right)
@@ -169,4 +187,32 @@ def compute_dag_layout(project: Project) -> dict[NodeId, QPointF]:
             y = start_y + i * (node_height + vertical_spacing)
             positions[node_id] = QPointF(x, y)
 
-    return positions
+            # If this is a branch, position its possible worlds
+            branch_persistent_id = project.dag.node_map.get(node_id)
+            if (
+                branch_persistent_id is not None
+                and branch_persistent_id in project.persistent_branches
+            ):
+                persistent_branch = project.persistent_branches[branch_persistent_id]
+                if current_version in persistent_branch.versions:
+                    branch = persistent_branch.versions[current_version]
+
+                    # Position possible worlds to the right of branch
+                    num_worlds = len(branch.possible_worlds)
+                    if num_worlds > 0:
+                        # Center possible worlds vertically around branch position
+                        pw_total_height = (
+                            num_worlds * 60 + (num_worlds - 1) * pw_vertical_spacing
+                        )
+                        pw_start_y = y - pw_total_height / 2
+
+                        for j, pw in enumerate(branch.possible_worlds):
+                            pw_x = x + pw_horizontal_offset
+                            pw_y = pw_start_y + j * (60 + pw_vertical_spacing)
+                            possible_world_positions[
+                                (node_id, PossibleWorldId(pw.id))
+                            ] = QPointF(pw_x, pw_y)
+
+    return DAGLayout(
+        node_positions=positions, possible_world_positions=possible_world_positions
+    )

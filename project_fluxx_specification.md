@@ -518,12 +518,16 @@ Located above the DAG view, contains:
 #### 5.2.3 List Display Mode
 
 **Layout**:
-- List of all nodes with titles
+- List of all selectable nodes:
+  - Task nodes (with titles)
+  - Branch decision points (occurrence points, labeled with branch title)
+  - Branch possible worlds (labeled with possible world title, showing parent branch)
 - Search bar to filter nodes using fuzzy matching (RapidFuzz library)
   - Nodes ranked by match quality
 
 **Interaction**:
 - Clicking a node switches back to DAG display with the node centered
+  - Exception: When in select-target-node mode, clicking selects it as dependency target
 
 ### 5.3 Editor Panel
 

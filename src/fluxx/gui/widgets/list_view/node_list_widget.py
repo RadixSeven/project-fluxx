@@ -10,16 +10,16 @@ from PySide6.QtWidgets import (
 )
 from rapidfuzz import fuzz
 
-from fluxx.data.models import NodeId, Project
+from fluxx.data.models import NodeId, PossibleWorldId, Project
 from fluxx.gui.controller import ProjectController
 
 
 class NodeListWidget(QWidget):
-    """Filterable list view for navigating tasks and branches.
+    """Filterable list view for navigating tasks, branches, and possible worlds.
 
     Features:
     - Search box with fuzzy matching
-    - Shows all tasks and branches
+    - Shows all tasks, branches, and possible worlds
     - Click to select node
     - Updates when project changes
     """
@@ -33,8 +33,14 @@ class NodeListWidget(QWidget):
         super().__init__()
         self.controller = controller
 
-        # Store all nodes for filtering
-        self.all_nodes: list[tuple[NodeId, str, str]] = []  # (node_id, title, type)
+        # Store all selectable items for filtering
+        # Each entry is either:
+        # - (node_id, title, "Task")
+        # - (node_id, title, "Branch")
+        # - ((branch_node_id, possible_world_id), title, "PossibleWorld")
+        self.all_nodes: list[
+            tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str]
+        ] = []
 
         self._setup_ui()
 
@@ -94,13 +100,13 @@ class NodeListWidget(QWidget):
                     break
 
     def _load_nodes(self) -> None:
-        """Load all nodes from the project."""
+        """Load all nodes and possible worlds from the project."""
         project = self.controller.get_project()
         current_version = project.dag.current_version_id
 
         self.all_nodes.clear()
 
-        # Load all tasks
+        # Load all tasks, branches, and possible worlds
         for node_id, persistent_id in project.dag.node_map.items():
             if persistent_id in project.persistent_tasks:
                 persistent_task = project.persistent_tasks[persistent_id]
@@ -112,7 +118,17 @@ class NodeListWidget(QWidget):
                 persistent_branch = project.persistent_branches[persistent_id]
                 if current_version in persistent_branch.versions:
                     branch = persistent_branch.versions[current_version]
+                    # Add branch occurrence point
                     self.all_nodes.append((node_id, branch.title, "Branch"))
+
+                    # Add each possible world as a separate item
+                    for pw in branch.possible_worlds:
+                        pw_id = PossibleWorldId(pw.id)
+                        # Format title to show it's a possible world of this branch
+                        pw_display_title = f"{pw.title} (from {branch.title})"
+                        self.all_nodes.append(
+                            ((node_id, pw_id), pw_display_title, "PossibleWorld")
+                        )
 
         # Sort by title
         self.all_nodes.sort(key=lambda x: x[1].lower())
@@ -142,7 +158,9 @@ class NodeListWidget(QWidget):
         if selected_node_id is not None:
             self._on_selection_changed(selected_node_id)
 
-    def _fuzzy_filter(self, search_text: str) -> list[tuple[NodeId, str, str, float]]:
+    def _fuzzy_filter(
+        self, search_text: str
+    ) -> list[tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, float]]:
         """Filter nodes using fuzzy matching.
 
         Args:
@@ -151,7 +169,9 @@ class NodeListWidget(QWidget):
         Returns:
             List of (node_id, title, type, score) tuples sorted by score
         """
-        matches: list[tuple[NodeId, str, str, float]] = []
+        matches: list[
+            tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, float]
+        ] = []
 
         for node_id, title, node_type in self.all_nodes:
             # Calculate fuzzy match score
@@ -166,13 +186,18 @@ class NodeListWidget(QWidget):
 
         return matches
 
-    def _add_list_item(self, node_id: NodeId, title: str, node_type: str) -> None:
+    def _add_list_item(
+        self,
+        node_id: NodeId | tuple[NodeId, PossibleWorldId],
+        title: str,
+        node_type: str,
+    ) -> None:
         """Add an item to the list.
 
         Args:
-            node_id: Node ID
-            title: Node title
-            node_type: Node type (Task or Branch)
+            node_id: Node ID or (branch_node_id, possible_world_id) tuple
+            title: Display title
+            node_type: Node type (Task, Branch, or PossibleWorld)
         """
         # Format display text
         display_text = f"[{node_type}] {title}"
@@ -183,7 +208,9 @@ class NodeListWidget(QWidget):
         # Add type-specific styling
         if node_type == "Task":
             item.setForeground(Qt.GlobalColor.blue)
-        else:  # Branch
+        elif node_type == "Branch":
+            item.setForeground(Qt.GlobalColor.darkYellow)
+        else:  # PossibleWorld
             item.setForeground(Qt.GlobalColor.darkGreen)
 
         self.node_list.addItem(item)
@@ -202,6 +229,14 @@ class NodeListWidget(QWidget):
         Args:
             item: Clicked item
         """
-        node_id = item.data(Qt.ItemDataRole.UserRole)
-        if node_id is not None:
-            self.controller.select_node(node_id)
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data is not None:
+            # Check if this is a possible world (tuple/list) or a node (NodeId)
+            # PySide6 may convert tuples to lists when storing in QVariant
+            if isinstance(data, (tuple, list)):
+                # Possible world: select parent branch
+                branch_node_id = data[0]
+                self.controller.select_node(branch_node_id)
+            else:
+                # Task or branch: select normally
+                self.controller.select_node(data)
