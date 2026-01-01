@@ -10,6 +10,9 @@ from PySide6.QtWidgets import (
 
 from fluxx.data.models import Project, Sample
 from fluxx.gui.simulation.analysis import extract_timeline_data
+from fluxx.gui.simulation.gantt_analysis import extract_gantt_statistics
+from fluxx.gui.simulation.gantt_optimizer import optimize_gantt_schedule
+from fluxx.gui.simulation.gantt_widget import GanttChartWidget
 from fluxx.gui.simulation.probabilistic_timeline_widget import (
     ProbabilisticTimelineWidget,
 )
@@ -60,6 +63,16 @@ class SimulationResultsDialog(QDialog):
         )
         self.timeline_widget = ProbabilisticTimelineWidget(timeline_data)
         self.tabs.addTab(self.timeline_widget, "Probabilistic Timeline")
+
+        # Gantt chart (conservative timeline)
+        gantt_statistics = extract_gantt_statistics(
+            self.samples, self.project, percentile=0.97
+        )
+        gantt_schedule = optimize_gantt_schedule(gantt_statistics)
+        self.gantt_widget = GanttChartWidget(
+            gantt_schedule, gantt_statistics.dependencies
+        )
+        self.tabs.addTab(self.gantt_widget, "Conservative Gantt Chart")
 
         # Histogram view (completion date distribution)
         self.histogram_widget = HistogramWidget(self.samples)

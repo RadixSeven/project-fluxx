@@ -115,16 +115,17 @@ def test_results_dialog_contains_both_views(
     sample_data: list[Sample],
     simple_project: Project,
 ) -> None:
-    """Test that results dialog contains both timeline and histogram views."""
+    """Test that results dialog contains all three views."""
     dialog = SimulationResultsDialog(sample_data, simple_project)
     qtbot.addWidget(dialog)
 
-    # Should have two tabs
-    assert dialog.tabs.count() == 2
+    # Should have three tabs
+    assert dialog.tabs.count() == 3
 
     # Check tab names
     assert dialog.tabs.tabText(0) == "Probabilistic Timeline"
-    assert dialog.tabs.tabText(1) == "Completion Date Distribution"
+    assert dialog.tabs.tabText(1) == "Conservative Gantt Chart"
+    assert dialog.tabs.tabText(2) == "Completion Date Distribution"
 
 
 def test_results_dialog_timeline_widget_created(

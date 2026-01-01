@@ -5,6 +5,7 @@ description = "Project planning that incorporates uncertainty"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "highspy>=1.7.0",
     "matplotlib>=3.10.8",
     "networkx>=3.0.0",
     "numpy>=1.26.0",
