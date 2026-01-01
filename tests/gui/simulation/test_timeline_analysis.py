@@ -8,7 +8,6 @@ from fluxx.data.models import (
     DAG,
     DAGId,
     DAGVersionId,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     Project,
@@ -83,9 +82,9 @@ def simple_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("A"): PersistentObjectId("pa"),
-            NodeId("B"): PersistentObjectId("pb"),
-            NodeId("C"): PersistentObjectId("pc"),
+            TaskId("A"): PersistentObjectId("pa"),
+            TaskId("B"): PersistentObjectId("pb"),
+            TaskId("C"): PersistentObjectId("pc"),
         },
     )
 
@@ -153,9 +152,9 @@ def parent_child_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("P"): PersistentObjectId("p"),
-            NodeId("C1"): PersistentObjectId("c1"),
-            NodeId("C2"): PersistentObjectId("c2"),
+            TaskId("P"): PersistentObjectId("p"),
+            TaskId("C1"): PersistentObjectId("c1"),
+            TaskId("C2"): PersistentObjectId("c2"),
         },
     )
 
@@ -261,12 +260,12 @@ def nested_parent_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("GP"): PersistentObjectId("gp"),
-            NodeId("P1"): PersistentObjectId("p1"),
-            NodeId("P2"): PersistentObjectId("p2"),
-            NodeId("C1"): PersistentObjectId("c1"),
-            NodeId("C2"): PersistentObjectId("c2"),
-            NodeId("C3"): PersistentObjectId("c3"),
+            TaskId("GP"): PersistentObjectId("gp"),
+            TaskId("P1"): PersistentObjectId("p1"),
+            TaskId("P2"): PersistentObjectId("p2"),
+            TaskId("C1"): PersistentObjectId("c1"),
+            TaskId("C2"): PersistentObjectId("c2"),
+            TaskId("C3"): PersistentObjectId("c3"),
         },
     )
 
@@ -294,25 +293,25 @@ def simple_samples() -> list[Sample]:
         sample_id=SampleId(0),
         events=[
             TaskEvent(
-                node_id=NodeId("A"),
+                node_id=TaskId("A"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("A"),
+                node_id=TaskId("A"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("B"),
+                node_id=TaskId("B"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("B"),
+                node_id=TaskId("B"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
                 details={},
@@ -327,25 +326,25 @@ def simple_samples() -> list[Sample]:
         sample_id=SampleId(1),
         events=[
             TaskEvent(
-                node_id=NodeId("A"),
+                node_id=TaskId("A"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 2, 9, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("A"),
+                node_id=TaskId("A"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 2, 11, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("C"),
+                node_id=TaskId("C"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 2, 11, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("C"),
+                node_id=TaskId("C"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 2, 13, 0, tzinfo=UTC),
                 details={},
@@ -434,14 +433,14 @@ def test_extract_leaf_task_times_incomplete_events() -> None:
         sample_id=SampleId(0),
         events=[
             TaskEvent(
-                node_id=NodeId("A"),
+                node_id=TaskId("A"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                 details={},
             ),
             # No complete event for A
             TaskEvent(
-                node_id=NodeId("B"),
+                node_id=TaskId("B"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 details={},
@@ -765,25 +764,25 @@ def test_extract_timeline_data_with_parent(parent_child_project: Project) -> Non
             sample_id=SampleId(0),
             events=[
                 TaskEvent(
-                    node_id=NodeId("C1"),
+                    node_id=TaskId("C1"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=NodeId("C1"),
+                    node_id=TaskId("C1"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=NodeId("C2"),
+                    node_id=TaskId("C2"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=NodeId("C2"),
+                    node_id=TaskId("C2"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
                     details={},
@@ -829,7 +828,7 @@ def test_extract_timeline_data_dependencies() -> None:
     # Create task A with dependency on task B
     dep_a = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("B"),
+        target_node_id=TaskId("B"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -866,8 +865,8 @@ def test_extract_timeline_data_dependencies() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("A"): PersistentObjectId("pa"),
-            NodeId("B"): PersistentObjectId("pb"),
+            TaskId("A"): PersistentObjectId("pa"),
+            TaskId("B"): PersistentObjectId("pb"),
         },
     )
 
@@ -888,25 +887,25 @@ def test_extract_timeline_data_dependencies() -> None:
             sample_id=SampleId(0),
             events=[
                 TaskEvent(
-                    node_id=NodeId("A"),
+                    node_id=TaskId("A"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=NodeId("A"),
+                    node_id=TaskId("A"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=NodeId("B"),
+                    node_id=TaskId("B"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=NodeId("B"),
+                    node_id=TaskId("B"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
@@ -925,6 +924,6 @@ def test_extract_timeline_data_dependencies() -> None:
     dep_info = timeline_data.dependencies[0]
     assert isinstance(dep_info, DependencyInfo)
     assert dep_info.source_task_id == TaskId("A")
-    assert dep_info.dependency.target_node_id == NodeId("B")
+    assert dep_info.dependency.target_node_id == TaskId("B")
     assert dep_info.dependency.source_endpoint == Endpoint.START
     assert dep_info.dependency.target_endpoint == Endpoint.END

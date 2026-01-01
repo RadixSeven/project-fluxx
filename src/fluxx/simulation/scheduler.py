@@ -6,6 +6,7 @@ designed to be small and focused for easy testing.
 """
 
 from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 
@@ -95,7 +96,7 @@ def is_dependency_satisfied(
         # Extract branch and world IDs
         branch_id_str, world_id_str = node_str.split(":", 1)
         branch_id = BranchId(branch_id_str)
-        branch_node_id = NodeId(branch_id_str)
+        branch_node_id: NodeId = branch_id
         world_id = PossibleWorldId(world_id_str)
 
         # Check that the branch exists
@@ -107,8 +108,10 @@ def is_dependency_satisfied(
             return False
         return state.resolved_branches[branch_id] == world_id
 
+    node_id = cast(NodeId, target_node_id)
+
     # Check if target is a task
-    if is_task_node(target_node_id, state):
+    if is_task_node(node_id, state):
         task_id = TaskId(node_str)
 
         # Get the task to check if it's a parent task
@@ -153,7 +156,7 @@ def is_dependency_satisfied(
             return False
 
     # Check if target is a branch (just the branch itself, not a specific world)
-    elif is_branch_node(target_node_id, state):
+    elif is_branch_node(node_id, state):
         # This is a branch ID - just check if resolved
         branch_id = BranchId(node_str)
         return branch_id in state.resolved_branches

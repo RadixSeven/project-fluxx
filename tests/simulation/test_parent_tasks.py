@@ -8,7 +8,6 @@ from fluxx.data.models import (
     DAG,
     DAGId,
     DAGVersionId,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     Project,
@@ -74,9 +73,9 @@ def test_simulation_with_parent_task_should_skip_parent() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("B"): PersistentObjectId("pB"),
-            NodeId("B.1"): PersistentObjectId("pB.1"),
-            NodeId("B.2"): PersistentObjectId("pB.2"),
+            TaskId("B"): PersistentObjectId("pB"),
+            TaskId("B.1"): PersistentObjectId("pB.1"),
+            TaskId("B.2"): PersistentObjectId("pB.2"),
         },
     )
 
@@ -110,7 +109,7 @@ def test_simulation_with_parent_task_should_skip_parent() -> None:
 
     # Should have events for B.1 and B.2 (children), but NOT for B (parent)
     task_ids_in_events = {event.node_id for event in sample.events}
-    assert NodeId("B.1") in task_ids_in_events
-    assert NodeId("B.2") in task_ids_in_events
+    assert TaskId("B.1") in task_ids_in_events
+    assert TaskId("B.2") in task_ids_in_events
     # Parent task B should not have start/complete events
     # (its times are inferred from children)

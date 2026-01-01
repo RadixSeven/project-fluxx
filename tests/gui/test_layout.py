@@ -4,7 +4,6 @@ from fluxx.data.models import (
     ConstraintType,
     Dependency,
     Endpoint,
-    NodeId,
     Triangular,
 )
 from fluxx.gui.controller import ProjectController
@@ -34,7 +33,7 @@ def test_layout_single_task() -> None:
     layout = compute_dag_layout(project)
     positions = layout.node_positions
 
-    node_id = NodeId(task_id)
+    node_id = task_id
     assert node_id in positions
     # Horizontal layout: x increases with time
     assert positions[node_id].x() >= 0  # Should be at some x position
@@ -57,8 +56,8 @@ def test_layout_two_tasks_no_dependency() -> None:
     layout = compute_dag_layout(project)
     positions = layout.node_positions
 
-    node_id1 = NodeId(task_id1)
-    node_id2 = NodeId(task_id2)
+    node_id1 = task_id1
+    node_id2 = task_id2
 
     assert node_id1 in positions
     assert node_id2 in positions
@@ -83,18 +82,18 @@ def test_layout_two_tasks_with_dependency() -> None:
     # Add dependency: Task 1.start >= Task 2.end (Task 1 starts after Task 2 ends)
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task_id2),
+        target_node_id=task_id2,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task_id1), dep)
+    controller.add_dependency(task_id1, dep)
 
     project = controller.get_project()
     layout = compute_dag_layout(project)
     positions = layout.node_positions
 
-    node_id1 = NodeId(task_id1)
-    node_id2 = NodeId(task_id2)
+    node_id1 = task_id1
+    node_id2 = task_id2
 
     assert node_id1 in positions
     assert node_id2 in positions
@@ -125,27 +124,27 @@ def test_layout_three_tasks_chain() -> None:
     # This creates a sequence: Task 3 -> Task 2 -> Task 1
     dep12 = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task_id2),
+        target_node_id=task_id2,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     dep23 = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task_id3),
+        target_node_id=task_id3,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
-    controller.add_dependency(NodeId(task_id1), dep12)
-    controller.add_dependency(NodeId(task_id2), dep23)
+    controller.add_dependency(task_id1, dep12)
+    controller.add_dependency(task_id2, dep23)
 
     project = controller.get_project()
     layout = compute_dag_layout(project)
     positions = layout.node_positions
 
-    node_id1 = NodeId(task_id1)
-    node_id2 = NodeId(task_id2)
-    node_id3 = NodeId(task_id3)
+    node_id1 = task_id1
+    node_id2 = task_id2
+    node_id3 = task_id3
 
     assert node_id1 in positions
     assert node_id2 in positions
@@ -178,8 +177,8 @@ def test_layout_parent_child_tasks() -> None:
     layout = compute_dag_layout(project)
     positions = layout.node_positions
 
-    parent_node_id = NodeId(parent_id)
-    child_node_id = NodeId(child_id)
+    parent_node_id = parent_id
+    child_node_id = child_id
 
     # Both nodes should have positions
     assert parent_node_id in positions

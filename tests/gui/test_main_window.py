@@ -299,9 +299,7 @@ def test_unsaved_changes_on_new_cancel(window: MainWindow) -> None:
     window._check_unsaved_changes.assert_called_once()
 
     # Should NOT have created new project (task still exists)
-    from fluxx.data.models import NodeId
-
-    assert NodeId(task_id) in window.controller.get_project().dag.node_map
+    assert task_id in window.controller.get_project().dag.node_map
 
 
 def test_unsaved_changes_on_new_save(window: MainWindow) -> None:
@@ -349,15 +347,13 @@ def test_undo_action_triggered(
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    from fluxx.data.models import NodeId
-
-    assert NodeId(task_id) in window.controller.get_project().dag.node_map
+    assert task_id in window.controller.get_project().dag.node_map
 
     # Trigger undo
     window._on_undo()
 
     # Task should be gone
-    assert NodeId(task_id) not in window.controller.get_project().dag.node_map
+    assert task_id not in window.controller.get_project().dag.node_map
     # No error should have occurred
     mock_critical.assert_not_called()
 
@@ -379,15 +375,13 @@ def test_redo_action_triggered(
     # Undo
     window.controller.undo()
 
-    from fluxx.data.models import NodeId
-
-    assert NodeId(task_id) not in window.controller.get_project().dag.node_map
+    assert task_id not in window.controller.get_project().dag.node_map
 
     # Trigger redo
     window._on_redo()
 
     # Task should be back
-    assert NodeId(task_id) in window.controller.get_project().dag.node_map
+    assert task_id in window.controller.get_project().dag.node_map
     # No error should have occurred
     mock_critical.assert_not_called()
 

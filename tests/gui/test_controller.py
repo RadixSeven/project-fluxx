@@ -12,7 +12,6 @@ from fluxx.data.models import (
     ConstraintType,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
     ShiftedLognormal,
@@ -105,7 +104,7 @@ def test_create_task(controller: ProjectController, listener: SignalListener) ->
 
     assert task_id is not None
     project = controller.get_project()
-    assert NodeId(task_id) in project.dag.node_map
+    assert task_id in project.dag.node_map
     assert controller.is_modified()
 
     # Check signals
@@ -128,7 +127,7 @@ def test_update_task(controller: ProjectController) -> None:
 
     # Verify update
     project = controller.get_project()
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -148,7 +147,7 @@ def test_create_branch(controller: ProjectController) -> None:
 
     assert branch_id is not None
     project = controller.get_project()
-    assert NodeId(branch_id) in project.dag.node_map
+    assert branch_id in project.dag.node_map
     assert controller.is_modified()
 
 
@@ -165,7 +164,7 @@ def test_update_branch(controller: ProjectController) -> None:
 
     # Verify update
     project = controller.get_project()
-    persistent_id = project.dag.node_map[NodeId(branch_id)]
+    persistent_id = project.dag.node_map[branch_id]
     branch = project.persistent_branches[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -187,15 +186,15 @@ def test_add_dependency(controller: ProjectController) -> None:
     # Add dependency
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task1_id), dep)
+    controller.add_dependency(task1_id, dep)
 
     # Verify dependency
     project = controller.get_project()
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -217,18 +216,18 @@ def test_remove_dependency(controller: ProjectController) -> None:
     # Add dependency
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task1_id), dep)
+    controller.add_dependency(task1_id, dep)
 
     # Remove dependency
-    controller.remove_dependency(NodeId(task1_id), dep)
+    controller.remove_dependency(task1_id, dep)
 
     # Verify dependency removed
     project = controller.get_project()
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -256,7 +255,7 @@ def test_undo_redo(controller: ProjectController) -> None:
 
     # Task should be gone
     project = controller.get_project()
-    assert NodeId(task_id) not in project.dag.node_map
+    assert task_id not in project.dag.node_map
 
     # Can't undo, can redo
     assert not controller.can_undo()
@@ -267,7 +266,7 @@ def test_undo_redo(controller: ProjectController) -> None:
 
     # Task should be back
     project = controller.get_project()
-    assert NodeId(task_id) in project.dag.node_map
+    assert task_id in project.dag.node_map
 
     # Can undo, can't redo
     assert controller.can_undo()
@@ -285,9 +284,9 @@ def test_selection(controller: ProjectController, listener: SignalListener) -> N
     )
 
     # Select task
-    controller.select_node(NodeId(task_id))
+    controller.select_node(task_id)
 
-    assert controller.get_selected_node_id() == NodeId(task_id)
+    assert controller.get_selected_node_id() == task_id
 
     # Check signal
     signal_names = [s[0] for s in listener.signals_received]
@@ -330,7 +329,7 @@ def test_file_operations(controller: ProjectController) -> None:
         controller.open_project(file_path)
 
         project = controller.get_project()
-        persistent_id = project.dag.node_map[NodeId(task_id)]
+        persistent_id = project.dag.node_map[task_id]
         task = project.persistent_tasks[persistent_id].versions[
             project.dag.current_version_id
         ]
@@ -525,7 +524,7 @@ def test_add_sibling_without_distribution(controller: ProjectController) -> None
 
     # Verify the sibling was created
     project = controller.get_project()
-    child2_node_id = NodeId(child2_id)
+    child2_node_id = child2_id
     assert child2_node_id in project.dag.node_map
 
     # Get the sibling task
@@ -566,7 +565,7 @@ def test_convert_to_parent_uses_default_distribution(
 
     # Get the child task
     project = controller.get_project()
-    child_node_id = NodeId(child_id)
+    child_node_id = child_id
     child_persistent_id = project.dag.node_map[child_node_id]
     child_task = project.persistent_tasks[child_persistent_id].versions[
         project.dag.current_version_id

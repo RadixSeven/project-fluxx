@@ -14,12 +14,12 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PersistentBranch,
     PersistentObjectId,
     PersistentTask,
     PossibleWorld,
     PossibleWorldId,
+    PossibleWorldReference,
     Project,
     ProjectMetadata,
     Task,
@@ -82,7 +82,7 @@ def simple_project() -> Project:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("t1"),
+                target_node_id=TaskId("t1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -104,8 +104,8 @@ def simple_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("t2"): PersistentObjectId("pt2"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
         },
     )
 
@@ -138,13 +138,13 @@ def test_is_dependency_on_task_start() -> None:
     """Test detecting START endpoint dependencies."""
     dep_start = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     dep_end = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -157,13 +157,13 @@ def test_is_dependency_on_task_end() -> None:
     """Test detecting END endpoint dependencies."""
     dep_start = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     dep_end = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -176,13 +176,13 @@ def test_is_dependency_on_branch() -> None:
     """Test detecting OCCURRENCE_POINT endpoint dependencies."""
     dep_occurrence = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("b1"),
+        target_node_id=BranchId("b1"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     dep_end = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -200,9 +200,9 @@ def test_is_task_node(
     """Test checking if a node is a task."""
     state = SimulationState(simple_project, start_date, base_workers)
 
-    assert is_task_node(NodeId("t1"), state)
-    assert is_task_node(NodeId("t2"), state)
-    assert not is_task_node(NodeId("nonexistent"), state)
+    assert is_task_node(TaskId("t1"), state)
+    assert is_task_node(TaskId("t2"), state)
+    assert not is_task_node(TaskId("nonexistent"), state)
 
 
 def test_is_branch_node(
@@ -224,12 +224,12 @@ def test_is_branch_node(
         id=PersistentObjectId("pb1"),
         versions={simple_project.dag.current_version_id: branch},
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
-    assert is_branch_node(NodeId("b1"), state)
-    assert not is_branch_node(NodeId("t1"), state)
-    assert not is_branch_node(NodeId("nonexistent"), state)
+    assert is_branch_node(BranchId("b1"), state)
+    assert not is_branch_node(TaskId("t1"), state)
+    assert not is_branch_node(BranchId("nonexistent"), state)
 
 
 # Tests for dependency satisfaction
@@ -243,7 +243,7 @@ def test_is_dependency_satisfied_task_end(
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -264,7 +264,7 @@ def test_is_dependency_satisfied_task_start(
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -301,12 +301,12 @@ def test_is_dependency_satisfied_branch_resolved(
         id=PersistentObjectId("pb1"),
         versions={simple_project.dag.current_version_id: branch},
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("b1"),
+        target_node_id=BranchId("b1"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -339,13 +339,13 @@ def test_is_dependency_satisfied_possible_world(
         id=PersistentObjectId("pb1"),
         versions={simple_project.dag.current_version_id: branch},
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
     # Dependency on specific world (pw1)
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("b1:pw1"),
+        target_node_id=BranchId("b1:pw1"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -370,7 +370,7 @@ def test_is_dependency_satisfied_unknown_node(
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("nonexistent"),
+        target_node_id=TaskId("nonexistent"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -668,7 +668,7 @@ def test_get_unresolved_branches_exists(
         id=PersistentObjectId("pb1"),
         versions={simple_project.dag.current_version_id: branch},
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
     unresolved = get_unresolved_branches(state)
@@ -722,7 +722,7 @@ def test_select_next_action_branch(
         id=PersistentObjectId("pb1"),
         versions={simple_project.dag.current_version_id: branch},
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
     action = select_next_action(state, rng)
@@ -871,7 +871,7 @@ def test_is_dependency_satisfied_possible_world_invalid_branch(
     # Dependency on a possible world for a branch that doesn't exist
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("nonexistent_branch:pw1"),
+        target_node_id=PossibleWorldReference("nonexistent_branch:pw1"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -889,7 +889,7 @@ def test_is_dependency_satisfied_task_unknown_endpoint(
     # Dependency with OCCURRENCE endpoint on a task (invalid)
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.OCCURRENCE,  # Invalid for tasks
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -919,13 +919,13 @@ def test_is_dependency_satisfied_task_not_found(
     )
 
     # Add to project
-    state.project.dag.node_map[NodeId("old_task")] = PersistentObjectId("pt_old")
+    state.project.dag.node_map[TaskId("old_task")] = PersistentObjectId("pt_old")
     state.project.persistent_tasks[PersistentObjectId("pt_old")] = persistent_old
 
     # Now is_task_node() will return True, but get_task() will raise KeyError
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("old_task"),
+        target_node_id=TaskId("old_task"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -974,9 +974,9 @@ def test_is_dependency_satisfied_parent_task_end_incomplete(
             id=DAGId("dag1"),
             current_version_id=version_id,
             node_map={
-                NodeId("parent"): PersistentObjectId("pp"),
-                NodeId("child1"): PersistentObjectId("pc1"),
-                NodeId("child2"): PersistentObjectId("pc2"),
+                TaskId("parent"): PersistentObjectId("pp"),
+                TaskId("child1"): PersistentObjectId("pc1"),
+                TaskId("child2"): PersistentObjectId("pc2"),
             },
         ),
         persistent_tasks={
@@ -997,7 +997,7 @@ def test_is_dependency_satisfied_parent_task_end_incomplete(
     # Dependency on parent task END
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("parent"),
+        target_node_id=TaskId("parent"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -1050,9 +1050,9 @@ def test_is_dependency_satisfied_parent_task_end_complete(
             id=DAGId("dag1"),
             current_version_id=version_id,
             node_map={
-                NodeId("parent"): PersistentObjectId("pp"),
-                NodeId("child1"): PersistentObjectId("pc1"),
-                NodeId("child2"): PersistentObjectId("pc2"),
+                TaskId("parent"): PersistentObjectId("pp"),
+                TaskId("child1"): PersistentObjectId("pc1"),
+                TaskId("child2"): PersistentObjectId("pc2"),
             },
         ),
         persistent_tasks={
@@ -1073,7 +1073,7 @@ def test_is_dependency_satisfied_parent_task_end_complete(
     # Dependency on parent task END
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("parent"),
+        target_node_id=TaskId("parent"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -1104,7 +1104,7 @@ def test_get_eligible_tasks_skips_old_version_tasks(
     )
 
     # Add to project
-    state.project.dag.node_map[NodeId("t_old")] = PersistentObjectId("pt_old")
+    state.project.dag.node_map[TaskId("t_old")] = PersistentObjectId("pt_old")
     state.project.persistent_tasks[PersistentObjectId("pt_old")] = persistent_task
 
     # Get eligible tasks - should not include the old version task

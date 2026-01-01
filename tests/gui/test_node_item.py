@@ -5,7 +5,6 @@ from PySide6.QtWidgets import QGraphicsItem
 from fluxx.data.models import (
     Branch,
     BranchId,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
     Task,
@@ -17,7 +16,7 @@ from fluxx.gui.widgets.dag_view.node_item import BranchNodeItem, NodeItem, TaskN
 
 def test_node_item_initialization() -> None:
     """Test NodeItem initialization."""
-    node_id = NodeId("task_1")
+    node_id = TaskId("task_1")
     title = "Test Task"
 
     node = NodeItem(node_id, title, width=200, height=80)
@@ -31,21 +30,21 @@ def test_node_item_initialization() -> None:
 
 def test_node_item_selectable() -> None:
     """Test that node item is selectable."""
-    node = NodeItem(NodeId("task_1"), "Test")
+    node = NodeItem(TaskId("task_1"), "Test")
 
     assert node.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
 
 
 def test_node_item_accepts_hover() -> None:
     """Test that node item accepts hover events."""
-    node = NodeItem(NodeId("task_1"), "Test")
+    node = NodeItem(TaskId("task_1"), "Test")
 
     assert node.acceptHoverEvents() is True
 
 
 def test_node_item_hover_state_change() -> None:
     """Test hover state changes."""
-    node = NodeItem(NodeId("task_1"), "Test")
+    node = NodeItem(TaskId("task_1"), "Test")
 
     # Initially not hovered
     assert node._is_hovered is False
@@ -61,7 +60,7 @@ def test_node_item_hover_state_change() -> None:
 
 def test_node_item_normal_state() -> None:
     """Test node in normal state."""
-    node = NodeItem(NodeId("task_1"), "Test Task")
+    node = NodeItem(TaskId("task_1"), "Test Task")
 
     # Set normal state
     node._is_hovered = False
@@ -74,7 +73,7 @@ def test_node_item_normal_state() -> None:
 
 def test_node_item_hovered_state() -> None:
     """Test node in hovered state."""
-    node = NodeItem(NodeId("task_1"), "Test Task")
+    node = NodeItem(TaskId("task_1"), "Test Task")
 
     # Set hovered state
     node._is_hovered = True
@@ -87,7 +86,7 @@ def test_node_item_hovered_state() -> None:
 
 def test_node_item_selected_state() -> None:
     """Test node in selected state."""
-    node = NodeItem(NodeId("task_1"), "Test Task")
+    node = NodeItem(TaskId("task_1"), "Test Task")
 
     # Set selected state
     node._is_hovered = False
@@ -102,7 +101,7 @@ def test_node_item_paint_none_painter() -> None:
     """Test paint with None painter does nothing."""
     from PySide6.QtWidgets import QStyleOptionGraphicsItem
 
-    node = NodeItem(NodeId("task_1"), "Test")
+    node = NodeItem(TaskId("task_1"), "Test")
 
     # Should not raise exception when painter is None
     option = QStyleOptionGraphicsItem()
@@ -118,9 +117,9 @@ def test_task_node_item_initialization() -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    node = TaskNodeItem(NodeId(task.id), task)
+    node = TaskNodeItem(task.id, task)
 
-    assert node.node_id == NodeId(task.id)
+    assert node.node_id == task.id
     assert node.title == task.title
     assert node.task == task
 
@@ -133,7 +132,7 @@ def test_task_node_item_colors() -> None:
         description="Description",
     )
 
-    node = TaskNodeItem(NodeId(task.id), task)
+    node = TaskNodeItem(task.id, task)
 
     # Verify task-specific colors are set
     assert node._base_color.red() == 200
@@ -156,9 +155,9 @@ def test_branch_node_item_initialization() -> None:
         ],
     )
 
-    node = BranchNodeItem(NodeId(branch.id), branch)
+    node = BranchNodeItem(branch.id, branch)
 
-    assert node.node_id == NodeId(branch.id)
+    assert node.node_id == branch.id
     assert node.title == branch.title
     assert node.branch == branch
 
@@ -171,7 +170,7 @@ def test_branch_node_item_colors() -> None:
         description="Description",
     )
 
-    node = BranchNodeItem(NodeId(branch.id), branch)
+    node = BranchNodeItem(branch.id, branch)
 
     # Verify branch-specific colors are set (orange) - updated for circle rendering
     assert node._base_color.red() == 255

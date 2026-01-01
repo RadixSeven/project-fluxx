@@ -9,7 +9,6 @@ from fluxx.data.models import (
     BranchId,
     DAGId,
     DAGVersionId,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     PossibleWorldId,
@@ -88,9 +87,9 @@ def simple_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("t2"): PersistentObjectId("pt2"),
-            NodeId("t3"): PersistentObjectId("pt3"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+            TaskId("t3"): PersistentObjectId("pt3"),
         },
     )
 
@@ -270,14 +269,14 @@ def test_add_event(
     state = SimulationState(simple_project, start_date, base_workers)
 
     event1 = TaskEvent(
-        node_id=NodeId("t1"),
+        node_id=TaskId("t1"),
         event_type="start",
         timestamp=start_date,
         details={"worker_id": "w1"},
     )
 
     event2 = TaskEvent(
-        node_id=NodeId("t1"),
+        node_id=TaskId("t1"),
         event_type="complete",
         timestamp=start_date + timedelta(hours=2),
         details={"worker_id": "w1"},
@@ -329,7 +328,7 @@ def test_get_task_not_in_persistent_tasks(
     state = SimulationState(simple_project, start_date, base_workers)
 
     # Add a node to node_map that doesn't exist in persistent_tasks
-    state.project.dag.node_map[NodeId("orphan")] = PersistentObjectId("missing")
+    state.project.dag.node_map[TaskId("orphan")] = PersistentObjectId("missing")
 
     with pytest.raises(KeyError, match="Task orphan not found in persistent_tasks"):
         state.get_task(TaskId("orphan"))
@@ -357,7 +356,7 @@ def test_get_task_not_in_current_version(
     )
 
     # Add to project
-    state.project.dag.node_map[NodeId("t_old")] = PersistentObjectId("pt_old")
+    state.project.dag.node_map[TaskId("t_old")] = PersistentObjectId("pt_old")
     state.project.persistent_tasks[PersistentObjectId("pt_old")] = persistent_task
 
     with pytest.raises(KeyError, match="Task t_old not found in current version"):

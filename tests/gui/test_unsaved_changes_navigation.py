@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from pytestqt.qtbot import QtBot
 
-from fluxx.data.models import NodeId, Triangular
+from fluxx.data.models import Triangular
 from fluxx.gui.main_window import MainWindow
 
 
@@ -18,7 +18,7 @@ def test_navigation_with_unsaved_changes_cancel(qtbot: QtBot) -> None:
     task2_id = controller.create_task(title="Task 2", duration_distribution=dist)
 
     # Select Task 1
-    controller.select_node(NodeId(task1_id))
+    controller.select_node(task1_id)
 
     # Modify Task 1 in the UI
     window.editor_panel.task_editor.title_field.setText("Task 1 Modified")
@@ -43,10 +43,10 @@ def test_navigation_with_unsaved_changes_cancel(qtbot: QtBot) -> None:
         mock_instance.clickedButton.return_value = "Cancel"
 
         # Try to select Task 2
-        controller.select_node(NodeId(task2_id))
+        controller.select_node(task2_id)
 
         # Verify selection didn't change
-        assert controller.get_selected_node_id() == NodeId(task1_id)
+        assert controller.get_selected_node_id() == task1_id
         assert window.editor_panel.task_editor.is_dirty()
 
 
@@ -62,7 +62,7 @@ def test_navigation_with_unsaved_changes_revert(qtbot: QtBot) -> None:
     task2_id = controller.create_task(title="Task 2", duration_distribution=dist)
 
     # Select Task 1
-    controller.select_node(NodeId(task1_id))
+    controller.select_node(task1_id)
 
     # Modify Task 1
     window.editor_panel.task_editor.title_field.setText("Task 1 Modified")
@@ -76,13 +76,13 @@ def test_navigation_with_unsaved_changes_revert(qtbot: QtBot) -> None:
         mock_instance.clickedButton.return_value = "Revert"
 
         # Try to select Task 2
-        controller.select_node(NodeId(task2_id))
+        controller.select_node(task2_id)
 
         # Verify selection changed
-        assert controller.get_selected_node_id() == NodeId(task2_id)
+        assert controller.get_selected_node_id() == task2_id
 
         # Re-select Task 1 and check title (should be original)
-        controller.select_node(NodeId(task1_id))
+        controller.select_node(task1_id)
         assert window.editor_panel.task_editor.title_field.text() == "Task 1"
 
 
@@ -98,7 +98,7 @@ def test_navigation_with_unsaved_changes_apply(qtbot: QtBot) -> None:
     task2_id = controller.create_task(title="Task 2", duration_distribution=dist)
 
     # Select Task 1
-    controller.select_node(NodeId(task1_id))
+    controller.select_node(task1_id)
 
     # Modify Task 1
     window.editor_panel.task_editor.title_field.setText("Task 1 Modified")
@@ -112,14 +112,14 @@ def test_navigation_with_unsaved_changes_apply(qtbot: QtBot) -> None:
         mock_instance.clickedButton.return_value = "Apply"
 
         # Try to select Task 2
-        controller.select_node(NodeId(task2_id))
+        controller.select_node(task2_id)
 
         # Verify selection changed
-        assert controller.get_selected_node_id() == NodeId(task2_id)
+        assert controller.get_selected_node_id() == task2_id
 
         # Verify changes were saved in the project
         project = controller.get_project()
-        persistent_id = project.dag.node_map[NodeId(task1_id)]
+        persistent_id = project.dag.node_map[task1_id]
         task = project.persistent_tasks[persistent_id].versions[
             project.dag.current_version_id
         ]
@@ -138,7 +138,7 @@ def test_navigation_with_unsaved_changes_apply_failed(qtbot: QtBot) -> None:
     task2_id = controller.create_task(title="Task 2", duration_distribution=dist)
 
     # Select Task 1
-    controller.select_node(NodeId(task1_id))
+    controller.select_node(task1_id)
 
     # Modify Task 1 with invalid value (empty title)
     window.editor_panel.task_editor.title_field.setText("")
@@ -153,8 +153,8 @@ def test_navigation_with_unsaved_changes_apply_failed(qtbot: QtBot) -> None:
         mock_instance.clickedButton.return_value = "Apply"
 
         # Try to select Task 2
-        controller.select_node(NodeId(task2_id))
+        controller.select_node(task2_id)
 
         # Verify selection DID NOT change because Apply failed (invalid title)
-        assert controller.get_selected_node_id() == NodeId(task1_id)
+        assert controller.get_selected_node_id() == task1_id
         assert window.editor_panel.task_editor.is_dirty()

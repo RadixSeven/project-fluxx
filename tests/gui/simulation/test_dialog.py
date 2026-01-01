@@ -10,7 +10,6 @@ from fluxx.data.models import (
     DAG,
     DAGId,
     DAGVersionId,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     Project,
@@ -41,7 +40,7 @@ def simple_project() -> Project:
     dag = DAG(
         id=DAGId("dag1"),
         current_version_id=version_id,
-        node_map={NodeId("t1"): PersistentObjectId("pt1")},
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
     )
 
     metadata = ProjectMetadata(

@@ -4,14 +4,14 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QColor
 from pytestqt.qtbot import QtBot
 
-from fluxx.data.models import ConstraintType, NodeId
+from fluxx.data.models import ConstraintType, TaskId
 from fluxx.gui.widgets.dag_view.edge_item import EdgeItem
 
 
 def test_edge_item_initialization() -> None:
     """Test EdgeItem initialization."""
-    source_id = NodeId("task_1")
-    target_id = NodeId("task_2")
+    source_id = TaskId("task_1")
+    target_id = TaskId("task_2")
     source_pos = QPointF(100, 100)
     target_pos = QPointF(300, 200)
 
@@ -27,8 +27,8 @@ def test_edge_item_initialization() -> None:
 
 def test_edge_item_initialization_with_constraint() -> None:
     """Test EdgeItem initialization with explicit constraint type."""
-    source_id = NodeId("task_1")
-    target_id = NodeId("task_2")
+    source_id = TaskId("task_1")
+    target_id = TaskId("task_2")
     source_pos = QPointF(100, 100)
     target_pos = QPointF(300, 200)
 
@@ -48,7 +48,7 @@ def test_edge_item_path_creation() -> None:
     source_pos = QPointF(0, 0)
     target_pos = QPointF(100, 100)
 
-    edge = EdgeItem(NodeId("task_1"), NodeId("task_2"), source_pos, target_pos)
+    edge = EdgeItem(TaskId("task_1"), TaskId("task_2"), source_pos, target_pos)
 
     path = edge.path()
     assert not path.isEmpty()
@@ -57,8 +57,8 @@ def test_edge_item_path_creation() -> None:
 def test_edge_item_update_positions() -> None:
     """Test updating edge positions."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -75,8 +75,8 @@ def test_edge_item_update_positions() -> None:
 def test_edge_item_hover_state_change(qtbot: QtBot) -> None:
     """Test hover state changes."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -96,8 +96,8 @@ def test_edge_item_hover_state_change(qtbot: QtBot) -> None:
 def test_edge_item_pen_width_normal() -> None:
     """Test pen width in normal state."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -111,8 +111,8 @@ def test_edge_item_pen_width_normal() -> None:
 def test_edge_item_pen_width_hovered() -> None:
     """Test pen width changes in hovered state."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -127,8 +127,8 @@ def test_edge_item_paint_none_painter() -> None:
     from PySide6.QtWidgets import QStyleOptionGraphicsItem
 
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -141,8 +141,8 @@ def test_edge_item_paint_none_painter() -> None:
 def test_edge_item_draw_arrow_zero_length() -> None:
     """Test drawing arrow with zero-length edge."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(100, 100),
         QPointF(100, 100),  # Same position
     )
@@ -155,8 +155,8 @@ def test_edge_item_draw_arrow_zero_length() -> None:
 def test_edge_item_colors() -> None:
     """Test edge color properties."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -169,8 +169,8 @@ def test_edge_item_colors() -> None:
 def test_edge_item_accepts_hover_events() -> None:
     """Test that edge accepts hover events."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )
@@ -181,8 +181,8 @@ def test_edge_item_accepts_hover_events() -> None:
 def test_edge_item_z_value() -> None:
     """Test that edges are behind nodes."""
     edge = EdgeItem(
-        NodeId("task_1"),
-        NodeId("task_2"),
+        TaskId("task_1"),
+        TaskId("task_2"),
         QPointF(0, 0),
         QPointF(100, 100),
     )

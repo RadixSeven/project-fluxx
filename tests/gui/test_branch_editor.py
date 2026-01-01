@@ -153,9 +153,7 @@ def test_branch_editor_apply_changes(
 
     # Verify branch was updated
     project = controller.get_project()
-    from fluxx.data.models import NodeId
-
-    node_id = NodeId(branch_id)
+    node_id = branch_id
     persistent_id = project.dag.node_map[node_id]
     branch = project.persistent_branches[persistent_id].versions[
         project.dag.current_version_id
@@ -287,7 +285,6 @@ def test_branch_editor_add_dependency_and_apply(
         ConstraintType,
         Dependency,
         Endpoint,
-        NodeId,
         PossibleWorld,
         Triangular,
     )
@@ -312,7 +309,7 @@ def test_branch_editor_add_dependency_and_apply(
     # Simulate adding a dependency to the task
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -320,7 +317,7 @@ def test_branch_editor_add_dependency_and_apply(
     # Get current dependencies from branch
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(branch_id)]
+    persistent_id = project.dag.node_map[branch_id]
     branch = project.persistent_branches[persistent_id].versions[current_version]
     current_deps = list(branch.dependencies)
     current_deps.append(dep)
@@ -334,12 +331,12 @@ def test_branch_editor_add_dependency_and_apply(
 
     # Verify the dependency was added
     project_after = controller.get_project()
-    persistent_id_after = project_after.dag.node_map[NodeId(branch_id)]
+    persistent_id_after = project_after.dag.node_map[branch_id]
     branch_after = project_after.persistent_branches[persistent_id_after].versions[
         project_after.dag.current_version_id
     ]
     assert len(branch_after.dependencies) == 1
-    assert branch_after.dependencies[0].target_node_id == NodeId(task_id)
+    assert branch_after.dependencies[0].target_node_id == task_id
 
 
 def test_branch_editor_dependency_display(
@@ -351,7 +348,6 @@ def test_branch_editor_dependency_display(
         ConstraintType,
         Dependency,
         Endpoint,
-        NodeId,
         PossibleWorld,
         Triangular,
     )
@@ -373,11 +369,11 @@ def test_branch_editor_dependency_display(
     # Add dependency: branch.occurrence >= task.end
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(branch_id), dep)
+    controller.add_dependency(branch_id, dep)
 
     # Load branch in editor
     branch_editor.load_branch(branch_id)

@@ -28,7 +28,6 @@ from fluxx.data.models import (
     Dependency,
     Endpoint,
     EventType,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     PossibleWorld,
@@ -77,13 +76,13 @@ def test_add_task_creates_new_version(empty_project: Project) -> None:
     assert updated_project.dag.current_version_id != initial_version
 
     # Task should be in node map
-    assert NodeId(task_id) in updated_project.dag.node_map
+    assert task_id in updated_project.dag.node_map
 
     # Event should be recorded
     assert len(updated_project.history_events) == 1
     event = updated_project.history_events[0]
     assert event.event_type == EventType.NODE_CREATED
-    assert NodeId(task_id) in event.affected_nodes
+    assert task_id in event.affected_nodes
 
     # Metadata last_modified should be updated
     assert updated_project.metadata.last_modified > empty_project.metadata.last_modified
@@ -109,7 +108,7 @@ def test_add_task_with_parent(empty_project: Project) -> None:
     )
 
     # Get the parent task from the new version
-    parent_persistent_id = updated_project.dag.node_map[NodeId(parent_id)]
+    parent_persistent_id = updated_project.dag.node_map[parent_id]
     parent_task = updated_project.persistent_tasks[parent_persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -120,7 +119,7 @@ def test_add_task_with_parent(empty_project: Project) -> None:
     assert parent_task.duration_distribution == Triangular(min=1.0, mode=2.0, max=3.0)
 
     # Get the child task
-    child_persistent_id = updated_project.dag.node_map[NodeId(child_id)]
+    child_persistent_id = updated_project.dag.node_map[child_id]
     child_task = updated_project.persistent_tasks[child_persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -140,7 +139,7 @@ def test_add_task_with_allowed_workers(empty_project: Project) -> None:
     )
 
     # Get the task
-    persistent_id = updated_project.dag.node_map[NodeId(task_id)]
+    persistent_id = updated_project.dag.node_map[task_id]
     task = updated_project.persistent_tasks[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -179,13 +178,13 @@ def test_add_branch_creates_new_version(empty_project: Project) -> None:
     assert updated_project.dag.current_version_id != initial_version
 
     # Branch should be in node map
-    assert NodeId(branch_id) in updated_project.dag.node_map
+    assert branch_id in updated_project.dag.node_map
 
     # Event should be recorded
     assert len(updated_project.history_events) == 1
     event = updated_project.history_events[0]
     assert event.event_type == EventType.NODE_CREATED
-    assert NodeId(branch_id) in event.affected_nodes
+    assert branch_id in event.affected_nodes
 
 
 def test_add_dependency_creates_new_version(empty_project: Project) -> None:
@@ -209,18 +208,18 @@ def test_add_dependency_creates_new_version(empty_project: Project) -> None:
     # Add dependency: task1.end >= task2.start
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
-    updated_project = add_dependency(project, NodeId(task1_id), dep)
+    updated_project = add_dependency(project, task1_id, dep)
 
     # Version should change
     assert updated_project.dag.current_version_id != initial_version
 
     # Task should have the dependency
-    persistent_id = updated_project.dag.node_map[NodeId(task1_id)]
+    persistent_id = updated_project.dag.node_map[task1_id]
     task = updated_project.persistent_tasks[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -229,7 +228,7 @@ def test_add_dependency_creates_new_version(empty_project: Project) -> None:
     # Event should be recorded
     last_event = updated_project.history_events[-1]
     assert last_event.event_type == EventType.NODE_MODIFIED
-    assert NodeId(task1_id) in last_event.affected_nodes
+    assert task1_id in last_event.affected_nodes
 
 
 def test_add_dependency_detects_cycle(empty_project: Project) -> None:
@@ -251,11 +250,11 @@ def test_add_dependency_detects_cycle(empty_project: Project) -> None:
     # Add dependency: task1.end >= task2.start
     dep1 = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep1)
+    project = add_dependency(project, task1_id, dep1)
 
     # Try to add dependency that creates cycle: task2.end >= task1.end
     # This creates: task2.start -> task2.end -> task1.end (via dep2)
@@ -267,13 +266,13 @@ def test_add_dependency_detects_cycle(empty_project: Project) -> None:
     # This creates: task1.end -> task2.start -> task1.end (cycle!)
     dep2 = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(DAGOperationError, match="Cycle detected"):
-        add_dependency(project, NodeId(task2_id), dep2)
+        add_dependency(project, task2_id, dep2)
 
 
 def test_add_dependency_invalid_endpoint(empty_project: Project) -> None:
@@ -289,13 +288,13 @@ def test_add_dependency_invalid_endpoint(empty_project: Project) -> None:
     # Try to use OCCURRENCE endpoint on a task (invalid)
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.EQUAL,
     )
 
     with pytest.raises(DAGOperationError, match="cannot use OCCURRENCE"):
-        add_dependency(project, NodeId(task_id), dep)
+        add_dependency(project, task_id, dep)
 
 
 def test_generate_task_id_is_unique() -> None:
@@ -353,7 +352,7 @@ def test_task_persists_across_versions(empty_project: Project) -> None:
     version2 = project.dag.current_version_id
 
     # Task 1 should exist in both versions
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     persistent_task = project.persistent_tasks[persistent_id]
 
     assert version1 in persistent_task.versions
@@ -388,8 +387,8 @@ def test_add_task_with_existing_branches(empty_project: Project) -> None:
     )
 
     # Both branch and task should exist in the new version
-    assert NodeId(branch_id) in updated_project.dag.node_map
-    assert NodeId(task_id) in updated_project.dag.node_map
+    assert branch_id in updated_project.dag.node_map
+    assert task_id in updated_project.dag.node_map
 
 
 def test_add_branch_with_existing_tasks(empty_project: Project) -> None:
@@ -414,8 +413,8 @@ def test_add_branch_with_existing_tasks(empty_project: Project) -> None:
     )
 
     # Both task and branch should exist in the new version
-    assert NodeId(task_id) in updated_project.dag.node_map
-    assert NodeId(branch_id) in updated_project.dag.node_map
+    assert task_id in updated_project.dag.node_map
+    assert branch_id in updated_project.dag.node_map
 
 
 def test_add_branch_with_existing_branches(empty_project: Project) -> None:
@@ -441,8 +440,8 @@ def test_add_branch_with_existing_branches(empty_project: Project) -> None:
     )
 
     # Both branches should exist in the new version
-    assert NodeId(branch1_id) in updated_project.dag.node_map
-    assert NodeId(branch2_id) in updated_project.dag.node_map
+    assert branch1_id in updated_project.dag.node_map
+    assert branch2_id in updated_project.dag.node_map
 
 
 def test_add_dependency_with_nonexistent_source(empty_project: Project) -> None:
@@ -458,13 +457,13 @@ def test_add_dependency_with_nonexistent_source(empty_project: Project) -> None:
     # Try to add dependency from non-existent node
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(DAGOperationError, match="Source node.*does not exist"):
-        add_dependency(project, NodeId("nonexistent"), dep)
+        add_dependency(project, TaskId("nonexistent"), dep)
 
 
 def test_add_dependency_to_branch(empty_project: Project) -> None:
@@ -491,15 +490,15 @@ def test_add_dependency_to_branch(empty_project: Project) -> None:
     # Add dependency from branch to task
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
-    updated_project = add_dependency(project, NodeId(branch_id), dep)
+    updated_project = add_dependency(project, branch_id, dep)
 
     # Branch should have the dependency
-    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    persistent_id = updated_project.dag.node_map[branch_id]
     branch = updated_project.persistent_branches[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -535,15 +534,15 @@ def test_add_dependency_to_task_with_existing_branches(empty_project: Project) -
     # Add dependency between tasks (should copy branch to new version)
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
-    updated_project = add_dependency(project, NodeId(task1_id), dep)
+    updated_project = add_dependency(project, task1_id, dep)
 
     # Branch should still exist in new version
-    assert NodeId(branch_id) in updated_project.dag.node_map
+    assert branch_id in updated_project.dag.node_map
 
 
 def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
@@ -574,7 +573,7 @@ def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
             # Self-reference creates a cycle
             Dependency(
                 source_endpoint=Endpoint.OCCURRENCE,
-                target_node_id=NodeId("corrupt"),
+                target_node_id=BranchId("corrupt"),
                 target_endpoint=Endpoint.OCCURRENCE,
                 constraint_type=ConstraintType.EQUAL,
             )
@@ -593,7 +592,7 @@ def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
             update={
                 "node_map": {
                     **project.dag.node_map,
-                    NodeId("corrupt"): persistent_corrupt.id,
+                    BranchId("corrupt"): persistent_corrupt.id,
                 }
             }
         ),
@@ -633,7 +632,7 @@ def test_update_task_title(empty_project: Project) -> None:
     assert updated_project.dag.current_version_id != initial_version
 
     # Get the updated task
-    persistent_id = updated_project.dag.node_map[NodeId(task_id)]
+    persistent_id = updated_project.dag.node_map[task_id]
     task = updated_project.persistent_tasks[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -645,7 +644,7 @@ def test_update_task_title(empty_project: Project) -> None:
     # Event should be recorded
     last_event = updated_project.history_events[-1]
     assert last_event.event_type == EventType.NODE_MODIFIED
-    assert NodeId(task_id) in last_event.affected_nodes
+    assert task_id in last_event.affected_nodes
 
 
 def test_update_task_multiple_fields(empty_project: Project) -> None:
@@ -670,7 +669,7 @@ def test_update_task_multiple_fields(empty_project: Project) -> None:
     )
 
     # Get the updated task
-    persistent_id = updated_project.dag.node_map[NodeId(task_id)]
+    persistent_id = updated_project.dag.node_map[task_id]
     task = updated_project.persistent_tasks[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -749,7 +748,7 @@ def test_update_branch_title(empty_project: Project) -> None:
     assert updated_project.dag.current_version_id != initial_version
 
     # Get the updated branch
-    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    persistent_id = updated_project.dag.node_map[branch_id]
     branch = updated_project.persistent_branches[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -761,7 +760,7 @@ def test_update_branch_title(empty_project: Project) -> None:
     # Event should be recorded
     last_event = updated_project.history_events[-1]
     assert last_event.event_type == EventType.NODE_MODIFIED
-    assert NodeId(branch_id) in last_event.affected_nodes
+    assert branch_id in last_event.affected_nodes
 
 
 def test_update_branch_possible_worlds(empty_project: Project) -> None:
@@ -784,7 +783,7 @@ def test_update_branch_possible_worlds(empty_project: Project) -> None:
     updated_project = update_branch(project, branch_id, possible_worlds=new_worlds)
 
     # Get the updated branch
-    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    persistent_id = updated_project.dag.node_map[branch_id]
     branch = updated_project.persistent_branches[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -841,22 +840,22 @@ def test_remove_dependency_from_task(empty_project: Project) -> None:
     # Add dependency
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep)
+    project = add_dependency(project, task1_id, dep)
 
     initial_version = project.dag.current_version_id
 
     # Remove the dependency
-    updated_project = remove_dependency(project, NodeId(task1_id), dep)
+    updated_project = remove_dependency(project, task1_id, dep)
 
     # Version should change
     assert updated_project.dag.current_version_id != initial_version
 
     # Task should no longer have the dependency
-    persistent_id = updated_project.dag.node_map[NodeId(task1_id)]
+    persistent_id = updated_project.dag.node_map[task1_id]
     task = updated_project.persistent_tasks[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -866,7 +865,7 @@ def test_remove_dependency_from_task(empty_project: Project) -> None:
     # Event should be recorded
     last_event = updated_project.history_events[-1]
     assert last_event.event_type == EventType.NODE_MODIFIED
-    assert NodeId(task1_id) in last_event.affected_nodes
+    assert task1_id in last_event.affected_nodes
 
 
 def test_remove_dependency_from_branch(empty_project: Project) -> None:
@@ -890,17 +889,17 @@ def test_remove_dependency_from_branch(empty_project: Project) -> None:
     # Add dependency from branch to task
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(branch_id), dep)
+    project = add_dependency(project, branch_id, dep)
 
     # Remove the dependency
-    updated_project = remove_dependency(project, NodeId(branch_id), dep)
+    updated_project = remove_dependency(project, branch_id, dep)
 
     # Branch should no longer have the dependency
-    persistent_id = updated_project.dag.node_map[NodeId(branch_id)]
+    persistent_id = updated_project.dag.node_map[branch_id]
     branch = updated_project.persistent_branches[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -912,13 +911,13 @@ def test_remove_dependency_nonexistent_node(empty_project: Project) -> None:
     """Test that removing a dependency from a non-existent node raises error."""
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("task_123"),
+        target_node_id=TaskId("task_123"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(DAGOperationError, match="Node.*not found"):
-        remove_dependency(empty_project, NodeId("nonexistent"), dep)
+        remove_dependency(empty_project, TaskId("nonexistent"), dep)
 
 
 def test_remove_dependency_preserves_other_dependencies(empty_project: Project) -> None:
@@ -946,24 +945,24 @@ def test_remove_dependency_preserves_other_dependencies(empty_project: Project) 
     # Add two dependencies from task1
     dep1 = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     dep2 = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task3_id),
+        target_node_id=task3_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep1)
-    project = add_dependency(project, NodeId(task1_id), dep2)
+    project = add_dependency(project, task1_id, dep1)
+    project = add_dependency(project, task1_id, dep2)
 
     # Remove only dep1
-    updated_project = remove_dependency(project, NodeId(task1_id), dep1)
+    updated_project = remove_dependency(project, task1_id, dep1)
 
     # Get the task
-    persistent_id = updated_project.dag.node_map[NodeId(task1_id)]
+    persistent_id = updated_project.dag.node_map[task1_id]
     task = updated_project.persistent_tasks[persistent_id].versions[
         updated_project.dag.current_version_id
     ]
@@ -988,7 +987,7 @@ def test_convert_to_parent_creates_child(empty_project: Project) -> None:
     updated_project, child_id = convert_to_parent_task(project, task_id, "Child Task")
 
     # Get parent task
-    parent_node_id = NodeId(task_id)
+    parent_node_id = task_id
     parent_persistent_id = updated_project.dag.node_map[parent_node_id]
     parent_task = updated_project.persistent_tasks[parent_persistent_id].versions[
         updated_project.dag.current_version_id
@@ -1002,7 +1001,7 @@ def test_convert_to_parent_creates_child(empty_project: Project) -> None:
     assert parent_task.duration_distribution is None
 
     # Get child task
-    child_node_id = NodeId(child_id)
+    child_node_id = child_id
     child_persistent_id = updated_project.dag.node_map[child_node_id]
     child_task = updated_project.persistent_tasks[child_persistent_id].versions[
         updated_project.dag.current_version_id
@@ -1018,7 +1017,7 @@ def test_convert_to_parent_creates_child(empty_project: Project) -> None:
     assert len(child_task.dependencies) == 1
     child_dep = child_task.dependencies[0]
     assert child_dep.source_endpoint == Endpoint.START
-    assert child_dep.target_node_id == NodeId(task_id)
+    assert child_dep.target_node_id == task_id
     assert child_dep.target_endpoint == Endpoint.START
     assert child_dep.constraint_type == ConstraintType.GREATER_EQUAL
 
@@ -1026,7 +1025,7 @@ def test_convert_to_parent_creates_child(empty_project: Project) -> None:
     assert len(parent_task.dependencies) == 1
     parent_dep = parent_task.dependencies[0]
     assert parent_dep.source_endpoint == Endpoint.END
-    assert parent_dep.target_node_id == NodeId(child_id)
+    assert parent_dep.target_node_id == child_id
     assert parent_dep.target_endpoint == Endpoint.END
     assert parent_dep.constraint_type == ConstraintType.GREATER_EQUAL
 
@@ -1074,7 +1073,7 @@ def test_add_sibling_creates_sibling(empty_project: Project) -> None:
     )
 
     # Get parent task
-    parent_node_id = NodeId(parent_id)
+    parent_node_id = parent_id
     parent_persistent_id = updated_project.dag.node_map[parent_node_id]
     parent_task = updated_project.persistent_tasks[parent_persistent_id].versions[
         updated_project.dag.current_version_id
@@ -1086,7 +1085,7 @@ def test_add_sibling_creates_sibling(empty_project: Project) -> None:
     assert sibling_id in parent_task.children
 
     # Get sibling task
-    sibling_node_id = NodeId(sibling_id)
+    sibling_node_id = sibling_id
     sibling_persistent_id = updated_project.dag.node_map[sibling_node_id]
     sibling_task = updated_project.persistent_tasks[sibling_persistent_id].versions[
         updated_project.dag.current_version_id
@@ -1102,7 +1101,7 @@ def test_add_sibling_creates_sibling(empty_project: Project) -> None:
     assert len(sibling_task.dependencies) == 1
     sibling_dep = sibling_task.dependencies[0]
     assert sibling_dep.source_endpoint == Endpoint.START
-    assert sibling_dep.target_node_id == NodeId(parent_id)
+    assert sibling_dep.target_node_id == parent_id
     assert sibling_dep.target_endpoint == Endpoint.START
     assert sibling_dep.constraint_type == ConstraintType.GREATER_EQUAL
 
@@ -1158,7 +1157,7 @@ def test_convert_to_parent_fails_if_branch_not_task(empty_project: Project) -> N
     project = Project(
         **empty_project.model_dump(exclude={"persistent_branches", "dag"}),
         dag=empty_project.dag.model_copy(
-            update={"node_map": {NodeId("b1"): PersistentObjectId("pb1")}}
+            update={"node_map": {BranchId("b1"): PersistentObjectId("pb1")}}
         ),
         persistent_branches={PersistentObjectId("pb1"): persistent_branch},
     )
@@ -1188,7 +1187,7 @@ def test_convert_to_parent_fails_if_not_in_current_version(
     project = Project(
         **empty_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=empty_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -1218,7 +1217,7 @@ def test_convert_to_parent_uses_default_distribution_when_none(
     project_with_leaf = Project(
         **empty_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=empty_project.dag.model_copy(
-            update={"node_map": {NodeId("leaf"): PersistentObjectId("pl")}}
+            update={"node_map": {TaskId("leaf"): PersistentObjectId("pl")}}
         ),
         persistent_tasks={PersistentObjectId("pl"): persistent_leaf},
     )
@@ -1229,7 +1228,7 @@ def test_convert_to_parent_uses_default_distribution_when_none(
     )
 
     # Verify child has the default distribution
-    child_persistent_id = updated_project.dag.node_map[NodeId(child_id)]
+    child_persistent_id = updated_project.dag.node_map[child_id]
     child_persistent = updated_project.persistent_tasks[child_persistent_id]
     child_task = child_persistent.versions[updated_project.dag.current_version_id]
 
@@ -1297,9 +1296,9 @@ def test_convert_to_parent_with_old_version_tasks_and_branches(
         dag=empty_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("old_task"): PersistentObjectId("pot"),
-                    NodeId("old_branch"): PersistentObjectId("pob"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("old_task"): PersistentObjectId("pot"),
+                    BranchId("old_branch"): PersistentObjectId("pob"),
                 }
             }
         ),
@@ -1344,7 +1343,7 @@ def test_add_sibling_fails_if_branch_not_task(empty_project: Project) -> None:
     project = Project(
         **empty_project.model_dump(exclude={"persistent_branches", "dag"}),
         dag=empty_project.dag.model_copy(
-            update={"node_map": {NodeId("b1"): PersistentObjectId("pb1")}}
+            update={"node_map": {BranchId("b1"): PersistentObjectId("pb1")}}
         ),
         persistent_branches={PersistentObjectId("pb1"): persistent_branch},
     )
@@ -1373,7 +1372,7 @@ def test_add_sibling_fails_if_not_in_current_version(empty_project: Project) -> 
     project = Project(
         **empty_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=empty_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -1449,10 +1448,10 @@ def test_add_sibling_with_old_version_tasks_and_branches(
         dag=empty_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child1"): PersistentObjectId("pc1"),
-                    NodeId("old_task"): PersistentObjectId("pot"),
-                    NodeId("old_branch"): PersistentObjectId("pob"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child1"): PersistentObjectId("pc1"),
+                    TaskId("old_task"): PersistentObjectId("pot"),
+                    BranchId("old_branch"): PersistentObjectId("pob"),
                 }
             }
         ),
@@ -1540,9 +1539,9 @@ def test_convert_to_parent_with_multiple_current_version_tasks(
         dag=empty_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("t2"): PersistentObjectId("pt2"),
-                    NodeId("b1"): PersistentObjectId("pb1"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                    BranchId("b1"): PersistentObjectId("pb1"),
                 }
             }
         ),
@@ -1636,9 +1635,9 @@ def test_add_sibling_with_multiple_current_version_tasks(
         dag=empty_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child1"): PersistentObjectId("pc1"),
-                    NodeId("b1"): PersistentObjectId("pb1"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child1"): PersistentObjectId("pc1"),
+                    BranchId("b1"): PersistentObjectId("pb1"),
                 }
             }
         ),

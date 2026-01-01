@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 from fluxx.data.models import (
     BranchId,
-    NodeId,
     PossibleWorldId,
     Project,
     Task,
@@ -135,7 +134,7 @@ class SimulationState:
             KeyError: If the task is not found
         """
         # Look up the persistent object ID
-        node_id = NodeId(task_id)
+        node_id = task_id
         if node_id not in self.project.dag.node_map:
             raise KeyError(f"Task {task_id} not found in node_map")
 

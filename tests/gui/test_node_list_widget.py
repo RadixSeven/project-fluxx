@@ -3,12 +3,7 @@
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
-from fluxx.data.models import (
-    NodeId,
-    PossibleWorld,
-    PossibleWorldId,
-    Triangular,
-)
+from fluxx.data.models import PossibleWorld, PossibleWorldId, Triangular
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.list_view.node_list_widget import NodeListWidget
 
@@ -286,7 +281,7 @@ def test_node_list_widget_selection_updates_controller(qtbot: QtBot) -> None:
     widget.node_list.itemClicked.emit(item)
 
     # Controller should have selected the task
-    assert controller.get_selected_node_id() == NodeId(str(task_id))
+    assert controller.get_selected_node_id() == task_id
 
 
 def test_node_list_widget_responds_to_selection_changes(qtbot: QtBot) -> None:
@@ -317,7 +312,7 @@ def test_node_list_widget_responds_to_selection_changes(qtbot: QtBot) -> None:
     qtbot.addWidget(widget)
 
     # Select first task via controller
-    controller.select_node(NodeId(str(task1_id)))
+    controller.select_node(task1_id)
 
     # First item should be selected
     item_0 = widget.node_list.item(0)
@@ -328,7 +323,7 @@ def test_node_list_widget_responds_to_selection_changes(qtbot: QtBot) -> None:
     assert not item_1.isSelected()
 
     # Select second task via controller
-    controller.select_node(NodeId(str(task2_id)))
+    controller.select_node(task2_id)
 
     # Second item should be selected
     assert not item_0.isSelected()
@@ -441,7 +436,7 @@ def test_node_list_widget_search_preserves_selection(qtbot: QtBot) -> None:
     qtbot.addWidget(widget)
 
     # Select first task
-    controller.select_node(NodeId(str(task1_id)))
+    controller.select_node(task1_id)
     item_0 = widget.node_list.item(0)
     assert item_0 is not None
     assert item_0.isSelected()

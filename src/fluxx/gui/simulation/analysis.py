@@ -10,7 +10,7 @@ from typing import NewType
 
 import numpy as np
 
-from fluxx.data.models import Dependency, NodeId, Project, Sample, Task, TaskId
+from fluxx.data.models import Dependency, Project, Sample, Task, TaskId
 
 
 def extract_completion_times(samples: list[Sample]) -> list[datetime]:
@@ -221,7 +221,7 @@ def get_task_from_project(task_id: TaskId, project: Project) -> Task:
     Raises:
         KeyError: If task not found
     """
-    node_id = NodeId(str(task_id))
+    node_id = task_id
     if node_id not in project.dag.node_map:
         raise KeyError(f"Task {task_id} not found in node_map")
 

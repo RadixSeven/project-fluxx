@@ -65,10 +65,8 @@ def test_dag_view_renders_single_task(
     )
 
     # Should have one node item
-    from fluxx.data.models import NodeId
-
     assert len(dag_view.node_items) == 1
-    assert NodeId(task_id) in dag_view.node_items
+    assert task_id in dag_view.node_items
 
 
 def test_dag_view_renders_multiple_tasks(
@@ -86,11 +84,9 @@ def test_dag_view_renders_multiple_tasks(
     )
 
     # Should have two node items
-    from fluxx.data.models import NodeId
-
     assert len(dag_view.node_items) == 2
-    assert NodeId(task_id1) in dag_view.node_items
-    assert NodeId(task_id2) in dag_view.node_items
+    assert task_id1 in dag_view.node_items
+    assert task_id2 in dag_view.node_items
 
 
 def test_dag_view_updates_on_project_change(
@@ -129,9 +125,7 @@ def test_dag_view_selection(
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    from fluxx.data.models import NodeId
-
-    node_id = NodeId(task_id)
+    node_id = task_id
 
     # Initially not selected
     assert not dag_view.node_items[node_id].isSelected()
@@ -160,10 +154,8 @@ def test_dag_view_renders_branch(
     )
 
     # Should have one node item
-    from fluxx.data.models import NodeId
-
     assert len(dag_view.node_items) == 1
-    assert NodeId(branch_id) in dag_view.node_items
+    assert branch_id in dag_view.node_items
 
 
 def test_dag_view_renders_tasks_and_branches(
@@ -181,11 +173,9 @@ def test_dag_view_renders_tasks_and_branches(
     )
 
     # Should have two node items
-    from fluxx.data.models import NodeId
-
     assert len(dag_view.node_items) == 2
-    assert NodeId(task_id) in dag_view.node_items
-    assert NodeId(branch_id) in dag_view.node_items
+    assert task_id in dag_view.node_items
+    assert branch_id in dag_view.node_items
 
 
 def test_dag_view_renders_dependencies(
@@ -203,20 +193,20 @@ def test_dag_view_renders_dependencies(
     )
 
     # Add dependency: task2 depends on task1
-    from fluxx.data.models import ConstraintType, Dependency, Endpoint, NodeId
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task2_id), dep)
+    controller.add_dependency(task2_id, dep)
 
     # Verify edge is created
     assert len(dag_view.edge_items) == 1
 
     # Verify edge connects the correct nodes
     edge = dag_view.edge_items[0]
-    assert edge.source_id == NodeId(task2_id)
-    assert edge.target_id == NodeId(task1_id)
+    assert edge.source_id == task2_id
+    assert edge.target_id == task1_id

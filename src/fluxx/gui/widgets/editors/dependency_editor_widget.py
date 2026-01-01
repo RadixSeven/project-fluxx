@@ -13,11 +13,15 @@ from PySide6.QtWidgets import (
 )
 
 from fluxx.data.models import (
+    BranchId,
     ConstraintType,
     Dependency,
+    DependencyTargetId,
     Endpoint,
-    NodeId,
+    NodeIdType,
     PossibleWorldId,
+    TaskId,
+    get_node_id_type,
 )
 from fluxx.gui.controller import ProjectController
 
@@ -53,7 +57,7 @@ class DependencyEditorWidget(QWidget):
         super().__init__(parent)
         self.controller = controller
         self.is_branch = is_branch
-        self._target_node_id: NodeId | None = None
+        self._target_node_id: DependencyTargetId | None = None
 
         self._init_ui()
 
@@ -152,7 +156,7 @@ class DependencyEditorWidget(QWidget):
         """Handle cancel button click."""
         self.cancelled.emit()
 
-    def set_target_node(self, node_id: NodeId) -> None:
+    def set_target_node(self, node_id: DependencyTargetId) -> None:
         """Set the selected target node.
 
         Args:
@@ -164,12 +168,21 @@ class DependencyEditorWidget(QWidget):
         project = self.controller.get_project()
         current_version = project.dag.current_version_id
 
-        # Check if this is a possible world reference (format: "branch_id:world_id")
+        # Determine node type using type-safe function
         node_str = str(node_id)
-        if ":" in node_str:
+
+        try:
+            node_type = get_node_id_type(node_str)
+        except ValueError:
+            # Invalid node ID pattern
+            self.target_display.setText("<Invalid node>")
+            self.target_display.setStyleSheet("color: red; font-style: italic;")
+            return
+
+        if node_type == NodeIdType.POSSIBLE_WORLD_REFERENCE:
             # Parse possible world reference
             branch_id_str, world_id_str = node_str.split(":", 1)
-            branch_node_id = NodeId(branch_id_str)
+            branch_node_id = BranchId(branch_id_str)
             pw_id = PossibleWorldId(world_id_str)
 
             # Find the branch and possible world
@@ -211,12 +224,12 @@ class DependencyEditorWidget(QWidget):
             self.target_display.setStyleSheet("color: red; font-style: italic;")
             return
 
-        # Not a possible world reference, check regular nodes
-        persistent_id = project.dag.node_map.get(node_id)
+        elif node_type == NodeIdType.TASK:
+            # Regular task node
+            task_node_id = TaskId(node_str)
+            persistent_id = project.dag.node_map.get(task_node_id)
 
-        # Check if it's a task or branch in the DAG
-        if persistent_id is not None:
-            if persistent_id in project.persistent_tasks:
+            if persistent_id is not None and persistent_id in project.persistent_tasks:
                 persistent_task = project.persistent_tasks[persistent_id]
                 if current_version in persistent_task.versions:
                     task = persistent_task.versions[current_version]
@@ -232,8 +245,18 @@ class DependencyEditorWidget(QWidget):
                         self.target_endpoint_combo.currentData() == Endpoint.OCCURRENCE
                     ):  # Reset if was occurrence
                         self.target_endpoint_combo.setCurrentIndex(1)
+                    self._on_field_changed()
+                    return
 
-            elif persistent_id in project.persistent_branches:
+        elif node_type == NodeIdType.BRANCH:
+            # Regular branch node
+            branch_node_id_2 = BranchId(node_str)
+            persistent_id = project.dag.node_map.get(branch_node_id_2)
+
+            if (
+                persistent_id is not None
+                and persistent_id in project.persistent_branches
+            ):
                 persistent_branch = project.persistent_branches[persistent_id]
                 if current_version in persistent_branch.versions:
                     branch = persistent_branch.versions[current_version]
@@ -247,11 +270,12 @@ class DependencyEditorWidget(QWidget):
                         model.item(2).setEnabled(True)  # Occurrence
                     # Auto-select occurrence for branches
                     self.target_endpoint_combo.setCurrentIndex(2)
-        else:
-            # Not found anywhere
-            self.target_display.setText("<Invalid node>")
-            self.target_display.setStyleSheet("color: red; font-style: italic;")
-            return
+                    self._on_field_changed()
+                    return
+
+        # Not found or invalid
+        self.target_display.setText("<Invalid node>")
+        self.target_display.setStyleSheet("color: red; font-style: italic;")
 
         self._on_field_changed()
 

@@ -1,6 +1,6 @@
 """Undo/redo operations using event history."""
 
-from fluxx.data.models import DAGVersionId, NodeId, Project
+from fluxx.data.models import DAGVersionId, NodeId, PersistentObjectId, Project
 
 
 class UndoError(Exception):
@@ -86,19 +86,19 @@ def undo(project: Project) -> Project:
 
     # Reconstruct node_map for parent version
     parent_version = parent_event.resulting_dag_version
-    new_node_map = {}
+    new_node_map: dict[NodeId, PersistentObjectId] = {}
 
     # Add tasks that exist in parent version
     for persistent_id, persistent_task in project.persistent_tasks.items():
         if parent_version in persistent_task.versions:
             task = persistent_task.versions[parent_version]
-            new_node_map[NodeId(task.id)] = persistent_id
+            new_node_map[task.id] = persistent_id
 
     # Add branches that exist in parent version
     for persistent_id, persistent_branch in project.persistent_branches.items():
         if parent_version in persistent_branch.versions:
             branch = persistent_branch.versions[parent_version]
-            new_node_map[NodeId(branch.id)] = persistent_id
+            new_node_map[branch.id] = persistent_id
 
     # Revert to parent event's DAG version
     return project.model_copy(
@@ -143,19 +143,19 @@ def redo(project: Project) -> Project:
 
     # Reconstruct node_map for next version
     next_version = next_event.resulting_dag_version
-    new_node_map = {}
+    new_node_map: dict[NodeId, PersistentObjectId] = {}
 
     # Add tasks that exist in next version
     for persistent_id, persistent_task in project.persistent_tasks.items():
         if next_version in persistent_task.versions:
             task = persistent_task.versions[next_version]
-            new_node_map[NodeId(task.id)] = persistent_id
+            new_node_map[task.id] = persistent_id
 
     # Add branches that exist in next version
     for persistent_id, persistent_branch in project.persistent_branches.items():
         if next_version in persistent_branch.versions:
             branch = persistent_branch.versions[next_version]
-            new_node_map[NodeId(branch.id)] = persistent_id
+            new_node_map[branch.id] = persistent_id
 
     # Move to next event's DAG version
     return project.model_copy(

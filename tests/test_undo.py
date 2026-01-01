@@ -23,7 +23,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
     Project,
@@ -64,13 +63,13 @@ def test_undo_single_operation(empty_project: Project) -> None:
     )
 
     # Verify task exists
-    assert NodeId(task_id) in project.dag.node_map
+    assert task_id in project.dag.node_map
 
     # Undo
     undone_project = undo(project)
 
     # Task should no longer exist in current version
-    assert NodeId(task_id) not in undone_project.dag.node_map
+    assert task_id not in undone_project.dag.node_map
     # Should be back to empty state
     assert len(undone_project.dag.node_map) == 0
     assert undone_project.current_event_id is None
@@ -143,13 +142,13 @@ def test_redo_single_operation(empty_project: Project) -> None:
 
     # Undo
     project = undo(project)
-    assert NodeId(task_id) not in project.dag.node_map
+    assert task_id not in project.dag.node_map
 
     # Redo
     redone_project = redo(project)
 
     # Task should exist again
-    assert NodeId(task_id) in redone_project.dag.node_map
+    assert task_id in redone_project.dag.node_map
     assert redone_project.dag.current_version_id == version_with_task
 
 
@@ -224,7 +223,7 @@ def test_redo_after_new_operation_uses_last_child(empty_project: Project) -> Non
 
     # Redo should use the most recent child (Task 2)
     redone_project = redo(project)
-    assert NodeId(task2_id) in redone_project.dag.node_map
+    assert task2_id in redone_project.dag.node_map
 
 
 def test_can_undo_returns_true_when_undo_available(empty_project: Project) -> None:
@@ -317,7 +316,7 @@ def test_undo_redo_cycle_preserves_data(empty_project: Project) -> None:
     )
 
     # Get the original task
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     original_task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -352,7 +351,7 @@ def test_undo_update_operation(empty_project: Project) -> None:
     project = update_task(project, task_id, title="Updated Title")
 
     # Get the updated task
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     updated_task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -387,14 +386,14 @@ def test_undo_dependency_operation(empty_project: Project) -> None:
     # Add dependency
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep)
+    project = add_dependency(project, task1_id, dep)
 
     # Verify dependency exists
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -431,24 +430,24 @@ def test_undo_with_branches_and_tasks(empty_project: Project) -> None:
     )
 
     # Should have both
-    assert NodeId(branch_id) in project.dag.node_map
-    assert NodeId(task_id) in project.dag.node_map
+    assert branch_id in project.dag.node_map
+    assert task_id in project.dag.node_map
 
     # Undo task addition
     project = undo(project)
-    assert NodeId(branch_id) in project.dag.node_map
-    assert NodeId(task_id) not in project.dag.node_map
+    assert branch_id in project.dag.node_map
+    assert task_id not in project.dag.node_map
 
     # Undo branch addition
     project = undo(project)
-    assert NodeId(branch_id) not in project.dag.node_map
+    assert branch_id not in project.dag.node_map
 
     # Redo branch
     project = redo(project)
-    assert NodeId(branch_id) in project.dag.node_map
-    assert NodeId(task_id) not in project.dag.node_map
+    assert branch_id in project.dag.node_map
+    assert task_id not in project.dag.node_map
 
     # Redo task
     project = redo(project)
-    assert NodeId(branch_id) in project.dag.node_map
-    assert NodeId(task_id) in project.dag.node_map
+    assert branch_id in project.dag.node_map
+    assert task_id in project.dag.node_map

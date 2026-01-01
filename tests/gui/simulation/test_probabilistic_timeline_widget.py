@@ -9,7 +9,6 @@ from fluxx.data.models import (
     ConstraintType,
     Dependency,
     Endpoint,
-    NodeId,
     TaskId,
 )
 from fluxx.gui.simulation.analysis import (
@@ -93,7 +92,7 @@ def timeline_data_with_dependencies() -> TimelineData:
     # B depends on A (B.start >= A.end)
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("A"),
+        target_node_id=TaskId("A"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )

@@ -11,7 +11,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorldId,
     Project,
     ProjectMetadata,
@@ -123,7 +122,7 @@ def test_optimize_linear_chain(simple_project: Project) -> None:
             source_task_id=TaskId("task_b"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_a"),
+                target_node_id=TaskId("task_a"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -132,7 +131,7 @@ def test_optimize_linear_chain(simple_project: Project) -> None:
             source_task_id=TaskId("task_c"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_b"),
+                target_node_id=TaskId("task_b"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -205,7 +204,7 @@ def test_optimize_parallel_tasks(simple_project: Project) -> None:
             source_task_id=TaskId("task_c"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_a"),
+                target_node_id=TaskId("task_a"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -214,7 +213,7 @@ def test_optimize_parallel_tasks(simple_project: Project) -> None:
             source_task_id=TaskId("task_c"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_b"),
+                target_node_id=TaskId("task_b"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -367,7 +366,7 @@ def test_optimize_dependency_only_applies_to_matching_world_sequence(
             source_task_id=TaskId("task_b"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_a"),
+                target_node_id=TaskId("task_a"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -415,7 +414,7 @@ def test_optimize_all_dependency_endpoint_combinations(simple_project: Project) 
             source_task_id=TaskId("task_2"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_1"),
+                target_node_id=TaskId("task_1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -425,7 +424,7 @@ def test_optimize_all_dependency_endpoint_combinations(simple_project: Project) 
             source_task_id=TaskId("task_4"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task_3"),
+                target_node_id=TaskId("task_3"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -435,7 +434,7 @@ def test_optimize_all_dependency_endpoint_combinations(simple_project: Project) 
             source_task_id=TaskId("task_6"),
             dependency=Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("task_5"),
+                target_node_id=TaskId("task_5"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -445,7 +444,7 @@ def test_optimize_all_dependency_endpoint_combinations(simple_project: Project) 
             source_task_id=TaskId("task_8"),
             dependency=Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("task_7"),
+                target_node_id=TaskId("task_7"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),

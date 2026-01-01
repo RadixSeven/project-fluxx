@@ -415,7 +415,7 @@ class MainWindow(QMainWindow):
                 )
 
                 # Select the new task
-                self.controller.select_node(NodeId(task_id))
+                self.controller.select_node(task_id)
             except Exception as e:
                 QMessageBox.critical(
                     self,
@@ -440,7 +440,7 @@ class MainWindow(QMainWindow):
                 )
 
                 # Select the new branch
-                self.controller.select_node(NodeId(branch_id))
+                self.controller.select_node(branch_id)
             except Exception as e:
                 QMessageBox.critical(
                     self,

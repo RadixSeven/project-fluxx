@@ -9,7 +9,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     Project,
@@ -55,19 +54,19 @@ def test_test_prj_json_structure() -> None:
             # Parent depends on all children ending
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("B.1"),
+                target_node_id=TaskId("B.1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("B.2"),
+                target_node_id=TaskId("B.2"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("B.3"),
+                target_node_id=TaskId("B.3"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -85,7 +84,7 @@ def test_test_prj_json_structure() -> None:
             # Child depends on parent starting
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -103,7 +102,7 @@ def test_test_prj_json_structure() -> None:
             # Child depends on parent starting
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -121,14 +120,14 @@ def test_test_prj_json_structure() -> None:
             # Child depends on parent starting
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             # B.3 also depends on B.1 ending
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B.1"),
+                target_node_id=TaskId("B.1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -144,7 +143,7 @@ def test_test_prj_json_structure() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -183,12 +182,12 @@ def test_test_prj_json_structure() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("A"): PersistentObjectId("pA"),
-            NodeId("B"): PersistentObjectId("pB"),
-            NodeId("B.1"): PersistentObjectId("pB.1"),
-            NodeId("B.2"): PersistentObjectId("pB.2"),
-            NodeId("B.3"): PersistentObjectId("pB.3"),
-            NodeId("C"): PersistentObjectId("pC"),
+            TaskId("A"): PersistentObjectId("pA"),
+            TaskId("B"): PersistentObjectId("pB"),
+            TaskId("B.1"): PersistentObjectId("pB.1"),
+            TaskId("B.2"): PersistentObjectId("pB.2"),
+            TaskId("B.3"): PersistentObjectId("pB.3"),
+            TaskId("C"): PersistentObjectId("pC"),
         },
     )
 
@@ -235,14 +234,14 @@ def test_test_prj_json_structure() -> None:
         # Parent B should not have events
         task_ids_in_events = {event.node_id for event in sample.events}
 
-        assert NodeId("A") in task_ids_in_events, f"Sample {i} missing task A"
-        assert NodeId("B.1") in task_ids_in_events, f"Sample {i} missing task B.1"
-        assert NodeId("B.2") in task_ids_in_events, f"Sample {i} missing task B.2"
-        assert NodeId("B.3") in task_ids_in_events, f"Sample {i} missing task B.3"
-        assert NodeId("C") in task_ids_in_events, f"Sample {i} missing task C"
+        assert TaskId("A") in task_ids_in_events, f"Sample {i} missing task A"
+        assert TaskId("B.1") in task_ids_in_events, f"Sample {i} missing task B.1"
+        assert TaskId("B.2") in task_ids_in_events, f"Sample {i} missing task B.2"
+        assert TaskId("B.3") in task_ids_in_events, f"Sample {i} missing task B.3"
+        assert TaskId("C") in task_ids_in_events, f"Sample {i} missing task C"
 
         # Parent B should not have events (never executed)
-        assert NodeId("B") not in task_ids_in_events, (
+        assert TaskId("B") not in task_ids_in_events, (
             f"Sample {i} should not have events for parent task B"
         )
 
@@ -273,19 +272,19 @@ def test_gantt_chart_with_test_prj_structure() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("B.1"),
+                target_node_id=TaskId("B.1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("B.2"),
+                target_node_id=TaskId("B.2"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("B.3"),
+                target_node_id=TaskId("B.3"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -301,7 +300,7 @@ def test_gantt_chart_with_test_prj_structure() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -317,7 +316,7 @@ def test_gantt_chart_with_test_prj_structure() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -333,13 +332,13 @@ def test_gantt_chart_with_test_prj_structure() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B.1"),
+                target_node_id=TaskId("B.1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -354,7 +353,7 @@ def test_gantt_chart_with_test_prj_structure() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("B"),
+                target_node_id=TaskId("B"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -386,12 +385,12 @@ def test_gantt_chart_with_test_prj_structure() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("A"): PersistentObjectId("pA"),
-            NodeId("B"): PersistentObjectId("pB"),
-            NodeId("B.1"): PersistentObjectId("pB.1"),
-            NodeId("B.2"): PersistentObjectId("pB.2"),
-            NodeId("B.3"): PersistentObjectId("pB.3"),
-            NodeId("C"): PersistentObjectId("pC"),
+            TaskId("A"): PersistentObjectId("pA"),
+            TaskId("B"): PersistentObjectId("pB"),
+            TaskId("B.1"): PersistentObjectId("pB.1"),
+            TaskId("B.2"): PersistentObjectId("pB.2"),
+            TaskId("B.3"): PersistentObjectId("pB.3"),
+            TaskId("C"): PersistentObjectId("pC"),
         },
     )
 

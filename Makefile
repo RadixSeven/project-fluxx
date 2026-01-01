@@ -26,7 +26,10 @@ install:
 
 test:
 	@echo "==> Running tests with coverage..."
-	pytest $(TEST_DIR) \
+	# The QT_QPA_PLATFORM=offscreen keeps the tests
+	# from crashing in restricted sandboxes like those
+	# used by `claude` and `codex`
+	QT_QPA_PLATFORM=offscreen pytest $(TEST_DIR) \
 		--cov=$(SRC_DIR) \
 		--cov-report=term \
 		--cov-report=html \
@@ -35,7 +38,10 @@ test:
 
 coverage:
 	@echo "==> Coverage report (showing files not at 100%)..."
-	@pytest $(TEST_DIR) \
+	# The QT_QPA_PLATFORM=offscreen keeps the tests
+	# from crashing in restricted sandboxes like those
+	# used by `claude` and `codex`
+	@QT_QPA_PLATFORM=offscreen pytest $(TEST_DIR) \
 		--cov=$(SRC_DIR) \
 		--cov-report=term-missing \
 		--cov-report=json \

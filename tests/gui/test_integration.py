@@ -9,7 +9,6 @@ from fluxx.data.models import (
     ConstraintType,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
     Triangular,
@@ -34,7 +33,7 @@ def test_create_and_edit_task_workflow(qtbot: QtBot) -> None:
     )
 
     # Select the task
-    controller.select_node(NodeId(task_id))
+    controller.select_node(task_id)
 
     # Verify task editor is showing
     assert window.editor_panel.stack.currentWidget() == window.editor_panel.task_editor
@@ -52,7 +51,7 @@ def test_create_and_edit_task_workflow(qtbot: QtBot) -> None:
     # Verify update reflected in project
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[current_version]
     assert task.title == "Implement Advanced Feature"
     assert task.description == "Add advanced feature with testing"
@@ -82,19 +81,19 @@ def test_create_task_with_dependency_workflow(qtbot: QtBot) -> None:
     # Add dependency: task2 depends on task1
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task2_id), dep)
+    controller.add_dependency(task2_id, dep)
 
     # Verify dependency exists
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    persistent_id = project.dag.node_map[task2_id]
     task2 = project.persistent_tasks[persistent_id].versions[current_version]
     assert len(task2.dependencies) == 1
-    assert task2.dependencies[0].target_node_id == NodeId(task1_id)
+    assert task2.dependencies[0].target_node_id == task1_id
 
 
 def test_create_branch_workflow(qtbot: QtBot) -> None:
@@ -126,7 +125,7 @@ def test_create_branch_workflow(qtbot: QtBot) -> None:
     )
 
     # Select the branch
-    controller.select_node(NodeId(branch_id))
+    controller.select_node(branch_id)
 
     # Verify branch editor is showing
     assert (
@@ -158,7 +157,7 @@ def test_undo_redo_workflow(qtbot: QtBot) -> None:
     # Verify update
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[current_version]
     assert task.title == "Updated Task"
 
@@ -168,7 +167,7 @@ def test_undo_redo_workflow(qtbot: QtBot) -> None:
     # Verify reverted to original
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[current_version]
     assert task.title == "Original Task"
 
@@ -178,7 +177,7 @@ def test_undo_redo_workflow(qtbot: QtBot) -> None:
     # Verify back to updated
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[current_version]
     assert task.title == "Updated Task"
 
@@ -216,8 +215,8 @@ def test_save_and_load_workflow(qtbot: QtBot) -> None:
         assert project.metadata.name == "Save Test Project"
 
         # Verify task exists
-        assert NodeId(task_id) in project.dag.node_map
-        persistent_id = project.dag.node_map[NodeId(task_id)]
+        assert task_id in project.dag.node_map
+        persistent_id = project.dag.node_map[task_id]
         assert persistent_id in project.persistent_tasks
 
 
@@ -317,26 +316,26 @@ def test_dependency_removal_workflow(qtbot: QtBot) -> None:
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task2_id), dep)
+    controller.add_dependency(task2_id, dep)
 
     # Verify dependency exists
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    persistent_id = project.dag.node_map[task2_id]
     task2 = project.persistent_tasks[persistent_id].versions[current_version]
     assert len(task2.dependencies) == 1
 
     # Remove dependency
-    controller.remove_dependency(NodeId(task2_id), dep)
+    controller.remove_dependency(task2_id, dep)
 
     # Verify dependency removed
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    persistent_id = project.dag.node_map[task2_id]
     task2 = project.persistent_tasks[persistent_id].versions[current_version]
     assert len(task2.dependencies) == 0
 
@@ -372,7 +371,7 @@ def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
     )
 
     # Select task 2 to edit
-    controller.select_node(NodeId(task2_id))
+    controller.select_node(task2_id)
 
     # Verify task editor is showing
     task_editor = window.editor_panel.task_editor
@@ -410,14 +409,14 @@ def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
     # Simulate clicking on task1 in DAG view
     # This emits node_selected_for_dependency signal and exits mode
     # (in real usage, both happen in mousePressEvent)
-    dag_view.node_selected_for_dependency.emit(NodeId(task1_id))
+    dag_view.node_selected_for_dependency.emit(task1_id)
     dag_view.exit_select_target_mode()
 
     # Verify DAG view exited select-target mode
     assert not dag_view._select_target_mode
 
     # Verify target was set in dependency editor
-    assert task_editor.dependency_editor._target_node_id == NodeId(task1_id)
+    assert task_editor.dependency_editor._target_node_id == task1_id
     assert "Task: Task 1" in task_editor.dependency_editor.target_display.text()
 
     # Configure remaining dependency fields
@@ -437,7 +436,7 @@ def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
 
     dep = task_editor.pending_changes["dependencies"][0]
     assert dep.source_endpoint == Endpoint.END
-    assert dep.target_node_id == NodeId(task1_id)
+    assert dep.target_node_id == task1_id
     assert dep.target_endpoint == Endpoint.END
     assert dep.constraint_type == ConstraintType.GREATER_EQUAL
 
@@ -453,7 +452,7 @@ def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
     # Verify dependency was applied to project
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    persistent_id = project.dag.node_map[task2_id]
     task2 = project.persistent_tasks[persistent_id].versions[current_version]
     assert len(task2.dependencies) == 1
-    assert task2.dependencies[0].target_node_id == NodeId(task1_id)
+    assert task2.dependencies[0].target_node_id == task1_id

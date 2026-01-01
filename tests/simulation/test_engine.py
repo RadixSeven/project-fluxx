@@ -14,7 +14,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PersistentBranch,
     PersistentObjectId,
     PersistentTask,
@@ -77,7 +76,7 @@ def simple_project() -> Project:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("t1"),
+                target_node_id=TaskId("t1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -99,8 +98,8 @@ def simple_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("t2"): PersistentObjectId("pt2"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
         },
     )
 
@@ -265,7 +264,7 @@ def test_select_worker_for_task_no_eligible() -> None:
     dag = DAG(
         id=DAGId("dag1"),
         current_version_id=version_id,
-        node_map={NodeId("t1"): PersistentObjectId("pt1")},
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
     )
     metadata = ProjectMetadata(
         name="Test",
@@ -499,7 +498,7 @@ def test_get_branch(
         id=PersistentObjectId("pb1"),
         versions={simple_project.dag.current_version_id: branch},
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
     retrieved = get_branch(BranchId("b1"), state)
@@ -525,7 +524,7 @@ def test_get_branch_not_in_persistent_branches(
     state = SimulationState(simple_project, start_date, base_workers)
 
     # Add to node_map but not persistent_branches
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb_missing")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb_missing")
 
     with pytest.raises(KeyError, match="not found in persistent_branches"):
         get_branch(BranchId("b1"), state)
@@ -551,7 +550,7 @@ def test_get_branch_not_in_current_version(
         id=PersistentObjectId("pb1"),
         versions={old_version_id: branch},  # Only in old version
     )
-    state.project.dag.node_map[NodeId("b1")] = PersistentObjectId("pb1")
+    state.project.dag.node_map[BranchId("b1")] = PersistentObjectId("pb1")
     state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
 
     with pytest.raises(KeyError, match="not found in current version"):
@@ -661,7 +660,7 @@ def test_run_single_sample_deadlock() -> None:
     dag = DAG(
         id=DAGId("dag1"),
         current_version_id=version_id,
-        node_map={NodeId("t1"): PersistentObjectId("pt1")},
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
     )
 
     start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
@@ -754,8 +753,8 @@ def test_run_single_sample_with_branch() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("b1"): PersistentObjectId("pb1"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            BranchId("b1"): PersistentObjectId("pb1"),
         },
     )
 
@@ -819,8 +818,8 @@ def test_create_failed_sample_with_branch() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("b1"): PersistentObjectId("pb1"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            BranchId("b1"): PersistentObjectId("pb1"),
         },
     )
 
@@ -869,7 +868,7 @@ def test_run_single_sample_advance_exception() -> None:
     dag = DAG(
         id=DAGId("dag1"),
         current_version_id=version_id,
-        node_map={NodeId("t1"): PersistentObjectId("pt1")},
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
     )
 
     start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
@@ -930,7 +929,7 @@ def test_all_tasks_completed_with_unchosen_possible_world() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("b1:world1"),
+                target_node_id=BranchId("b1:world1"),
                 target_endpoint=Endpoint.OCCURRENCE,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -946,7 +945,7 @@ def test_all_tasks_completed_with_unchosen_possible_world() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("b1:world2"),
+                target_node_id=BranchId("b1:world2"),
                 target_endpoint=Endpoint.OCCURRENCE,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -974,9 +973,9 @@ def test_all_tasks_completed_with_unchosen_possible_world() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("b1"): PersistentObjectId("pb1"),
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("t2"): PersistentObjectId("pt2"),
+            BranchId("b1"): PersistentObjectId("pb1"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
         },
     )
 
@@ -1041,7 +1040,7 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.OCCURRENCE,
-                target_node_id=NodeId("prereq"),
+                target_node_id=TaskId("prereq"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1057,7 +1056,7 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("b1"),
+                target_node_id=BranchId("b1"),
                 target_endpoint=Endpoint.OCCURRENCE,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1085,9 +1084,9 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("prereq"): PersistentObjectId("pt_prereq"),
-            NodeId("b1"): PersistentObjectId("pb1"),
-            NodeId("dependent"): PersistentObjectId("pt_dependent"),
+            TaskId("prereq"): PersistentObjectId("pt_prereq"),
+            BranchId("b1"): PersistentObjectId("pb1"),
+            TaskId("dependent"): PersistentObjectId("pt_dependent"),
         },
     )
 

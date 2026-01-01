@@ -342,7 +342,7 @@ class ProjectController(QObject):
         )
         self._set_project(project)
         # Select the newly created child
-        self.select_node(NodeId(child_id))
+        self.select_node(child_id)
         return child_id
 
     def add_sibling(
@@ -374,7 +374,7 @@ class ProjectController(QObject):
         )
         self._set_project(project)
         # Select the newly created sibling
-        self.select_node(NodeId(sibling_id))
+        self.select_node(sibling_id)
         return sibling_id
 
     # History operations

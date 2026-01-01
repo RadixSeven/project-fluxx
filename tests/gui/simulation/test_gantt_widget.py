@@ -11,7 +11,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorldId,
     Project,
     ProjectMetadata,
@@ -130,7 +129,7 @@ def test_gantt_widget_with_multiple_tasks(qtbot: QtBot) -> None:
             source_task_id=TaskId("task2"),
             dependency=Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("task1"),
+                target_node_id=TaskId("task1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),

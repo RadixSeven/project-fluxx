@@ -23,7 +23,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PersistentBranch,
     PersistentObjectId,
     PersistentTask,
@@ -80,7 +79,7 @@ def test_validate_single_task(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -100,7 +99,7 @@ def test_detect_simple_cycle(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("t2"),
+                target_node_id=TaskId("t2"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -114,7 +113,7 @@ def test_detect_simple_cycle(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId("t1"),
+                target_node_id=TaskId("t1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -135,8 +134,8 @@ def test_detect_simple_cycle(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("t2"): PersistentObjectId("pt2"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
                 }
             }
         ),
@@ -162,7 +161,7 @@ def test_detect_self_cycle(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("t1"),
+                target_node_id=TaskId("t1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -177,7 +176,7 @@ def test_detect_self_cycle(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -216,8 +215,8 @@ def test_validate_parent_child_hierarchy(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child"): PersistentObjectId("pc"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -248,7 +247,7 @@ def test_invalid_parent_reference(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -274,7 +273,7 @@ def test_leaf_task_requires_duration(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -316,8 +315,8 @@ def test_parent_task_can_have_duration(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child"): PersistentObjectId("pc"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -349,7 +348,7 @@ def test_validate_worker_constraints(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -375,7 +374,7 @@ def test_invalid_worker_constraint(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -401,7 +400,7 @@ def test_validate_dependency_task_endpoints(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -409,11 +408,11 @@ def test_validate_dependency_task_endpoints(base_project: Project) -> None:
     # Valid: task with START/END endpoints
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    validate_dependency(project, NodeId("t1"), dep)
+    validate_dependency(project, TaskId("t1"), dep)
 
 
 def test_task_cannot_use_occurrence_endpoint(base_project: Project) -> None:
@@ -433,7 +432,7 @@ def test_task_cannot_use_occurrence_endpoint(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -441,13 +440,13 @@ def test_task_cannot_use_occurrence_endpoint(base_project: Project) -> None:
     # Invalid: task with OCCURRENCE endpoint
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.EQUAL,
     )
 
     with pytest.raises(EndpointError, match="cannot use OCCURRENCE"):
-        validate_dependency(project, NodeId("t1"), dep)
+        validate_dependency(project, TaskId("t1"), dep)
 
 
 def test_branch_cannot_use_start_end_endpoint(base_project: Project) -> None:
@@ -467,7 +466,7 @@ def test_branch_cannot_use_start_end_endpoint(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_branches", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("b1"): PersistentObjectId("pb1")}}
+            update={"node_map": {BranchId("b1"): PersistentObjectId("pb1")}}
         ),
         persistent_branches={PersistentObjectId("pb1"): persistent_branch},
     )
@@ -475,13 +474,13 @@ def test_branch_cannot_use_start_end_endpoint(base_project: Project) -> None:
     # Invalid: branch with START endpoint
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("b1"),
+        target_node_id=BranchId("b1"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(EndpointError, match="cannot use START/END"):
-        validate_dependency(project, NodeId("b1"), dep)
+        validate_dependency(project, BranchId("b1"), dep)
 
 
 def test_cycle_detection_with_branches(base_project: Project) -> None:
@@ -497,7 +496,7 @@ def test_cycle_detection_with_branches(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("b1"),
+                target_node_id=BranchId("b1"),
                 target_endpoint=Endpoint.OCCURRENCE,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -511,7 +510,7 @@ def test_cycle_detection_with_branches(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.OCCURRENCE,
-                target_node_id=NodeId("t1"),
+                target_node_id=TaskId("t1"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -534,8 +533,8 @@ def test_cycle_detection_with_branches(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("b1"): PersistentObjectId("pb1"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    BranchId("b1"): PersistentObjectId("pb1"),
                 }
             }
         ),
@@ -564,20 +563,20 @@ def test_validate_dependency_nonexistent_source(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
 
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("t1"),
+        target_node_id=TaskId("t1"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(ValidationError, match="does not exist"):
-        validate_dependency(project, NodeId("nonexistent"), dep)
+        validate_dependency(project, TaskId("nonexistent"), dep)
 
 
 def test_validate_dependency_nonexistent_target(base_project: Project) -> None:
@@ -597,20 +596,20 @@ def test_validate_dependency_nonexistent_target(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
 
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("nonexistent"),
+        target_node_id=TaskId("nonexistent"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(ValidationError, match="does not exist"):
-        validate_dependency(project, NodeId("t1"), dep)
+        validate_dependency(project, TaskId("t1"), dep)
 
 
 def test_task_target_cannot_use_occurrence(base_project: Project) -> None:
@@ -642,8 +641,8 @@ def test_task_target_cannot_use_occurrence(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("t2"): PersistentObjectId("pt2"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
                 }
             }
         ),
@@ -656,13 +655,13 @@ def test_task_target_cannot_use_occurrence(base_project: Project) -> None:
     # Try to use OCCURRENCE on task target
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("t2"),
+        target_node_id=TaskId("t2"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(EndpointError, match="cannot use OCCURRENCE"):
-        validate_dependency(project, NodeId("t1"), dep)
+        validate_dependency(project, TaskId("t1"), dep)
 
 
 def test_branch_target_cannot_use_start_end(base_project: Project) -> None:
@@ -696,8 +695,8 @@ def test_branch_target_cannot_use_start_end(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("b1"): PersistentObjectId("pb1"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    BranchId("b1"): PersistentObjectId("pb1"),
                 }
             }
         ),
@@ -708,13 +707,13 @@ def test_branch_target_cannot_use_start_end(base_project: Project) -> None:
     # Try to use END endpoint on branch target
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("b1"),
+        target_node_id=BranchId("b1"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     with pytest.raises(EndpointError, match="cannot use START/END"):
-        validate_dependency(project, NodeId("t1"), dep)
+        validate_dependency(project, TaskId("t1"), dep)
 
 
 def test_diamond_dependency_no_cycle(base_project: Project) -> None:
@@ -729,13 +728,13 @@ def test_diamond_dependency_no_cycle(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("t2"),
+                target_node_id=TaskId("t2"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("t3"),
+                target_node_id=TaskId("t3"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             ),
@@ -749,7 +748,7 @@ def test_diamond_dependency_no_cycle(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("t4"),
+                target_node_id=TaskId("t4"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -763,7 +762,7 @@ def test_diamond_dependency_no_cycle(base_project: Project) -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("t4"),
+                target_node_id=TaskId("t4"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -800,10 +799,10 @@ def test_diamond_dependency_no_cycle(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("t2"): PersistentObjectId("pt2"),
-                    NodeId("t3"): PersistentObjectId("pt3"),
-                    NodeId("t4"): PersistentObjectId("pt4"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                    TaskId("t3"): PersistentObjectId("pt3"),
+                    TaskId("t4"): PersistentObjectId("pt4"),
                 }
             }
         ),
@@ -846,8 +845,8 @@ def test_parent_is_branch_not_task(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("b1"): PersistentObjectId("pb1"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    BranchId("b1"): PersistentObjectId("pb1"),
                 }
             }
         ),
@@ -892,8 +891,8 @@ def test_parent_doesnt_list_child(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child"): PersistentObjectId("pc"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -938,8 +937,8 @@ def test_child_is_branch_not_task(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("t1"): PersistentObjectId("pt1"),
-                    NodeId("b1"): PersistentObjectId("pb1"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    BranchId("b1"): PersistentObjectId("pb1"),
                 }
             }
         ),
@@ -981,8 +980,8 @@ def test_child_doesnt_reference_parent(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child"): PersistentObjectId("pc"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -1014,7 +1013,7 @@ def test_excluded_worker_tasks_validation(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -1044,7 +1043,7 @@ def test_task_missing_current_version_in_hierarchy_check(
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -1073,7 +1072,7 @@ def test_parent_references_child_not_in_node_map(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
+                    TaskId("parent"): PersistentObjectId("pp"),
                     # nonexistent_child is NOT in node_map
                 }
             }
@@ -1118,8 +1117,8 @@ def test_child_missing_current_version_in_hierarchy_check(
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("parent"): PersistentObjectId("pp"),
-                    NodeId("child"): PersistentObjectId("pc"),
+                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -1156,7 +1155,7 @@ def test_task_missing_current_version_in_worker_check(
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {NodeId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
@@ -1186,7 +1185,7 @@ def test_cycle_detection_visits_isolated_end_endpoint(
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("x"),
+                target_node_id=TaskId("x"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1201,7 +1200,7 @@ def test_cycle_detection_visits_isolated_end_endpoint(
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=NodeId("b"),
+                target_node_id=BranchId("b"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1235,9 +1234,9 @@ def test_cycle_detection_visits_isolated_end_endpoint(
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    NodeId("a"): PersistentObjectId("pa"),
-                    NodeId("x"): PersistentObjectId("px"),
-                    NodeId("b"): PersistentObjectId("pb"),
+                    TaskId("a"): PersistentObjectId("pa"),
+                    TaskId("x"): PersistentObjectId("px"),
+                    BranchId("b"): PersistentObjectId("pb"),
                 }
             }
         ),

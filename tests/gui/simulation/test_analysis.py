@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from fluxx.data.models import NodeId, Sample, SampleId, TaskEvent, TaskId
+from fluxx.data.models import Sample, SampleId, TaskEvent, TaskId
 from fluxx.gui.simulation.analysis import (
     calculate_percentiles,
     calculate_statistics,
@@ -19,13 +19,13 @@ def successful_sample() -> Sample:
     """Create a successful simulation sample."""
     events = [
         TaskEvent(
-            node_id=NodeId("t1"),
+            node_id=TaskId("t1"),
             event_type="start",
             timestamp=datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC),
             details={},
         ),
         TaskEvent(
-            node_id=NodeId("t1"),
+            node_id=TaskId("t1"),
             event_type="complete",
             timestamp=datetime(2024, 1, 3, 17, 0, 0, tzinfo=UTC),
             details={},
@@ -39,7 +39,7 @@ def failed_sample() -> Sample:
     """Create a failed simulation sample."""
     events = [
         TaskEvent(
-            node_id=NodeId("t1"),
+            node_id=TaskId("t1"),
             event_type="start",
             timestamp=datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC),
             details={},
@@ -61,7 +61,7 @@ def test_extract_completion_times_all_successful(
             sample_id=SampleId(1),
             events=[
                 TaskEvent(
-                    node_id=NodeId("t1"),
+                    node_id=TaskId("t1"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 5, 17, 0, 0, tzinfo=UTC),
                     details={},
@@ -75,7 +75,7 @@ def test_extract_completion_times_all_successful(
             sample_id=SampleId(2),
             events=[
                 TaskEvent(
-                    node_id=NodeId("t1"),
+                    node_id=TaskId("t1"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 2, 17, 0, 0, tzinfo=UTC),
                     details={},

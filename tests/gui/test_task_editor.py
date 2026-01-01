@@ -130,9 +130,7 @@ def test_task_editor_apply_changes(
 
     # Verify task was updated
     project = controller.get_project()
-    from fluxx.data.models import NodeId
-
-    node_id = NodeId(task_id)
+    node_id = task_id
     persistent_id = project.dag.node_map[node_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
@@ -246,15 +244,15 @@ def test_task_editor_dependencies_display(
     )
 
     # Add dependency: task2 depends on task1
-    from fluxx.data.models import ConstraintType, Dependency, Endpoint, NodeId
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task2_id), dep)
+    controller.add_dependency(task2_id, dep)
 
     # Load task 2
     task_editor.load_task(task2_id)
@@ -280,15 +278,15 @@ def test_task_editor_remove_dependency(
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    from fluxx.data.models import ConstraintType, Dependency, Endpoint, NodeId
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(task2_id), dep)
+    controller.add_dependency(task2_id, dep)
 
     # Load task 2
     task_editor.load_task(task2_id)
@@ -410,7 +408,6 @@ def test_task_editor_add_dependency_and_apply(
         ConstraintType,
         Dependency,
         Endpoint,
-        NodeId,
         Triangular,
     )
 
@@ -431,7 +428,7 @@ def test_task_editor_add_dependency_and_apply(
     # This is what the UI does when user adds a dependency
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId(task1_id),
+        target_node_id=task1_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -439,7 +436,7 @@ def test_task_editor_add_dependency_and_apply(
     # Get current dependencies from task
     project = controller.get_project()
     current_version = project.dag.current_version_id
-    persistent_id = project.dag.node_map[NodeId(task2_id)]
+    persistent_id = project.dag.node_map[task2_id]
     task2 = project.persistent_tasks[persistent_id].versions[current_version]
     current_deps = list(task2.dependencies)
     current_deps.append(dep)
@@ -454,9 +451,9 @@ def test_task_editor_add_dependency_and_apply(
 
     # Verify the dependency was added
     project_after = controller.get_project()
-    persistent_id_after = project_after.dag.node_map[NodeId(task2_id)]
+    persistent_id_after = project_after.dag.node_map[task2_id]
     task2_after = project_after.persistent_tasks[persistent_id_after].versions[
         project_after.dag.current_version_id
     ]
     assert len(task2_after.dependencies) == 1
-    assert task2_after.dependencies[0].target_node_id == NodeId(task1_id)
+    assert task2_after.dependencies[0].target_node_id == task1_id

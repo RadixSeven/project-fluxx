@@ -23,7 +23,6 @@ from fluxx.data.models import (
     DAGVersionId,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
     Project,
@@ -93,7 +92,7 @@ def test_add_task_after_undo_to_initial(empty_project: Project) -> None:
     )
 
     # Should succeed
-    assert NodeId(task2_id) in project.dag.node_map
+    assert task2_id in project.dag.node_map
     assert len(project.dag.node_map) == 1
 
 
@@ -139,7 +138,7 @@ def test_add_branch_after_undo_to_initial(empty_project: Project) -> None:
     )
 
     # Should succeed
-    assert NodeId(branch2_id) in project.dag.node_map
+    assert branch2_id in project.dag.node_map
     assert len(project.dag.node_map) == 1
 
 
@@ -194,14 +193,14 @@ def test_add_dependency_after_undo_to_initial(empty_project: Project) -> None:
     # This should hit lines 336-337 (skipping task2) and 356-358 (skipping branch1)
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task3_id),
+        target_node_id=task3_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep)
+    project = add_dependency(project, task1_id, dep)
 
     # Should succeed
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -252,7 +251,7 @@ def test_update_task_after_undo_to_initial(empty_project: Project) -> None:
     project = update_task(project, task1_id, title="Updated")
 
     # Should succeed
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -309,9 +308,9 @@ def test_update_task_with_existing_branches(empty_project: Project) -> None:
     project = update_task(project, task_id, title="Updated Task")
 
     # Verify update succeeded and branch still exists
-    assert NodeId(task_id) in project.dag.node_map
-    assert NodeId(branch_id) in project.dag.node_map
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    assert task_id in project.dag.node_map
+    assert branch_id in project.dag.node_map
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -330,7 +329,7 @@ def test_update_task_individual_fields(empty_project: Project) -> None:
 
     # Update just description (line 474)
     project = update_task(project, task_id, description="New description")
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -399,7 +398,7 @@ def test_update_branch_after_undo_to_initial(empty_project: Project) -> None:
     project = update_branch(project, branch1_id, title="Updated")
 
     # Should succeed
-    persistent_id = project.dag.node_map[NodeId(branch1_id)]
+    persistent_id = project.dag.node_map[branch1_id]
     branch = project.persistent_branches[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -474,10 +473,10 @@ def test_update_branch_with_existing_tasks_and_branches(
     project = update_branch(project, branch1_id, title="Updated Branch")
 
     # Verify update succeeded and all nodes still exist
-    assert NodeId(task_id) in project.dag.node_map
-    assert NodeId(branch1_id) in project.dag.node_map
-    assert NodeId(branch2_id) in project.dag.node_map
-    persistent_id = project.dag.node_map[NodeId(branch1_id)]
+    assert task_id in project.dag.node_map
+    assert branch1_id in project.dag.node_map
+    assert branch2_id in project.dag.node_map
+    persistent_id = project.dag.node_map[branch1_id]
     branch = project.persistent_branches[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -498,7 +497,7 @@ def test_update_branch_individual_fields(empty_project: Project) -> None:
 
     # Update just description (line 607)
     project = update_branch(project, branch_id, description="New description")
-    persistent_id = project.dag.node_map[NodeId(branch_id)]
+    persistent_id = project.dag.node_map[branch_id]
     branch = project.persistent_branches[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -527,11 +526,11 @@ def test_remove_dependency_after_undo_to_initial(empty_project: Project) -> None
 
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep)
+    project = add_dependency(project, task1_id, dep)
     version_with_dep = project.dag.current_version_id
 
     # Add task3 (version v4)
@@ -560,10 +559,10 @@ def test_remove_dependency_after_undo_to_initial(empty_project: Project) -> None
     # Remove dependency (creates new version from v3)
     # At this point, task3 and branch1 exist in persistent storage but not in v3
     # This should hit lines 724-725 (skipping task3) and 744-745 (skipping branch1)
-    project = remove_dependency(project, NodeId(task1_id), dep)
+    project = remove_dependency(project, task1_id, dep)
 
     # Should succeed
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -773,20 +772,20 @@ def test_update_task_with_multiple_tasks(empty_project: Project) -> None:
     project = update_task(project, task2_id, title="Updated Task 2")
 
     # Task 2 should be updated
-    persistent_id2 = project.dag.node_map[NodeId(task2_id)]
+    persistent_id2 = project.dag.node_map[task2_id]
     task2 = project.persistent_tasks[persistent_id2].versions[
         project.dag.current_version_id
     ]
     assert task2.title == "Updated Task 2"
 
     # Task 1 and Task 3 should be unchanged
-    persistent_id1 = project.dag.node_map[NodeId(task1_id)]
+    persistent_id1 = project.dag.node_map[task1_id]
     task1 = project.persistent_tasks[persistent_id1].versions[
         project.dag.current_version_id
     ]
     assert task1.title == "Task 1"
 
-    persistent_id3 = project.dag.node_map[NodeId(task3_id)]
+    persistent_id3 = project.dag.node_map[task3_id]
     task3 = project.persistent_tasks[persistent_id3].versions[
         project.dag.current_version_id
     ]
@@ -816,7 +815,7 @@ def test_update_task_excluded_worker_tasks(empty_project: Project) -> None:
     project = update_task(project, task1_id, excluded_worker_tasks=[task2_id])
 
     # Verify
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -840,7 +839,7 @@ def test_update_task_assigned_worker_and_actual_duration(
 
     # Update assigned_worker (which maps to actual_assignee field)
     project = update_task(project, task_id, assigned_worker=WorkerId("w1"))
-    persistent_id = project.dag.node_map[NodeId(task_id)]
+    persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -888,19 +887,19 @@ def test_remove_dependency_with_multiple_branches(empty_project: Project) -> Non
     # Add dependency from branch1 to task
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(branch1_id), dep)
+    project = add_dependency(project, branch1_id, dep)
 
     # Remove dependency from branch1 (branch2 exists and should be copied via line 763)
-    project = remove_dependency(project, NodeId(branch1_id), dep)
+    project = remove_dependency(project, branch1_id, dep)
 
     # Verify dependency removed and both branches still exist
-    assert NodeId(branch1_id) in project.dag.node_map
-    assert NodeId(branch2_id) in project.dag.node_map
-    persistent_id = project.dag.node_map[NodeId(branch1_id)]
+    assert branch1_id in project.dag.node_map
+    assert branch2_id in project.dag.node_map
+    persistent_id = project.dag.node_map[branch1_id]
     branch = project.persistent_branches[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -928,17 +927,17 @@ def test_remove_dependency_validation_failure(empty_project: Project) -> None:
 
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    project = add_dependency(project, NodeId(task1_id), dep)
+    project = add_dependency(project, task1_id, dep)
 
     # Now manually corrupt the project to make remove_dependency create
     # an invalid state. We'll corrupt task1 so it has invalid worker constraints.
 
     # Get the current version's task
-    persistent_id = project.dag.node_map[NodeId(task1_id)]
+    persistent_id = project.dag.node_map[task1_id]
     task1 = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
@@ -964,4 +963,4 @@ def test_remove_dependency_validation_failure(empty_project: Project) -> None:
 
     # Now try to remove the dependency - validation should fail due to corrupted task
     with pytest.raises(DAGOperationError, match="Failed to remove dependency"):
-        remove_dependency(corrupted_project, NodeId(task1_id), dep)
+        remove_dependency(corrupted_project, task1_id, dep)

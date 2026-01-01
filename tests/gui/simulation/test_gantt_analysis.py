@@ -6,6 +6,7 @@ import pytest
 
 from fluxx.data.models import (
     DAG,
+    BranchId,
     DAGId,
     DAGVersionId,
     NodeId,
@@ -103,7 +104,7 @@ def test_extract_world_sequence_from_sample_single_branch() -> None:
     events = [
         create_task_event(
             "resolve",
-            NodeId("branch1"),
+            BranchId("branch1"),
             now,
             {"chosen_world": "world_a"},
         ),
@@ -119,19 +120,19 @@ def test_extract_world_sequence_from_sample_multiple_branches() -> None:
     events = [
         create_task_event(
             "resolve",
-            NodeId("branch1"),
+            BranchId("branch1"),
             now,
             {"chosen_world": "world_a"},
         ),
         create_task_event(
             "resolve",
-            NodeId("branch2"),
+            BranchId("branch2"),
             now + timedelta(hours=1),
             {"chosen_world": "world_b"},
         ),
         create_task_event(
             "resolve",
-            NodeId("branch3"),
+            BranchId("branch3"),
             now + timedelta(hours=2),
             {"chosen_world": "world_c"},
         ),
@@ -152,19 +153,19 @@ def test_extract_world_sequence_preserves_order() -> None:
     events = [
         create_task_event(
             "resolve",
-            NodeId("branch2"),
+            BranchId("branch2"),
             now + timedelta(hours=2),
             {"chosen_world": "world_b"},
         ),
         create_task_event(
             "resolve",
-            NodeId("branch1"),
+            BranchId("branch1"),
             now,
             {"chosen_world": "world_a"},
         ),
         create_task_event(
             "resolve",
-            NodeId("branch3"),
+            BranchId("branch3"),
             now + timedelta(hours=1),
             {"chosen_world": "world_c"},
         ),
@@ -263,8 +264,8 @@ def test_extract_gantt_statistics_invalid_percentile(simple_project: Project) ->
     now = datetime.now(UTC)
     sample = create_sample_with_events(
         [
-            create_task_event("start", NodeId("task1"), now),
-            create_task_event("complete", NodeId("task1"), now + timedelta(hours=2)),
+            create_task_event("start", TaskId("task1"), now),
+            create_task_event("complete", TaskId("task1"), now + timedelta(hours=2)),
         ]
     )
 
@@ -290,8 +291,8 @@ def test_extract_gantt_statistics_single_task_single_sample(
 
     # Create sample with one task
     events = [
-        create_task_event("start", NodeId("task1"), now),
-        create_task_event("complete", NodeId("task1"), now + timedelta(hours=2)),
+        create_task_event("start", TaskId("task1"), now),
+        create_task_event("complete", TaskId("task1"), now + timedelta(hours=2)),
     ]
     sample = create_sample_with_events(events)
 
@@ -329,9 +330,9 @@ def test_extract_gantt_statistics_multiple_samples_same_world(
     for i, duration in enumerate([1.0, 2.0, 3.0]):
         start = base + timedelta(hours=i)
         events = [
-            create_task_event("start", NodeId("task1"), start),
+            create_task_event("start", TaskId("task1"), start),
             create_task_event(
-                "complete", NodeId("task1"), start + timedelta(hours=duration)
+                "complete", TaskId("task1"), start + timedelta(hours=duration)
             ),
         ]
         samples.append(create_sample_with_events(events, sample_id=i))
@@ -362,19 +363,19 @@ def test_extract_gantt_statistics_with_branches(simple_project: Project) -> None
     # Sample 1: world_a chosen
     events1 = [
         create_task_event(
-            "resolve", NodeId("branch1"), base, {"chosen_world": "world_a"}
+            "resolve", BranchId("branch1"), base, {"chosen_world": "world_a"}
         ),
-        create_task_event("start", NodeId("task1"), base + timedelta(hours=1)),
-        create_task_event("complete", NodeId("task1"), base + timedelta(hours=3)),
+        create_task_event("start", TaskId("task1"), base + timedelta(hours=1)),
+        create_task_event("complete", TaskId("task1"), base + timedelta(hours=3)),
     ]
 
     # Sample 2: world_b chosen (different world sequence)
     events2 = [
         create_task_event(
-            "resolve", NodeId("branch1"), base, {"chosen_world": "world_b"}
+            "resolve", BranchId("branch1"), base, {"chosen_world": "world_b"}
         ),
-        create_task_event("start", NodeId("task1"), base + timedelta(hours=1)),
-        create_task_event("complete", NodeId("task1"), base + timedelta(hours=4)),
+        create_task_event("start", TaskId("task1"), base + timedelta(hours=1)),
+        create_task_event("complete", TaskId("task1"), base + timedelta(hours=4)),
     ]
 
     samples = [
@@ -417,10 +418,10 @@ def test_extract_gantt_statistics_project_start_date_is_minimum(
 
     # Create samples where task2 starts before task1
     events = [
-        create_task_event("start", NodeId("task1"), base + timedelta(hours=5)),
-        create_task_event("complete", NodeId("task1"), base + timedelta(hours=7)),
-        create_task_event("start", NodeId("task2"), base + timedelta(hours=1)),
-        create_task_event("complete", NodeId("task2"), base + timedelta(hours=3)),
+        create_task_event("start", TaskId("task1"), base + timedelta(hours=5)),
+        create_task_event("complete", TaskId("task1"), base + timedelta(hours=7)),
+        create_task_event("start", TaskId("task2"), base + timedelta(hours=1)),
+        create_task_event("complete", TaskId("task2"), base + timedelta(hours=3)),
     ]
     sample = create_sample_with_events(events)
 
@@ -440,9 +441,9 @@ def test_extract_gantt_statistics_ignores_tasks_without_complete_event(
     # Task 1: has both start and complete
     # Task 2: only has start (no complete)
     events = [
-        create_task_event("start", NodeId("task1"), now),
-        create_task_event("complete", NodeId("task1"), now + timedelta(hours=2)),
-        create_task_event("start", NodeId("task2"), now),
+        create_task_event("start", TaskId("task1"), now),
+        create_task_event("complete", TaskId("task1"), now + timedelta(hours=2)),
+        create_task_event("start", TaskId("task2"), now),
         # Missing complete for task2
     ]
     sample = create_sample_with_events(events)
@@ -464,8 +465,8 @@ def test_extract_gantt_statistics_includes_dependencies(
 
     # Create sample with tasks
     events = [
-        create_task_event("start", NodeId("task1"), now),
-        create_task_event("complete", NodeId("task1"), now + timedelta(hours=2)),
+        create_task_event("start", TaskId("task1"), now),
+        create_task_event("complete", TaskId("task1"), now + timedelta(hours=2)),
     ]
     sample = create_sample_with_events(events)
 
@@ -487,8 +488,8 @@ def test_extract_gantt_statistics_calendar_hours_not_work_hours(
 
     # Task runs for 8 calendar hours (not 8 work hours)
     events = [
-        create_task_event("start", NodeId("task1"), base),
-        create_task_event("complete", NodeId("task1"), base + timedelta(hours=8)),
+        create_task_event("start", TaskId("task1"), base),
+        create_task_event("complete", TaskId("task1"), base + timedelta(hours=8)),
     ]
     sample = create_sample_with_events(events)
 
@@ -509,8 +510,8 @@ def test_extract_gantt_statistics_percentile_as_fraction(
     now = datetime.now(UTC)
 
     events = [
-        create_task_event("start", NodeId("task1"), now),
-        create_task_event("complete", NodeId("task1"), now + timedelta(hours=2)),
+        create_task_event("start", TaskId("task1"), now),
+        create_task_event("complete", TaskId("task1"), now + timedelta(hours=2)),
     ]
     sample = create_sample_with_events(events)
 

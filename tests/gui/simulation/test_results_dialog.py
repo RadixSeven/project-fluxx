@@ -9,7 +9,6 @@ from fluxx.data.models import (
     DAG,
     DAGId,
     DAGVersionId,
-    NodeId,
     PersistentObjectId,
     PersistentTask,
     Project,
@@ -50,7 +49,7 @@ def simple_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
+            TaskId("t1"): PersistentObjectId("pt1"),
         },
     )
 
@@ -75,13 +74,13 @@ def sample_data() -> list[Sample]:
     for i in range(5):
         events = [
             TaskEvent(
-                node_id=NodeId("t1"),
+                node_id=TaskId("t1"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1 + i, 9, 0, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=NodeId("t1"),
+                node_id=TaskId("t1"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1 + i, 17, 0, 0, tzinfo=UTC),
                 details={},

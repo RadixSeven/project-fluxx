@@ -17,7 +17,6 @@ from fluxx.data.models import (
     Endpoint,
     EventId,
     EventType,
-    NodeId,
     PersistentBranch,
     PersistentObjectId,
     PersistentTask,
@@ -133,12 +132,12 @@ def test_dependency_creation() -> None:
     """Test creating a dependency."""
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId("task2"),
+        target_node_id=TaskId("task2"),
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     assert dep.source_endpoint == Endpoint.END
-    assert dep.target_node_id == NodeId("task2")
+    assert dep.target_node_id == TaskId("task2")
     assert dep.constraint_type == ConstraintType.GREATER_EQUAL
 
 
@@ -146,7 +145,7 @@ def test_dependency_with_occurrence_point() -> None:
     """Test dependency with occurrence point."""
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId("branch1"),
+        target_node_id=BranchId("branch1"),
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.EQUAL,
     )
@@ -187,7 +186,7 @@ def test_task_with_dependencies() -> None:
     """Test task with dependencies."""
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=NodeId("t2"),
+        target_node_id=TaskId("t2"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -198,7 +197,7 @@ def test_task_with_dependencies() -> None:
         dependencies=[dep],
     )
     assert len(task.dependencies) == 1
-    assert task.dependencies[0].target_node_id == NodeId("t2")
+    assert task.dependencies[0].target_node_id == TaskId("t2")
 
 
 def test_task_completion_tracking() -> None:
@@ -265,8 +264,8 @@ def test_dag_creation() -> None:
         id=DAGId("dag1"),
         current_version_id=DAGVersionId("v1"),
         node_map={
-            NodeId("t1"): PersistentObjectId("pt1"),
-            NodeId("b1"): PersistentObjectId("pb1"),
+            TaskId("t1"): PersistentObjectId("pt1"),
+            BranchId("b1"): PersistentObjectId("pb1"),
         },
     )
     assert dag.id == DAGId("dag1")
@@ -284,7 +283,7 @@ def test_dag_event_creation() -> None:
         id=EventId("e1"),
         timestamp=now,
         event_type=EventType.NODE_CREATED,
-        affected_nodes=[NodeId("t1")],
+        affected_nodes=[TaskId("t1")],
         resulting_dag_version=DAGVersionId("v2"),
     )
     assert event.event_type == EventType.NODE_CREATED
@@ -337,11 +336,11 @@ def test_task_event_creation() -> None:
     now = datetime.now(UTC)
     event = TaskEvent(
         timestamp=now,
-        node_id=NodeId("t1"),
+        node_id=TaskId("t1"),
         event_type="start",
         details={"worker": "w1"},
     )
-    assert event.node_id == NodeId("t1")
+    assert event.node_id == TaskId("t1")
     assert event.details["worker"] == "w1"
 
 

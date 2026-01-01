@@ -1,10 +1,18 @@
 """Graphics view for DAG visualization."""
 
+from typing import cast
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPen, QWheelEvent
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsScene, QGraphicsView
 
-from fluxx.data.models import NodeId, PossibleWorldId, Project
+from fluxx.data.models import (
+    BranchId,
+    NodeId,
+    PossibleWorldId,
+    PossibleWorldReference,
+    Project,
+)
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.utils.layout import compute_dag_layout
 from fluxx.gui.widgets.dag_view.edge_item import EdgeItem
@@ -204,15 +212,23 @@ class DAGGraphicsView(QGraphicsView):
             # Create edge items for each dependency
             for dep in dependencies:
                 # Skip if source or target node not in view
+                target_str = str(dep.target_node_id)
+                target_node_id: NodeId
+                if ":" in target_str:
+                    branch_id_str, _ = target_str.split(":", 1)
+                    target_node_id = BranchId(branch_id_str)
+                else:
+                    target_node_id = cast(NodeId, dep.target_node_id)
+
                 if (
                     node_id not in self.node_items
-                    or dep.target_node_id not in self.node_items
+                    or target_node_id not in self.node_items
                 ):
                     continue
 
                 # Get node positions (center of nodes)
                 source_item = self.node_items[node_id]
-                target_item = self.node_items[dep.target_node_id]
+                target_item = self.node_items[target_node_id]
 
                 source_pos = source_item.pos()
                 target_pos = target_item.pos()
@@ -220,7 +236,7 @@ class DAGGraphicsView(QGraphicsView):
                 # Create edge item
                 edge = EdgeItem(
                     node_id,
-                    dep.target_node_id,
+                    target_node_id,
                     source_pos,
                     target_pos,
                     dep.constraint_type,
@@ -268,8 +284,10 @@ class DAGGraphicsView(QGraphicsView):
             if self._select_target_mode:
                 # In select-target mode: emit signal for possible world and exit mode
                 # Format: "branch_id:world_id" for simulation compatibility
-                pw_node_id = NodeId(f"{item.node_id}:{item.possible_world.id}")
-                self.node_selected_for_dependency.emit(pw_node_id)
+                pw_ref = PossibleWorldReference(
+                    f"{item.node_id}:{item.possible_world.id}"
+                )
+                self.node_selected_for_dependency.emit(pw_ref)
                 self.exit_select_target_mode()
             else:
                 # Normal mode: select parent branch (per spec 5.2.2)

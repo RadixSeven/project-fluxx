@@ -9,9 +9,10 @@ from fluxx.data.models import (
     ConstraintType,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
+    PossibleWorldReference,
+    TaskId,
     Triangular,
 )
 from fluxx.gui.controller import ProjectController
@@ -121,10 +122,10 @@ def test_dependency_editor_set_target_task(
     assert not task_dependency_editor.add_button.isEnabled()
 
     # Set as target
-    task_dependency_editor.set_target_node(NodeId(task_id))
+    task_dependency_editor.set_target_node(task_id)
 
     # Verify target is set
-    assert task_dependency_editor._target_node_id == NodeId(task_id)
+    assert task_dependency_editor._target_node_id == task_id
     assert "Task: Target Task" in task_dependency_editor.target_display.text()
 
     # Add button should now be enabled
@@ -152,10 +153,10 @@ def test_dependency_editor_set_target_branch(
     )
 
     # Set as target
-    task_dependency_editor.set_target_node(NodeId(branch_id))
+    task_dependency_editor.set_target_node(branch_id)
 
     # Verify target is set
-    assert task_dependency_editor._target_node_id == NodeId(branch_id)
+    assert task_dependency_editor._target_node_id == branch_id
     assert "Branch: Target Branch" in task_dependency_editor.target_display.text()
 
     # Should auto-select occurrence for branches
@@ -176,7 +177,7 @@ def test_dependency_editor_get_dependency_task(
     # Configure dependency
     task_dependency_editor.source_endpoint_combo.setCurrentIndex(1)  # END
     task_dependency_editor.constraint_type_combo.setCurrentIndex(0)  # >=
-    task_dependency_editor.set_target_node(NodeId(task_id))
+    task_dependency_editor.set_target_node(task_id)
     task_dependency_editor.target_endpoint_combo.setCurrentIndex(0)  # START
 
     # Get dependency
@@ -185,7 +186,7 @@ def test_dependency_editor_get_dependency_task(
     assert dep is not None
     assert dep.source_endpoint == Endpoint.END
     assert dep.constraint_type == ConstraintType.GREATER_EQUAL
-    assert dep.target_node_id == NodeId(task_id)
+    assert dep.target_node_id == task_id
     assert dep.target_endpoint == Endpoint.START
 
 
@@ -203,7 +204,7 @@ def test_dependency_editor_get_dependency_branch(
     # Configure dependency
     # Source endpoint is always OCCURRENCE for branches (no combo)
     branch_dependency_editor.constraint_type_combo.setCurrentIndex(1)  # =
-    branch_dependency_editor.set_target_node(NodeId(task_id))
+    branch_dependency_editor.set_target_node(task_id)
     branch_dependency_editor.target_endpoint_combo.setCurrentIndex(1)  # END
 
     # Get dependency
@@ -212,7 +213,7 @@ def test_dependency_editor_get_dependency_branch(
     assert dep is not None
     assert dep.source_endpoint == Endpoint.OCCURRENCE  # Always for branches
     assert dep.constraint_type == ConstraintType.EQUAL
-    assert dep.target_node_id == NodeId(task_id)
+    assert dep.target_node_id == task_id
     assert dep.target_endpoint == Endpoint.END
 
 
@@ -241,7 +242,7 @@ def test_dependency_editor_load_dependency(
     # Create dependency
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.EQUAL,
     )
@@ -252,7 +253,7 @@ def test_dependency_editor_load_dependency(
     # Verify fields are set
     assert task_dependency_editor.source_endpoint_combo.currentData() == Endpoint.END
     assert task_dependency_editor.constraint_type_combo.currentData() == "="
-    assert task_dependency_editor._target_node_id == NodeId(task_id)
+    assert task_dependency_editor._target_node_id == task_id
     assert task_dependency_editor.target_endpoint_combo.currentData() == Endpoint.START
 
 
@@ -261,7 +262,7 @@ def test_dependency_editor_clear(
 ) -> None:
     """Test clearing the editor."""
     # Set some values
-    task_dependency_editor._target_node_id = NodeId("test_node")
+    task_dependency_editor._target_node_id = TaskId("test_node")
     task_dependency_editor.target_display.setText("Test")
     task_dependency_editor.source_endpoint_combo.setCurrentIndex(1)
     task_dependency_editor.constraint_type_combo.setCurrentIndex(1)
@@ -359,7 +360,7 @@ def test_dependency_editor_set_target_possible_world(
     qtbot.addWidget(editor)
 
     # Set target to possible world (format: "branch_id:world_id")
-    pw_node_id = NodeId(f"{branch_id}:pw_001")
+    pw_node_id = PossibleWorldReference(f"{branch_id}:pw_001")
     editor.set_target_node(pw_node_id)
 
     # Check display shows possible world

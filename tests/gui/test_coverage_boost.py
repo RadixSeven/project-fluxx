@@ -6,7 +6,6 @@ from fluxx.data.models import (
     ConstraintType,
     Dependency,
     Endpoint,
-    NodeId,
     PossibleWorld,
     PossibleWorldId,
     ShiftedLognormal,
@@ -41,11 +40,11 @@ def test_branch_editor_with_dependencies(qtbot: QtBot) -> None:
     # Add dependency
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(task_id),
+        target_node_id=task_id,
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(branch_id), dep)
+    controller.add_dependency(branch_id, dep)
 
     # Load branch
     editor.load_branch(branch_id)
@@ -79,11 +78,11 @@ def test_branch_editor_dependency_to_branch(qtbot: QtBot) -> None:
     # Add dependency from branch2 to branch1
     dep = Dependency(
         source_endpoint=Endpoint.OCCURRENCE,
-        target_node_id=NodeId(branch1_id),
+        target_node_id=branch1_id,
         target_endpoint=Endpoint.OCCURRENCE,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
-    controller.add_dependency(NodeId(branch2_id), dep)
+    controller.add_dependency(branch2_id, dep)
 
     # Load branch2
     editor.load_branch(branch2_id)
@@ -273,10 +272,10 @@ def test_controller_selection_tracking(qtbot: QtBot) -> None:
     task_id = controller.create_task(
         title="Task", duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0)
     )
-    controller.select_node(NodeId(task_id))
+    controller.select_node(task_id)
 
     # Verify selected node is tracked (via internal state)
-    assert controller._selected_node_id == NodeId(task_id)
+    assert controller._selected_node_id == task_id
 
 
 def test_branch_editor_footer_buttons_exist(qtbot: QtBot) -> None:

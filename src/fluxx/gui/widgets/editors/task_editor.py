@@ -19,14 +19,17 @@ from PySide6.QtWidgets import (
 )
 
 from fluxx.data.models import (
+    BranchId,
     ConstraintType,
     Dependency,
     DurationDistribution,
     Endpoint,
     NodeId,
+    NodeIdType,
     ShiftedLognormal,
     TaskId,
     Triangular,
+    get_node_id_type,
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
@@ -202,7 +205,7 @@ class TaskEditor(QWidget):
 
         # Get task from project
         project = self.controller.get_project()
-        node_id = NodeId(task_id)
+        node_id: NodeId = task_id
 
         if node_id not in project.dag.node_map:
             return
@@ -428,7 +431,7 @@ class TaskEditor(QWidget):
         # Update subtask operation buttons
         if self.current_task_id is not None:
             project = self.controller.get_project()
-            node_id = NodeId(self.current_task_id)
+            node_id = self.current_task_id
 
             if node_id in project.dag.node_map:
                 persistent_id = project.dag.node_map[node_id]
@@ -498,7 +501,7 @@ class TaskEditor(QWidget):
         if "dependencies" in self.pending_changes:
             # Get original dependencies
             project = self.controller.get_project()
-            node_id = NodeId(self.current_task_id)
+            node_id = self.current_task_id
             persistent_id = project.dag.node_map[node_id]
             persistent_task = project.persistent_tasks[persistent_id]
             task = persistent_task.versions[project.dag.current_version_id]
@@ -548,40 +551,62 @@ class TaskEditor(QWidget):
             target_id = dep.target_node_id
             target_title = "Unknown"
 
-            # Check if this is a possible world reference (format: "branch_id:world_id")
+            # Determine target type using type-safe function
             target_str = str(target_id)
-            if ":" in target_str:
-                # Parse possible world reference
-                branch_id_str, world_id_str = target_str.split(":", 1)
-                branch_node_id = NodeId(branch_id_str)
 
-                # Find the branch and possible world
-                if branch_node_id in project.dag.node_map:
-                    branch_persistent_id = project.dag.node_map[branch_node_id]
+            try:
+                target_type = get_node_id_type(target_str)
 
-                    if branch_persistent_id in project.persistent_branches:
-                        persistent_branch = project.persistent_branches[
-                            branch_persistent_id
-                        ]
-                        if current_version in persistent_branch.versions:
-                            branch = persistent_branch.versions[current_version]
+                if target_type == NodeIdType.POSSIBLE_WORLD_REFERENCE:
+                    # Parse possible world reference
+                    branch_id_str, world_id_str = target_str.split(":", 1)
+                    branch_node_id = BranchId(branch_id_str)
 
-                            # Find the specific possible world
-                            for pw in branch.possible_worlds:
-                                if pw.id == world_id_str:
-                                    target_title = f"{pw.title} (from {branch.title})"
-                                    break
-            elif target_id in project.dag.node_map:
-                persistent_id = project.dag.node_map[target_id]
+                    # Find the branch and possible world
+                    if branch_node_id in project.dag.node_map:
+                        branch_persistent_id = project.dag.node_map[branch_node_id]
 
-                if persistent_id in project.persistent_tasks:
-                    persistent_task = project.persistent_tasks[persistent_id]
-                    if current_version in persistent_task.versions:
-                        target_title = persistent_task.versions[current_version].title
-                elif persistent_id in project.persistent_branches:
-                    persistent_branch = project.persistent_branches[persistent_id]
-                    if current_version in persistent_branch.versions:
-                        target_title = persistent_branch.versions[current_version].title
+                        if branch_persistent_id in project.persistent_branches:
+                            persistent_branch = project.persistent_branches[
+                                branch_persistent_id
+                            ]
+                            if current_version in persistent_branch.versions:
+                                branch = persistent_branch.versions[current_version]
+
+                                # Find the specific possible world
+                                for pw in branch.possible_worlds:
+                                    if pw.id == world_id_str:
+                                        target_title = (
+                                            f"{pw.title} (from {branch.title})"
+                                        )
+                                        break
+                elif target_type == NodeIdType.TASK:
+                    task_node_id = TaskId(target_str)
+                    if task_node_id in project.dag.node_map:
+                        persistent_id = project.dag.node_map[task_node_id]
+
+                        if persistent_id in project.persistent_tasks:
+                            persistent_task = project.persistent_tasks[persistent_id]
+                            if current_version in persistent_task.versions:
+                                target_title = persistent_task.versions[
+                                    current_version
+                                ].title
+                elif target_type == NodeIdType.BRANCH:
+                    branch_node_id_2 = BranchId(target_str)
+                    if branch_node_id_2 in project.dag.node_map:
+                        persistent_id = project.dag.node_map[branch_node_id_2]
+
+                        if persistent_id in project.persistent_branches:
+                            persistent_branch = project.persistent_branches[
+                                persistent_id
+                            ]
+                            if current_version in persistent_branch.versions:
+                                target_title = persistent_branch.versions[
+                                    current_version
+                                ].title
+            except ValueError:
+                # Unknown target type - leave as "Unknown"
+                pass
 
             # Format dependency display
             source_ep = dep.source_endpoint.value
@@ -658,7 +683,7 @@ class TaskEditor(QWidget):
             current_deps = self.pending_changes["dependencies"].copy()
         else:
             project = self.controller.get_project()
-            node_id = NodeId(self.current_task_id)
+            node_id = self.current_task_id
             persistent_id = project.dag.node_map[node_id]
             persistent_task = project.persistent_tasks[persistent_id]
             task = persistent_task.versions[project.dag.current_version_id]
@@ -699,7 +724,7 @@ class TaskEditor(QWidget):
             return False
 
         project = self.controller.get_project()
-        node_id = NodeId(self.current_task_id)
+        node_id = self.current_task_id
 
         if node_id not in project.dag.node_map:
             return False
@@ -718,7 +743,7 @@ class TaskEditor(QWidget):
         # Check if this is a subtask's required "start >= parent.start" dependency
         if task.parent_id is not None and (
             dependency.source_endpoint == Endpoint.START
-            and dependency.target_node_id == NodeId(task.parent_id)
+            and dependency.target_node_id == task.parent_id
             and dependency.target_endpoint == Endpoint.START
             and dependency.constraint_type == ConstraintType.GREATER_EQUAL
         ):
@@ -728,7 +753,7 @@ class TaskEditor(QWidget):
         for child_id in task.children:
             if (
                 dependency.source_endpoint == Endpoint.END
-                and dependency.target_node_id == NodeId(child_id)
+                and dependency.target_node_id == child_id
                 and dependency.target_endpoint == Endpoint.END
                 and dependency.constraint_type == ConstraintType.GREATER_EQUAL
             ):
@@ -753,7 +778,7 @@ class TaskEditor(QWidget):
             current_deps = self.pending_changes["dependencies"].copy()
         else:
             project = self.controller.get_project()
-            node_id = NodeId(self.current_task_id)
+            node_id = self.current_task_id
             persistent_id = project.dag.node_map[node_id]
             persistent_task = project.persistent_tasks[persistent_id]
             task = persistent_task.versions[project.dag.current_version_id]

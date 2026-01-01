@@ -199,7 +199,7 @@ def add_task(
 
     # Update node map
     new_node_map = dict(project.dag.node_map)
-    new_node_map[NodeId(task_id)] = persistent_id
+    new_node_map[task_id] = persistent_id
 
     # Create event
     event = DAGEvent(
@@ -207,7 +207,7 @@ def add_task(
         timestamp=datetime.now(UTC),
         parent_event_id=project.current_event_id,
         event_type=EventType.NODE_CREATED,
-        affected_nodes=[NodeId(task_id)],
+        affected_nodes=[task_id],
         resulting_dag_version=new_version_id,
     )
 
@@ -310,7 +310,7 @@ def add_branch(
 
     # Update node map
     new_node_map = dict(project.dag.node_map)
-    new_node_map[NodeId(branch_id)] = persistent_id
+    new_node_map[branch_id] = persistent_id
 
     # Create event
     event = DAGEvent(
@@ -318,7 +318,7 @@ def add_branch(
         timestamp=datetime.now(UTC),
         parent_event_id=project.current_event_id,
         event_type=EventType.NODE_CREATED,
-        affected_nodes=[NodeId(branch_id)],
+        affected_nodes=[branch_id],
         resulting_dag_version=new_version_id,
     )
 
@@ -476,7 +476,7 @@ def update_task(
         DAGOperationError: If the operation fails validation
     """
     # Find the task
-    node_id = NodeId(task_id)
+    node_id = task_id
     persistent_id = project.dag.node_map.get(node_id)
     if persistent_id is None:
         raise DAGOperationError(f"Task {task_id} not found")
@@ -586,7 +586,7 @@ def update_branch(
         DAGOperationError: If the operation fails validation
     """
     # Find the branch
-    node_id = NodeId(branch_id)
+    node_id = branch_id
     persistent_id = project.dag.node_map.get(node_id)
     if persistent_id is None:
         raise DAGOperationError(f"Branch {branch_id} not found")
@@ -772,7 +772,7 @@ def convert_to_parent_task(
         DAGOperationError: If the task is already a parent or doesn't exist
     """
     # Validate task exists and is a leaf
-    node_id = NodeId(task_id)
+    node_id = task_id
     if node_id not in project.dag.node_map:
         raise DAGOperationError(f"Task {task_id} not found")
 
@@ -814,7 +814,7 @@ def convert_to_parent_task(
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId(task_id),
+                target_node_id=task_id,
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -836,7 +836,7 @@ def convert_to_parent_task(
             + [
                 Dependency(
                     source_endpoint=Endpoint.END,
-                    target_node_id=NodeId(child_id),
+                    target_node_id=child_id,
                     target_endpoint=Endpoint.END,
                     constraint_type=ConstraintType.GREATER_EQUAL,
                 )
@@ -881,7 +881,7 @@ def convert_to_parent_task(
 
     # Update node map
     new_node_map = dict(project.dag.node_map)
-    new_node_map[NodeId(child_id)] = child_persistent_id
+    new_node_map[child_id] = child_persistent_id
 
     # Create event
     event = DAGEvent(
@@ -889,7 +889,7 @@ def convert_to_parent_task(
         timestamp=datetime.now(UTC),
         parent_event_id=project.current_event_id,
         event_type=EventType.NODE_MODIFIED,
-        affected_nodes=[NodeId(task_id), NodeId(child_id)],
+        affected_nodes=[task_id, child_id],
         resulting_dag_version=new_version_id,
     )
 
@@ -944,7 +944,7 @@ def add_sibling_subtask(
         DAGOperationError: If the task doesn't have a parent or doesn't exist
     """
     # Validate task exists and has a parent
-    node_id = NodeId(task_id)
+    node_id = task_id
     if node_id not in project.dag.node_map:
         raise DAGOperationError(f"Task {task_id} not found")
 
@@ -987,7 +987,7 @@ def add_sibling_subtask(
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=NodeId(parent_id),
+                target_node_id=parent_id,
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1019,7 +1019,7 @@ def add_sibling_subtask(
                     + [
                         Dependency(
                             source_endpoint=Endpoint.END,
-                            target_node_id=NodeId(sibling_id),
+                            target_node_id=sibling_id,
                             target_endpoint=Endpoint.END,
                             constraint_type=ConstraintType.GREATER_EQUAL,
                         )
@@ -1051,7 +1051,7 @@ def add_sibling_subtask(
 
     # Update node map
     new_node_map = dict(project.dag.node_map)
-    new_node_map[NodeId(sibling_id)] = sibling_persistent_id
+    new_node_map[sibling_id] = sibling_persistent_id
 
     # Create event
     event = DAGEvent(
@@ -1059,7 +1059,7 @@ def add_sibling_subtask(
         timestamp=datetime.now(UTC),
         parent_event_id=project.current_event_id,
         event_type=EventType.NODE_CREATED,
-        affected_nodes=[NodeId(parent_id), NodeId(sibling_id)],
+        affected_nodes=[parent_id, sibling_id],
         resulting_dag_version=new_version_id,
     )
 

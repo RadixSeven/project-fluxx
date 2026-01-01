@@ -12,7 +12,6 @@ import numpy as np
 from fluxx.data.models import (
     Branch,
     BranchId,
-    NodeId,
     PossibleWorldId,
     Project,
     Sample,
@@ -163,7 +162,7 @@ def start_task(
 
     # Record start event
     event = TaskEvent(
-        node_id=NodeId(str(task.id)),
+        node_id=task.id,
         event_type="start",
         timestamp=start_time,
         details={
@@ -197,7 +196,7 @@ def complete_task(
 
     # Record completion event
     event = TaskEvent(
-        node_id=NodeId(str(task.id)),
+        node_id=task.id,
         event_type="complete",
         timestamp=completion_time,
         details={"worker_id": str(worker_id) if worker_id else None},
@@ -282,7 +281,7 @@ def resolve_branch(
 
     # Record event
     event = TaskEvent(
-        node_id=NodeId(str(branch.id)),
+        node_id=branch.id,
         event_type="branch_resolved",
         timestamp=state.current_time,
         details={"chosen_world_id": str(chosen_world_id)},
@@ -304,7 +303,7 @@ def get_branch(branch_id: BranchId, state: SimulationState) -> Branch:
         KeyError: If the branch is not found
     """
     # Look up the persistent object ID
-    node_id = NodeId(str(branch_id))
+    node_id = branch_id
     if node_id not in state.project.dag.node_map:
         raise KeyError(f"Branch {branch_id} not found in node_map")
 

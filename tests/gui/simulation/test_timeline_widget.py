@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from pytestqt.qtbot import QtBot
 
-from fluxx.data.models import NodeId, Sample, SampleId, TaskEvent, TaskId
+from fluxx.data.models import Sample, SampleId, TaskEvent, TaskId
 from fluxx.gui.simulation.timeline_widget import ProbabilisticTimelineWidget
 
 
@@ -17,7 +17,7 @@ def successful_samples() -> list[Sample]:
     for i in range(10):
         events = [
             TaskEvent(
-                node_id=NodeId("t1"),
+                node_id=TaskId("t1"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1 + i, 17, 0, 0, tzinfo=UTC),
                 details={},
@@ -37,7 +37,7 @@ def mixed_samples() -> list[Sample]:
     for i in range(8):
         events = [
             TaskEvent(
-                node_id=NodeId("t1"),
+                node_id=TaskId("t1"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1 + i, 17, 0, 0, tzinfo=UTC),
                 details={},
@@ -49,7 +49,7 @@ def mixed_samples() -> list[Sample]:
     for i in range(8, 10):
         events = [
             TaskEvent(
-                node_id=NodeId("t1"),
+                node_id=TaskId("t1"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC),
                 details={},

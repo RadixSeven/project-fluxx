@@ -3,6 +3,7 @@
 Based on the specification in project_fluxx_specification.md section 3.
 """
 
+import re
 from abc import ABC
 from datetime import datetime
 from enum import Enum
@@ -17,13 +18,83 @@ TaskId = NewType("TaskId", str)
 BranchId = NewType("BranchId", str)
 WorkerId = NewType("WorkerId", str)
 PossibleWorldId = NewType("PossibleWorldId", str)
-NodeId = NewType("NodeId", str)  # Can be TaskId or BranchId
 DAGId = NewType("DAGId", str)
 DAGVersionId = NewType("DAGVersionId", str)
 EventId = NewType("EventId", str)
 SimulationId = NewType("SimulationId", str)
 PersistentObjectId = NewType("PersistentObjectId", str)
 SampleId = NewType("SampleId", int)
+
+# Union types for nodes and dependency targets
+NodeId = (
+    TaskId | BranchId
+)  # Nodes that exist in the DAG (use get_node_id_type to distinguish)
+PossibleWorldReference = NewType(
+    "PossibleWorldReference", str
+)  # Format: "branch_id:world_id"
+DependencyTargetId = (
+    NodeId | PossibleWorldReference
+)  # Things that can be dependency targets (use get_node_id_type to distinguish)
+
+
+class NodeIdType(str, Enum):
+    """Type of node ID for pattern-based type discrimination."""
+
+    TASK = "task"
+    BRANCH = "branch"
+    POSSIBLE_WORLD_REFERENCE = "possible_world_reference"
+
+
+def get_node_id_type(node_id: str) -> NodeIdType:
+    """Determine the type of a node ID based on its pattern.
+
+    Args:
+        node_id: The node ID string to check
+
+    Returns:
+        The type of the node ID
+
+    Raises:
+        ValueError: If the ID doesn't match any known pattern
+    """
+    # Check for possible world reference (contains colon)
+    if ":" in node_id:
+        return NodeIdType.POSSIBLE_WORLD_REFERENCE
+
+    # Check for task ID patterns (production and test)
+    if re.match(r"^task_\d+_[0-9a-f]+$", node_id) or re.match(r"^t\d+$", node_id):
+        return NodeIdType.TASK
+
+    # Check for branch ID patterns (production and test)
+    if re.match(r"^branch_\d+_[0-9a-f]+$", node_id) or re.match(r"^b\d+$", node_id):
+        return NodeIdType.BRANCH
+
+    raise ValueError(f"Unknown node ID pattern: {node_id}")
+
+
+def str_to_node_id(node_id_str: str) -> NodeId:
+    """Convert a string to a properly-typed NodeId.
+
+    Args:
+        node_id_str: The node ID string
+
+    Returns:
+        TaskId or BranchId based on the pattern
+
+    Raises:
+        ValueError: If the ID doesn't match any known node pattern
+    """
+    node_type = get_node_id_type(node_id_str)
+
+    if node_type == NodeIdType.TASK:
+        return TaskId(node_id_str)
+    elif node_type == NodeIdType.BRANCH:
+        return BranchId(node_id_str)
+    else:
+        raise ValueError(
+            f"Cannot convert '{node_id_str}' to NodeId: "
+            f"it's a {node_type}, not a task or branch"
+        )
 
 
 class DurationDistribution(BaseModel, ABC):
@@ -115,15 +186,15 @@ class Dependency(BaseModel):
     # Add dependency: task1.end >= task2.start
     Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=NodeId(task2_id),
+        target_node_id=task2_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
     """
 
     source_endpoint: Endpoint = Field(description="Source endpoint type")
-    target_node_id: NodeId = Field(
-        description="Target node ID (task or possible world ID)"
+    target_node_id: DependencyTargetId = Field(
+        description="Target: TaskId, BranchId, or PossibleWorldReference"
     )
     target_endpoint: Endpoint = Field(description="Target endpoint type")
     constraint_type: ConstraintType = Field(description="Type of constraint")
