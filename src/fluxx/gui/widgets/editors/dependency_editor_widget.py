@@ -12,7 +12,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from fluxx.data.models import ConstraintType, Dependency, Endpoint, NodeId
+from fluxx.data.models import (
+    ConstraintType,
+    Dependency,
+    Endpoint,
+    NodeId,
+    PossibleWorldId,
+)
 from fluxx.gui.controller import ProjectController
 
 
@@ -150,52 +156,102 @@ class DependencyEditorWidget(QWidget):
         """Set the selected target node.
 
         Args:
-            node_id: ID of the selected target node
+            node_id: ID of the selected target node (task/branch/possible world)
         """
         self._target_node_id = node_id
 
         # Get node info to display
         project = self.controller.get_project()
-        persistent_id = project.dag.node_map.get(node_id)
-        if persistent_id is None:
+        current_version = project.dag.current_version_id
+
+        # Check if this is a possible world reference (format: "branch_id:world_id")
+        node_str = str(node_id)
+        if ":" in node_str:
+            # Parse possible world reference
+            branch_id_str, world_id_str = node_str.split(":", 1)
+            branch_node_id = NodeId(branch_id_str)
+            pw_id = PossibleWorldId(world_id_str)
+
+            # Find the branch and possible world
+            branch_persistent_id = project.dag.node_map.get(branch_node_id)
+            if (
+                branch_persistent_id
+                and branch_persistent_id in project.persistent_branches
+            ):
+                persistent_branch = project.persistent_branches[branch_persistent_id]
+                if current_version in persistent_branch.versions:
+                    branch = persistent_branch.versions[current_version]
+                    # Find the specific possible world
+                    found_pw = None
+                    for pw in branch.possible_worlds:
+                        if pw.id == pw_id:
+                            found_pw = pw
+                            break
+
+                    if found_pw:
+                        # Display as possible world
+                        self.target_display.setText(
+                            f"Possible World: {found_pw.title} (from {branch.title})"
+                        )
+                        self.target_display.setStyleSheet("color: black;")
+                        # Disable start/end, enable only occurrence
+                        # (possible worlds only have occurrence point)
+                        model = self.target_endpoint_combo.model()
+                        if isinstance(model, QStandardItemModel):
+                            model.item(0).setEnabled(False)  # Start
+                            model.item(1).setEnabled(False)  # End
+                            model.item(2).setEnabled(True)  # Occurrence
+                        # Auto-select occurrence for possible worlds
+                        self.target_endpoint_combo.setCurrentIndex(2)
+                        self._on_field_changed()
+                        return
+
+            # If we get here, the reference is invalid
             self.target_display.setText("<Invalid node>")
             self.target_display.setStyleSheet("color: red; font-style: italic;")
             return
 
-        # Check if it's a task or branch
-        current_version = project.dag.current_version_id
+        # Not a possible world reference, check regular nodes
+        persistent_id = project.dag.node_map.get(node_id)
 
-        if persistent_id in project.persistent_tasks:
-            persistent_task = project.persistent_tasks[persistent_id]
-            if current_version in persistent_task.versions:
-                task = persistent_task.versions[current_version]
-                self.target_display.setText(f"Task: {task.title}")
-                self.target_display.setStyleSheet("color: black;")
-                # Enable start/end, disable occurrence
-                model = self.target_endpoint_combo.model()
-                if isinstance(model, QStandardItemModel):
-                    model.item(0).setEnabled(True)  # Start
-                    model.item(1).setEnabled(True)  # End
-                    model.item(2).setEnabled(False)  # Occurrence
-                if (
-                    self.target_endpoint_combo.currentData() == Endpoint.OCCURRENCE
-                ):  # Reset if was occurrence
-                    self.target_endpoint_combo.setCurrentIndex(1)
+        # Check if it's a task or branch in the DAG
+        if persistent_id is not None:
+            if persistent_id in project.persistent_tasks:
+                persistent_task = project.persistent_tasks[persistent_id]
+                if current_version in persistent_task.versions:
+                    task = persistent_task.versions[current_version]
+                    self.target_display.setText(f"Task: {task.title}")
+                    self.target_display.setStyleSheet("color: black;")
+                    # Enable start/end, disable occurrence
+                    model = self.target_endpoint_combo.model()
+                    if isinstance(model, QStandardItemModel):
+                        model.item(0).setEnabled(True)  # Start
+                        model.item(1).setEnabled(True)  # End
+                        model.item(2).setEnabled(False)  # Occurrence
+                    if (
+                        self.target_endpoint_combo.currentData() == Endpoint.OCCURRENCE
+                    ):  # Reset if was occurrence
+                        self.target_endpoint_combo.setCurrentIndex(1)
 
-        elif persistent_id in project.persistent_branches:
-            persistent_branch = project.persistent_branches[persistent_id]
-            if current_version in persistent_branch.versions:
-                branch = persistent_branch.versions[current_version]
-                self.target_display.setText(f"Branch: {branch.title}")
-                self.target_display.setStyleSheet("color: black;")
-                # Disable start/end, enable only occurrence
-                model = self.target_endpoint_combo.model()
-                if isinstance(model, QStandardItemModel):
-                    model.item(0).setEnabled(False)  # Start
-                    model.item(1).setEnabled(False)  # End
-                    model.item(2).setEnabled(True)  # Occurrence
-                # Auto-select occurrence for branches
-                self.target_endpoint_combo.setCurrentIndex(2)
+            elif persistent_id in project.persistent_branches:
+                persistent_branch = project.persistent_branches[persistent_id]
+                if current_version in persistent_branch.versions:
+                    branch = persistent_branch.versions[current_version]
+                    self.target_display.setText(f"Branch: {branch.title}")
+                    self.target_display.setStyleSheet("color: black;")
+                    # Disable start/end, enable only occurrence
+                    model = self.target_endpoint_combo.model()
+                    if isinstance(model, QStandardItemModel):
+                        model.item(0).setEnabled(False)  # Start
+                        model.item(1).setEnabled(False)  # End
+                        model.item(2).setEnabled(True)  # Occurrence
+                    # Auto-select occurrence for branches
+                    self.target_endpoint_combo.setCurrentIndex(2)
+        else:
+            # Not found anywhere
+            self.target_display.setText("<Invalid node>")
+            self.target_display.setStyleSheet("color: red; font-style: italic;")
+            return
 
         self._on_field_changed()
 

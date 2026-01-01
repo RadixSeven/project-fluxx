@@ -267,8 +267,9 @@ class DAGGraphicsView(QGraphicsView):
         if isinstance(item, PossibleWorldItem):
             if self._select_target_mode:
                 # In select-target mode: emit signal for possible world and exit mode
-                # Note: Dependencies can target possible worlds
-                self.node_selected_for_dependency.emit(NodeId(item.possible_world.id))
+                # Format: "branch_id:world_id" for simulation compatibility
+                pw_node_id = NodeId(f"{item.node_id}:{item.possible_world.id}")
+                self.node_selected_for_dependency.emit(pw_node_id)
                 self.exit_select_target_mode()
             else:
                 # Normal mode: select parent branch (per spec 5.2.2)

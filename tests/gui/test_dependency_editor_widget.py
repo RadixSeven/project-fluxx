@@ -11,6 +11,7 @@ from fluxx.data.models import (
     Endpoint,
     NodeId,
     PossibleWorld,
+    PossibleWorldId,
     Triangular,
 )
 from fluxx.gui.controller import ProjectController
@@ -327,3 +328,58 @@ def test_dependency_editor_signals(
     if cancel_button:
         cancel_button.click()
         assert cancelled_signal_count == 1
+
+
+def test_dependency_editor_set_target_possible_world(
+    qtbot: QtBot, controller: ProjectController
+) -> None:
+    """Test setting a possible world as target."""
+    # Create a branch with possible worlds
+    branch_id = controller.create_branch(
+        title="Test Branch",
+        description="A branch",
+        possible_worlds=[
+            PossibleWorld(
+                id=PossibleWorldId("pw_001"),
+                title="World A",
+                description="First world",
+                weight=1.0,
+            ),
+            PossibleWorld(
+                id=PossibleWorldId("pw_002"),
+                title="World B",
+                description="Second world",
+                weight=2.0,
+            ),
+        ],
+    )
+
+    # Create dependency editor
+    editor = DependencyEditorWidget(controller, is_branch=False)
+    qtbot.addWidget(editor)
+
+    # Set target to possible world (format: "branch_id:world_id")
+    pw_node_id = NodeId(f"{branch_id}:pw_001")
+    editor.set_target_node(pw_node_id)
+
+    # Check display shows possible world
+    assert "Possible World: World A" in editor.target_display.text()
+    assert "Test Branch" in editor.target_display.text()
+
+    # Check that only occurrence endpoint is enabled
+    from PySide6.QtGui import QStandardItemModel
+
+    model = editor.target_endpoint_combo.model()
+    assert isinstance(model, QStandardItemModel)
+    assert not model.item(0).isEnabled()  # Start disabled
+    assert not model.item(1).isEnabled()  # End disabled
+    assert model.item(2).isEnabled()  # Occurrence enabled
+
+    # Check that occurrence is selected
+    assert editor.target_endpoint_combo.currentData() == Endpoint.OCCURRENCE
+
+    # Verify we can get the dependency
+    dep = editor.get_dependency()
+    assert dep is not None
+    assert str(dep.target_node_id) == f"{branch_id}:pw_001"
+    assert dep.target_endpoint == Endpoint.OCCURRENCE

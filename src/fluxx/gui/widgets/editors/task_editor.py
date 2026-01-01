@@ -541,23 +541,45 @@ class TaskEditor(QWidget):
         self.dependencies_list.clear()
 
         project = self.controller.get_project()
+        current_version = project.dag.current_version_id
 
         for dep in dependencies:
             # Get target node title
             target_id = dep.target_node_id
             target_title = "Unknown"
 
-            if target_id in project.dag.node_map:
+            # Check if this is a possible world reference (format: "branch_id:world_id")
+            target_str = str(target_id)
+            if ":" in target_str:
+                # Parse possible world reference
+                branch_id_str, world_id_str = target_str.split(":", 1)
+                branch_node_id = NodeId(branch_id_str)
+
+                # Find the branch and possible world
+                if branch_node_id in project.dag.node_map:
+                    branch_persistent_id = project.dag.node_map[branch_node_id]
+
+                    if branch_persistent_id in project.persistent_branches:
+                        persistent_branch = project.persistent_branches[
+                            branch_persistent_id
+                        ]
+                        if current_version in persistent_branch.versions:
+                            branch = persistent_branch.versions[current_version]
+
+                            # Find the specific possible world
+                            for pw in branch.possible_worlds:
+                                if pw.id == world_id_str:
+                                    target_title = f"{pw.title} (from {branch.title})"
+                                    break
+            elif target_id in project.dag.node_map:
                 persistent_id = project.dag.node_map[target_id]
 
                 if persistent_id in project.persistent_tasks:
                     persistent_task = project.persistent_tasks[persistent_id]
-                    current_version = project.dag.current_version_id
                     if current_version in persistent_task.versions:
                         target_title = persistent_task.versions[current_version].title
                 elif persistent_id in project.persistent_branches:
                     persistent_branch = project.persistent_branches[persistent_id]
-                    current_version = project.dag.current_version_id
                     if current_version in persistent_branch.versions:
                         target_title = persistent_branch.versions[current_version].title
 

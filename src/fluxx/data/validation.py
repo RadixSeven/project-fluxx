@@ -300,17 +300,66 @@ def validate_dependency(
         raise ValidationError(f"Source node {source_node_id} does not exist")
 
     # Check target node exists
-    target_persistent_id = project.dag.node_map.get(dependency.target_node_id)
-    if target_persistent_id is None:
-        raise ValidationError(f"Target node {dependency.target_node_id} does not exist")
+    # Special handling for possible world references (format: "branch_id:world_id")
+    target_str = str(dependency.target_node_id)
+    target_is_possible_world = False
 
-    # Determine source and target node types
+    if ":" in target_str:
+        # Parse possible world reference
+        branch_id_str, world_id_str = target_str.split(":", 1)
+        branch_node_id = NodeId(branch_id_str)
+
+        # Validate branch exists
+        branch_persistent_id = project.dag.node_map.get(branch_node_id)
+        if branch_persistent_id is None:
+            raise ValidationError(
+                f"Target node {dependency.target_node_id} references non-existent "
+                f"branch {branch_id_str}"
+            )
+
+        if branch_persistent_id not in project.persistent_branches:
+            raise ValidationError(
+                f"Target node {dependency.target_node_id} references {branch_id_str} "
+                f"which is not a branch"
+            )
+
+        # Validate possible world exists in branch
+        current_version = project.dag.current_version_id
+        persistent_branch = project.persistent_branches[branch_persistent_id]
+
+        if current_version not in persistent_branch.versions:
+            raise ValidationError(
+                f"Target branch {branch_id_str} does not exist in current version"
+            )
+
+        branch = persistent_branch.versions[current_version]
+        world_exists = any(pw.id == world_id_str for pw in branch.possible_worlds)
+
+        if not world_exists:
+            raise ValidationError(
+                f"Target node {dependency.target_node_id} references non-existent "
+                f"possible world {world_id_str} in branch {branch_id_str}"
+            )
+
+        target_is_possible_world = True
+        target_is_task = False
+    else:
+        # Regular node reference
+        target_persistent_id = project.dag.node_map.get(dependency.target_node_id)
+        if target_persistent_id is None:
+            raise ValidationError(
+                f"Target node {dependency.target_node_id} does not exist"
+            )
+
+        # Determine target node type
+        target_is_task = target_persistent_id in project.persistent_tasks
+
+    # Determine source node type
     source_is_task = source_persistent_id in project.persistent_tasks
-    target_is_task = target_persistent_id in project.persistent_tasks
 
     # Validate endpoint compatibility
     # Tasks have START and END endpoints
-    # Branches have OCCURRENCE endpoint
+    # Branches and possible worlds have OCCURRENCE endpoint
 
     # Source endpoint validation
     if source_is_task and dependency.source_endpoint == Endpoint.OCCURRENCE:
@@ -333,9 +382,16 @@ def validate_dependency(
             f"(only branches can)"
         )
 
-    if not target_is_task and dependency.target_endpoint in (
-        Endpoint.START,
-        Endpoint.END,
+    if target_is_possible_world and dependency.target_endpoint != Endpoint.OCCURRENCE:
+        raise EndpointError(
+            f"Possible world {dependency.target_node_id} can only use OCCURRENCE "
+            f"endpoint"
+        )
+
+    if (
+        not target_is_task
+        and not target_is_possible_world
+        and dependency.target_endpoint in (Endpoint.START, Endpoint.END)
     ):
         raise EndpointError(
             f"Branch {dependency.target_node_id} cannot use START/END endpoint "
