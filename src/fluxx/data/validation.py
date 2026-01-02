@@ -66,21 +66,25 @@ def validate_dag(project: Project) -> None:
     _validate_worker_constraints(project, version_id)
 
 
-def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
-    """Check for cycles in the dependency graph.
+def _build_dependency_graph(
+    project: Project, version_id: DAGVersionId
+) -> dict[
+    tuple[NodeId | PossibleWorldId, Endpoint],
+    list[tuple[NodeId | PossibleWorldId, Endpoint]],
+]:
+    """Build the endpoint-based dependency graph for a DAG version.
 
-    The dependency graph is endpoint-based: each task has two nodes (start, end),
-    and each branch has nodes for its occurrence point and each possible world.
-    Dependencies connect specific endpoints, not whole nodes.
+    The graph uses (node_id, endpoint) tuples as nodes. Each task has START
+    and END endpoints, each branch has an OCCURRENCE endpoint, and each
+    possible world has an OCCURRENCE endpoint.
 
     Args:
-        project: The project to check
-        version_id: The DAG version to check
+        project: The project containing the DAG
+        version_id: The DAG version to build the graph for
 
-    Raises:
-        CycleError: If a cycle is detected
+    Returns:
+        Adjacency list representation of the dependency graph
     """
-    # Build adjacency list from dependencies using (node_id, endpoint) as graph nodes
     from fluxx.data.models import Endpoint
 
     graph: dict[
@@ -131,7 +135,24 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
                         graph,
                     )
 
-    # DFS-based cycle detection
+    return graph
+
+
+def _detect_cycles_in_graph(
+    graph: dict[
+        tuple[NodeId | PossibleWorldId, Endpoint],
+        list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ],
+) -> None:
+    """Detect cycles in a dependency graph using DFS.
+
+    Args:
+        graph: Adjacency list of the dependency graph
+
+    Raises:
+        CycleError: If a cycle is detected in the graph
+    """
+    # DFS-based cycle detection with three colors
     white, gray, black = 0, 1, 2
     color: dict[tuple[NodeId | PossibleWorldId, Endpoint], int] = defaultdict(
         lambda: white
@@ -142,7 +163,7 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
         path: list[tuple[NodeId | PossibleWorldId, Endpoint]],
     ) -> None:
         if color[node] == gray:
-            # Found a cycle
+            # Found a cycle - node is in current path
             cycle_start = path.index(node)
             cycle = path[cycle_start:] + [node]
             cycle_str = " -> ".join(
@@ -151,6 +172,7 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
             raise CycleError(f"Cycle detected in DAG: {cycle_str}")
 
         if color[node] == black:
+            # Already fully explored
             return
 
         color[node] = gray
@@ -162,20 +184,29 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
         path.pop()
         color[node] = black
 
-    # Check all endpoint nodes
-    for node_id in project.dag.node_map:
-        # Check task endpoints
-        if (node_id, Endpoint.START) in graph and color[
-            (node_id, Endpoint.START)
-        ] == white:
-            dfs((node_id, Endpoint.START), [])
-        if (node_id, Endpoint.END) in graph and color[(node_id, Endpoint.END)] == white:
-            dfs((node_id, Endpoint.END), [])
-        # Check branch endpoints
-        if (node_id, Endpoint.OCCURRENCE) in graph and color[
-            (node_id, Endpoint.OCCURRENCE)
-        ] == white:
-            dfs((node_id, Endpoint.OCCURRENCE), [])
+    # Check all nodes in the graph, including possible world IDs
+    # Convert to list to avoid "dictionary changed size during iteration"
+    for node in list(graph.keys()):
+        if color[node] == white:
+            dfs(node, [])
+
+
+def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
+    """Check for cycles in the dependency graph.
+
+    The dependency graph is endpoint-based: each task has two nodes (start, end),
+    and each branch has nodes for its occurrence point and each possible world.
+    Dependencies connect specific endpoints, not whole nodes.
+
+    Args:
+        project: The project to check
+        version_id: The DAG version to check
+
+    Raises:
+        CycleError: If a cycle is detected
+    """
+    graph = _build_dependency_graph(project, version_id)
+    _detect_cycles_in_graph(graph)
 
 
 def add_dep_edge(

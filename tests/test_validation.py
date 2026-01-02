@@ -28,6 +28,7 @@ from fluxx.data.models import (
     PersistentTask,
     PossibleWorld,
     PossibleWorldId,
+    PossibleWorldReferencePair,
     Project,
     ProjectMetadata,
     Task,
@@ -1250,4 +1251,754 @@ def test_cycle_detection_visits_isolated_end_endpoint(
     )
 
     # Should pass - no cycle, ensures END endpoint DFS is triggered separately
+    validate_dag(project)
+
+
+def test_validate_dependency_with_invalid_target_id_pattern(
+    base_project: Project,
+) -> None:
+    """Test that validate_dependency raises error for invalid target ID pattern."""
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task_id = TaskId("t1")
+    # Create task with invalid target ID that doesn't match any pattern
+    # Cast is justified: we're testing error handling for malformed data
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=TaskId("invalid_pattern_xyz"),  # Invalid pattern
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={"node_map": {task_id: PersistentObjectId("p1")}}
+        ),
+        persistent_tasks=persistent_tasks,
+    )
+
+    with pytest.raises(ValidationError, match="does not match a known ID type"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_validate_dependency_with_nonexistent_possible_world_branch(
+    base_project: Project,
+) -> None:
+    """Test validation when possible world references non-existent branch."""
+    from fluxx.data.models import PossibleWorldReference
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task_id = TaskId("t1")
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=PossibleWorldReference("b_nonexistent:pw1"),
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={"node_map": {task_id: PersistentObjectId("p1")}}
+        ),
+        persistent_tasks=persistent_tasks,
+    )
+
+    with pytest.raises(ValidationError, match="non-existent branch"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_validate_dependency_with_task_id_mapped_to_branch(
+    base_project: Project,
+) -> None:
+    """Test validation when persistent ID for branch is in wrong collection."""
+    from fluxx.data.models import PossibleWorldReference
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    pw_ref = PossibleWorldReference(f"{branch_id}:pw1")
+
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=pw_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Map branch_id to a task persistent object (wrong type)
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+        PersistentObjectId("pb"): PersistentTask(
+            id=PersistentObjectId("pb"),
+            versions={
+                base_project.dag.current_version_id: Task(
+                    id=TaskId("fake"),
+                    title="Fake",
+                    description="",
+                    duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+                )
+            },
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task_id: PersistentObjectId("p1"),
+                    branch_id: PersistentObjectId("pb"),  # Branch ID mapped to task
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+    )
+
+    with pytest.raises(ValidationError, match="not a branch"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_validate_dependency_with_branch_not_in_current_version(
+    base_project: Project,
+) -> None:
+    """Test validation when branch exists but not in current version."""
+    from fluxx.data.models import (
+        Branch,
+        PersistentBranch,
+        PossibleWorld,
+        PossibleWorldReference,
+    )
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    pw_ref = PossibleWorldReference(f"{branch_id}:pw1")
+
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=pw_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create branch but only in old version, not current version
+    old_version = DAGVersionId("old_v1")
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="World 1")],
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+    }
+
+    persistent_branches = {
+        PersistentObjectId("pb"): PersistentBranch(
+            id=PersistentObjectId("pb"),
+            versions={old_version: branch},  # Only in old version
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task_id: PersistentObjectId("p1"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+        persistent_branches=persistent_branches,
+    )
+
+    with pytest.raises(ValidationError, match="does not exist in current version"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_validate_dependency_with_nonexistent_possible_world_in_branch(
+    base_project: Project,
+) -> None:
+    """Test validation when possible world doesn't exist in branch."""
+    from fluxx.data.models import (
+        Branch,
+        PersistentBranch,
+        PossibleWorld,
+        PossibleWorldReference,
+    )
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    pw_ref = PossibleWorldReference(f"{branch_id}:pw_nonexistent")
+
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=pw_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1"),
+            PossibleWorld(id=PossibleWorldId("pw2"), title="World 2"),
+        ],
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+    }
+
+    persistent_branches = {
+        PersistentObjectId("pb"): PersistentBranch(
+            id=PersistentObjectId("pb"),
+            versions={base_project.dag.current_version_id: branch},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task_id: PersistentObjectId("p1"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+        persistent_branches=persistent_branches,
+    )
+
+    with pytest.raises(ValidationError, match="non-existent possible world"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_validate_dependency_target_is_task_but_persistent_id_is_branch(
+    base_project: Project,
+) -> None:
+    """Test validation when target TaskId is mapped to a branch persistent object."""
+    from fluxx.data.models import Branch, PersistentBranch, PossibleWorld
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task1_id = TaskId("t1")
+    task2_id = TaskId("t2")  # Will be mapped to a branch
+
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    branch = Branch(
+        id=BranchId("b_fake"),
+        title="Branch",
+        description="Test",
+        possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="World 1")],
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task1},
+        ),
+    }
+
+    persistent_branches = {
+        PersistentObjectId("pb"): PersistentBranch(
+            id=PersistentObjectId("pb"),
+            versions={base_project.dag.current_version_id: branch},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task1_id: PersistentObjectId("p1"),
+                    task2_id: PersistentObjectId("pb"),  # Task ID mapped to branch
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+        persistent_branches=persistent_branches,
+    )
+
+    with pytest.raises(ValidationError, match="not a task"):
+        validate_dependency(project, task1_id, task1.dependencies[0])
+
+
+def test_validate_dependency_target_is_branch_but_persistent_id_is_task(
+    base_project: Project,
+) -> None:
+    """Test validation when target BranchId is mapped to a task persistent object."""
+    from fluxx.data.validation import ValidationError, validate_dependency
+
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")  # Will be mapped to a task
+
+    task = Task(
+        id=task_id,
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=branch_id,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    fake_task = Task(
+        id=TaskId("fake"),
+        title="Fake",
+        description="",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+        PersistentObjectId("pfake"): PersistentTask(
+            id=PersistentObjectId("pfake"),
+            versions={base_project.dag.current_version_id: fake_task},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task_id: PersistentObjectId("p1"),
+                    branch_id: PersistentObjectId("pfake"),  # Branch ID mapped to task
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+    )
+
+    with pytest.raises(ValidationError, match="not a branch"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_validate_dependency_possible_world_with_non_occurrence_endpoint(
+    base_project: Project,
+) -> None:
+    """Test that possible world dependencies must use OCCURRENCE endpoint."""
+    from fluxx.data.models import (
+        Branch,
+        PersistentBranch,
+        PossibleWorld,
+        PossibleWorldReference,
+    )
+    from fluxx.data.validation import EndpointError, validate_dependency
+
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    pw_ref = PossibleWorldReference(f"{branch_id}:pw1")
+
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=pw_ref,
+                target_endpoint=Endpoint.START,  # Invalid for possible world
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="World 1")],
+    )
+
+    persistent_tasks = {
+        PersistentObjectId("p1"): PersistentTask(
+            id=PersistentObjectId("p1"),
+            versions={base_project.dag.current_version_id: task},
+        ),
+    }
+
+    persistent_branches = {
+        PersistentObjectId("pb"): PersistentBranch(
+            id=PersistentObjectId("pb"),
+            versions={base_project.dag.current_version_id: branch},
+        ),
+    }
+
+    project = Project(
+        **base_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task_id: PersistentObjectId("p1"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks=persistent_tasks,
+        persistent_branches=persistent_branches,
+    )
+
+    with pytest.raises(EndpointError, match="can only use OCCURRENCE endpoint"):
+        validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_add_dep_edge_with_invalid_target_id() -> None:
+    """Test add_dep_edge with invalid target ID pattern."""
+    from collections import defaultdict
+
+    from fluxx.data.models import Endpoint, NodeId, PossibleWorldId
+    from fluxx.data.validation import ValidationError, add_dep_edge
+
+    graph: dict[
+        tuple[NodeId | PossibleWorldId, Endpoint],
+        list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ] = defaultdict(list)
+
+    source_id = TaskId("t1")
+    target_id = TaskId("invalid_xyz")  # Invalid pattern
+
+    with pytest.raises(ValidationError, match="Invalid dependency target ID"):
+        add_dep_edge(
+            source_id,
+            Endpoint.START,
+            target_id,
+            Endpoint.START,
+            graph,
+        )
+
+
+def test_add_dep_edge_with_possible_world_reference() -> None:
+    """Test add_dep_edge correctly handles possible world references."""
+    from collections import defaultdict
+
+    from fluxx.data.models import (
+        Endpoint,
+        NodeId,
+        PossibleWorldId,
+        PossibleWorldReference,
+    )
+    from fluxx.data.validation import add_dep_edge
+
+    graph: dict[
+        tuple[NodeId | PossibleWorldId, Endpoint],
+        list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ] = defaultdict(list)
+
+    source_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    pw_ref = PossibleWorldReference(f"{branch_id}:pw1")
+
+    # Should add edge from branch OCCURRENCE to task START
+    add_dep_edge(
+        source_id,
+        Endpoint.START,
+        pw_ref,
+        Endpoint.END,  # This will be overridden to OCCURRENCE for possible worlds
+        graph,
+    )
+
+    # Check that the edge was added correctly
+    # Edge should be: (branch_id, OCCURRENCE) -> (source_id, START)
+    assert (source_id, Endpoint.START) in graph[(branch_id, Endpoint.OCCURRENCE)]
+
+
+def test_add_dep_edge_with_all_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test add_dep_edge defensive error handling.
+
+    Tests the case when type_explode_id returns all None.
+    """
+    from collections import defaultdict
+
+    from fluxx.data import validation
+    from fluxx.data.models import DependencyTargetId, Endpoint, NodeId, PossibleWorldId
+    from fluxx.data.validation import ValidationError, add_dep_edge
+
+    graph: dict[
+        tuple[NodeId | PossibleWorldId, Endpoint],
+        list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ] = defaultdict(list)
+
+    source_id = TaskId("t1")
+    target_id = TaskId("t2")
+
+    # Mock type_explode_id to return all None (impossible in reality)
+    def mock_type_explode_id(
+        ref: DependencyTargetId,
+    ) -> tuple[TaskId | None, BranchId | None, PossibleWorldReferencePair | None]:
+        return None, None, None
+
+    monkeypatch.setattr(validation, "type_explode_id", mock_type_explode_id)
+
+    with pytest.raises(ValidationError, match="Forgot dependency target type"):
+        add_dep_edge(
+            source_id,
+            Endpoint.START,
+            target_id,
+            Endpoint.START,
+            graph,
+        )
+
+
+def test_validate_dependency_with_all_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test validate_dependency defensive error handling.
+
+    Tests the case when type_explode_id returns all None.
+    """
+    from fluxx.data import validation
+
+    # Create minimal project
+    now = datetime.now(UTC)
+    metadata = ProjectMetadata(
+        name="Test",
+        created=now,
+        last_modified=now,
+    )
+    dag = DAG(id=DAGId("dag1"), current_version_id=DAGVersionId("v1"))
+    worker = Worker(id=WorkerId("w1"), name="Alice", hours_per_workday=8.0)
+
+    task_id = TaskId("t1")
+    task = Task(
+        id=task_id,
+        title="Test",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=TaskId("t2"),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag.model_copy(update={"node_map": {task_id: PersistentObjectId("p1")}}),
+        workers=[worker],
+        persistent_tasks={
+            PersistentObjectId("p1"): PersistentTask(
+                id=PersistentObjectId("p1"),
+                versions={dag.current_version_id: task},
+            ),
+        },
+    )
+
+    # Mock type_explode_id to return all None (impossible in reality)
+    from fluxx.data.models import DependencyTargetId as DepTargetId
+
+    def mock_type_explode_id(
+        ref: DepTargetId,
+    ) -> tuple[TaskId | None, BranchId | None, PossibleWorldReferencePair | None]:
+        return None, None, None
+
+    monkeypatch.setattr(validation, "type_explode_id", mock_type_explode_id)
+
+    # This should raise AssertionError from the defensive code
+    with pytest.raises(AssertionError, match="Forgot to add pattern"):
+        validation.validate_dependency(project, task_id, task.dependencies[0])
+
+
+def test_cycle_detection_dfs_visits_end_endpoint_separately() -> None:
+    """Test that cycle detection DFS visits END endpoint when it has its own edges.
+
+    This covers line 173 in validation.py - the DFS call for END endpoints.
+    """
+    from fluxx.data.validation import validate_dag
+
+    now = datetime.now(UTC)
+    metadata = ProjectMetadata(
+        name="Test",
+        created=now,
+        last_modified=now,
+    )
+    dag_id = DAGId("dag1")
+    version_id = DAGVersionId("v1")
+    dag = DAG(id=dag_id, current_version_id=version_id)
+    worker = Worker(id=WorkerId("w1"), name="Alice", hours_per_workday=8.0)
+
+    # Create tasks where:
+    # - Task A's START is visited first (via DFS from another task)
+    # - Task A's END has its own dependencies and must be visited separately
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    task_c_id = TaskId("t3")
+
+    # Task A has dependency from its END endpoint
+    task_a = Task(
+        id=task_a_id,
+        title="Task A",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            # Dependency from END endpoint
+            Dependency(
+                source_endpoint=Endpoint.END,
+                target_node_id=task_c_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Task B depends on Task A's START
+    task_b = Task(
+        id=task_b_id,
+        title="Task B",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task_a_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    task_c = Task(
+        id=task_c_id,
+        title="Task C",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag.model_copy(
+            update={
+                "node_map": {
+                    task_a_id: PersistentObjectId("pa"),
+                    task_b_id: PersistentObjectId("pb"),
+                    task_c_id: PersistentObjectId("pc"),
+                }
+            }
+        ),
+        workers=[worker],
+        persistent_tasks={
+            PersistentObjectId("pa"): PersistentTask(
+                id=PersistentObjectId("pa"),
+                versions={version_id: task_a},
+            ),
+            PersistentObjectId("pb"): PersistentTask(
+                id=PersistentObjectId("pb"),
+                versions={version_id: task_b},
+            ),
+            PersistentObjectId("pc"): PersistentTask(
+                id=PersistentObjectId("pc"),
+                versions={version_id: task_c},
+            ),
+        },
+    )
+
+    # Should validate without cycles
+    # This exercises the END endpoint DFS when:
+    # - task_a.START is visited first during another DFS
+    # - task_a.END needs separate DFS because it has outgoing edges
     validate_dag(project)

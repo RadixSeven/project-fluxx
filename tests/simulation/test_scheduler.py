@@ -1128,3 +1128,452 @@ def test_is_branch_eligible_nonexistent_branch(
 
     # Should return False for nonexistent branches
     assert not is_branch_eligible(nonexistent_branch, state)
+
+
+def test_is_dependency_satisfied_parent_task_with_no_runnable_children(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test dependency on parent task when all children depend on unresolved worlds."""
+    from fluxx.simulation.scheduler import is_dependency_satisfied
+
+    # Create a branch
+    branch_id = BranchId("b1")
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("pw2"), title="World 2", weight=1.0),
+        ],
+    )
+
+    # Create parent task
+    parent_id = TaskId("t_parent")
+    parent = Task(
+        id=parent_id,
+        title="Parent",
+        description="Test",
+        children=[TaskId("t_child")],
+    )
+
+    # Create child that depends on a specific possible world
+    child_id = TaskId("t_child")
+    child = Task(
+        id=child_id,
+        title="Child",
+        description="Test",
+        parent_id=parent_id,
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=PossibleWorldReference(f"{branch_id}:pw1"),
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create task that depends on parent's END
+    dependent_id = TaskId("t_dependent")
+    dependent = Task(
+        id=dependent_id,
+        title="Dependent",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=parent_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Add to project
+    project = Project(
+        **simple_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    parent_id: PersistentObjectId("pp"),
+                    child_id: PersistentObjectId("pc"),
+                    dependent_id: PersistentObjectId("pd"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pp"): PersistentTask(
+                id=PersistentObjectId("pp"),
+                versions={simple_project.dag.current_version_id: parent},
+            ),
+            PersistentObjectId("pc"): PersistentTask(
+                id=PersistentObjectId("pc"),
+                versions={simple_project.dag.current_version_id: child},
+            ),
+            PersistentObjectId("pd"): PersistentTask(
+                id=PersistentObjectId("pd"),
+                versions={simple_project.dag.current_version_id: dependent},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={simple_project.dag.current_version_id: branch},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Resolve branch to pw2 (NOT pw1 which child depends on)
+    state.resolve_branch(branch_id, PossibleWorldId("pw2"))
+
+    # Check if dependency on parent END is satisfied
+    # Should return False because child cannot run (depends on pw1 but pw2 was
+    # chosen)
+    assert not is_dependency_satisfied(dependent.dependencies[0], state, dependent)
+
+
+def test_is_child_runnable_nonexistent_child(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable_in_current_world with nonexistent child."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Try to check if nonexistent child is runnable
+    nonexistent_child = TaskId("t_nonexistent")
+    assert not is_child_runnable_in_current_world(nonexistent_child, state)
+
+
+def test_is_child_runnable_with_possible_world_dependencies(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable with possible world dependencies."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    # Create a branch
+    branch_id = BranchId("b1")
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("pw2"), title="World 2", weight=1.0),
+        ],
+    )
+
+    # Create child that depends on possible world
+    child_id = TaskId("t_child")
+    child = Task(
+        id=child_id,
+        title="Child",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=PossibleWorldReference(f"{branch_id}:pw1"),
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Add to project
+    project = Project(
+        **simple_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    child_id: PersistentObjectId("pc"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pc"): PersistentTask(
+                id=PersistentObjectId("pc"),
+                versions={simple_project.dag.current_version_id: child},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={simple_project.dag.current_version_id: branch},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Before branch resolution, child should be runnable (world is potentially
+    # satisfiable)
+    assert is_child_runnable_in_current_world(child_id, state)
+
+    # Resolve branch to pw1 (the world child depends on)
+    state.resolve_branch(branch_id, PossibleWorldId("pw1"))
+
+    # Child should still be runnable
+    assert is_child_runnable_in_current_world(child_id, state)
+
+    # Create new state and resolve to pw2 (different world)
+    state2 = SimulationState(project, start_date, base_workers)
+    state2.resolve_branch(branch_id, PossibleWorldId("pw2"))
+
+    # Child should NOT be runnable (depends on pw1 but pw2 was chosen)
+    assert not is_child_runnable_in_current_world(child_id, state2)
+
+
+def test_is_child_runnable_with_parent_task_dependency(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable when dependency is on a parent task."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    # Create parent task
+    parent_id = TaskId("t_parent")
+    parent = Task(
+        id=parent_id,
+        title="Parent",
+        description="Test",
+        children=[TaskId("t_parent_child")],
+    )
+
+    # Create child of parent
+    parent_child_id = TaskId("t_parent_child")
+    parent_child = Task(
+        id=parent_child_id,
+        title="Parent Child",
+        description="Test",
+        parent_id=parent_id,
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Create another task that depends on the parent
+    dependent_id = TaskId("t_dependent")
+    dependent = Task(
+        id=dependent_id,
+        title="Dependent",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=parent_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Add to project
+    project = Project(
+        **simple_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    parent_id: PersistentObjectId("pp"),
+                    parent_child_id: PersistentObjectId("ppc"),
+                    dependent_id: PersistentObjectId("pd"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pp"): PersistentTask(
+                id=PersistentObjectId("pp"),
+                versions={simple_project.dag.current_version_id: parent},
+            ),
+            PersistentObjectId("ppc"): PersistentTask(
+                id=PersistentObjectId("ppc"),
+                versions={simple_project.dag.current_version_id: parent_child},
+            ),
+            PersistentObjectId("pd"): PersistentTask(
+                id=PersistentObjectId("pd"),
+                versions={simple_project.dag.current_version_id: dependent},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Dependent should be runnable because parent's child is runnable
+    assert is_child_runnable_in_current_world(dependent_id, state)
+
+
+def test_is_child_runnable_with_leaf_task_dependency(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable when dependency is on a leaf task."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    # Create two tasks where task2 depends on task1
+    task1_id = TaskId("t1")
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task2_id = TaskId("t2")
+    task2 = Task(
+        id=task2_id,
+        title="Task 2",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task1_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Add to project
+    project = Project(
+        **simple_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task1_id: PersistentObjectId("p1"),
+                    task2_id: PersistentObjectId("p2"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("p1"): PersistentTask(
+                id=PersistentObjectId("p1"),
+                versions={simple_project.dag.current_version_id: task1},
+            ),
+            PersistentObjectId("p2"): PersistentTask(
+                id=PersistentObjectId("p2"),
+                versions={simple_project.dag.current_version_id: task2},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Task2 should be runnable (task1 is a simple leaf task)
+    assert is_child_runnable_in_current_world(task2_id, state)
+
+
+def test_is_child_runnable_with_parent_dependency_no_runnable_children(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable when parent dependency has no runnable children."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    # Create a branch
+    branch_id = BranchId("b1")
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("pw2"), title="World 2", weight=1.0),
+        ],
+    )
+
+    # Create parent task
+    parent_id = TaskId("t_parent")
+    parent = Task(
+        id=parent_id,
+        title="Parent",
+        description="Test",
+        children=[TaskId("t_parent_child")],
+    )
+
+    # Create child of parent that depends on pw1
+    parent_child_id = TaskId("t_parent_child")
+    parent_child = Task(
+        id=parent_child_id,
+        title="Parent Child",
+        description="Test",
+        parent_id=parent_id,
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=PossibleWorldReference(f"{branch_id}:pw1"),
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create task that depends on parent
+    dependent_id = TaskId("t_dependent")
+    dependent = Task(
+        id=dependent_id,
+        title="Dependent",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=parent_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Add to project
+    project = Project(
+        **simple_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    parent_id: PersistentObjectId("pp"),
+                    parent_child_id: PersistentObjectId("ppc"),
+                    dependent_id: PersistentObjectId("pd"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pp"): PersistentTask(
+                id=PersistentObjectId("pp"),
+                versions={simple_project.dag.current_version_id: parent},
+            ),
+            PersistentObjectId("ppc"): PersistentTask(
+                id=PersistentObjectId("ppc"),
+                versions={simple_project.dag.current_version_id: parent_child},
+            ),
+            PersistentObjectId("pd"): PersistentTask(
+                id=PersistentObjectId("pd"),
+                versions={simple_project.dag.current_version_id: dependent},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={simple_project.dag.current_version_id: branch},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Resolve branch to pw2 (NOT pw1 which parent's child depends on)
+    state.resolve_branch(branch_id, PossibleWorldId("pw2"))
+
+    # Dependent should NOT be runnable because parent has no runnable children
+    assert not is_child_runnable_in_current_world(dependent_id, state)

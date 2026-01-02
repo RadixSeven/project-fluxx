@@ -466,3 +466,128 @@ def test_project_with_workers() -> None:
     )
     assert len(project.workers) == 1
     assert project.workers[0].name == "Alice"
+
+
+def test_type_explode_id_with_invalid_pattern() -> None:
+    """Test type_explode_id raises ValueError for invalid ID patterns."""
+    from fluxx.data.models import TaskId, type_explode_id
+
+    # Create a TaskId with an invalid pattern that doesn't match any known
+    # format. We're intentionally creating an invalid ID to test error handling.
+    invalid_id = TaskId("invalid_id_pattern_xyz")
+
+    with pytest.raises(ValueError, match="Unknown dependency target ID pattern"):
+        type_explode_id(invalid_id)
+
+
+def test_extract_node_id_with_task() -> None:
+    """Test extract_node_id with a task ID."""
+    from fluxx.data.models import extract_node_id
+
+    task_id = TaskId("t1")
+    node_id = extract_node_id(task_id)
+    assert node_id == task_id
+
+
+def test_extract_node_id_with_branch() -> None:
+    """Test extract_node_id with a branch ID."""
+    from fluxx.data.models import BranchId, extract_node_id
+
+    branch_id = BranchId("b1")
+    node_id = extract_node_id(branch_id)
+    assert node_id == branch_id
+
+
+def test_extract_node_id_with_possible_world() -> None:
+    """Test extract_node_id with a possible world reference."""
+    from fluxx.data.models import PossibleWorldReference, extract_node_id
+
+    # Possible world reference format: "branch_id:world_id"
+    pw_ref = PossibleWorldReference("b1:pw1")
+    node_id = extract_node_id(pw_ref)
+    # Should extract the branch ID
+    assert node_id == BranchId("b1")
+
+
+def test_get_dep_id_type_with_task() -> None:
+    """Test get_dep_id_type with a task ID."""
+    from fluxx.data.models import DependencyTargetIdType, get_dep_id_type
+
+    task_id = TaskId("t1")
+    id_type = get_dep_id_type(task_id)
+    assert id_type == DependencyTargetIdType.TASK
+
+
+def test_get_dep_id_type_with_branch() -> None:
+    """Test get_dep_id_type with a branch ID."""
+    from fluxx.data.models import DependencyTargetIdType, get_dep_id_type
+
+    branch_id = BranchId("b1")
+    id_type = get_dep_id_type(branch_id)
+    assert id_type == DependencyTargetIdType.BRANCH
+
+
+def test_get_dep_id_type_with_possible_world() -> None:
+    """Test get_dep_id_type with a possible world reference."""
+    from fluxx.data.models import (
+        DependencyTargetIdType,
+        PossibleWorldReference,
+        get_dep_id_type,
+    )
+
+    pw_ref = PossibleWorldReference("b1:pw1")
+    id_type = get_dep_id_type(pw_ref)
+    assert id_type == DependencyTargetIdType.POSSIBLE_WORLD_REFERENCE
+
+
+def test_str_to_node_id_with_task() -> None:
+    """Test str_to_node_id with a task ID string."""
+    from fluxx.data.models import str_to_node_id
+
+    node_id = str_to_node_id("t1")
+    assert node_id == TaskId("t1")
+
+
+def test_str_to_node_id_with_branch() -> None:
+    """Test str_to_node_id with a branch ID string."""
+    from fluxx.data.models import str_to_node_id
+
+    node_id = str_to_node_id("b1")
+    assert node_id == BranchId("b1")
+
+
+def test_str_to_node_id_with_possible_world_raises() -> None:
+    """Test str_to_node_id raises ValueError for possible world reference."""
+    from fluxx.data.models import str_to_node_id
+
+    # Possible world reference is not a valid NodeId (only task or branch)
+    with pytest.raises(
+        ValueError, match="Cannot convert.*to NodeId: it's not a task or branch ID"
+    ):
+        str_to_node_id("b1:pw1")
+
+
+def test_extract_node_id_with_all_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test extract_node_id raises ValueError when type_explode_id returns all None.
+
+    This tests defensive error handling that should never happen in practice.
+    """
+    from fluxx.data import models
+
+    # Mock type_explode_id to return all None (should never happen in reality)
+    def mock_type_explode_id(
+        ref: models.DependencyTargetId,
+    ) -> tuple[
+        models.TaskId | None,
+        models.BranchId | None,
+        models.PossibleWorldReferencePair | None,
+    ]:
+        # Return all None - this is an impossible state but tests the
+        # defensive error handling
+        return None, None, None
+
+    monkeypatch.setattr(models, "type_explode_id", mock_type_explode_id)
+
+    task_id = TaskId("t1")
+    with pytest.raises(ValueError, match="Forgot to add branch"):
+        models.extract_node_id(task_id)

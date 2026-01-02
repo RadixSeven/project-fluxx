@@ -1667,3 +1667,56 @@ def test_add_sibling_with_multiple_current_version_tasks(
     ].versions
     assert DAGVersionId("old_version") in pb1_versions
     assert updated_project.dag.current_version_id in pb1_versions
+
+
+def test_convert_to_parent_validation_error(
+    empty_project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that convert_to_parent raises DAGOperationError when validation fails."""
+    from fluxx.data import dag_operations, validation
+
+    # Create a task
+    project, task_id = add_task(
+        empty_project,
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Mock validate_dag to raise an exception
+    def mock_validate_dag(project: Project) -> None:
+        raise validation.ValidationError("Mock validation error")
+
+    # Patch in dag_operations module where it's imported
+    monkeypatch.setattr(dag_operations, "validate_dag", mock_validate_dag)
+
+    # Should raise DAGOperationError wrapping the validation error
+    with pytest.raises(DAGOperationError, match="Failed to convert to parent"):
+        convert_to_parent_task(project, task_id, "Child")
+
+
+def test_add_sibling_validation_error(
+    empty_project: Project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that add_sibling raises DAGOperationError when validation fails."""
+    from fluxx.data import dag_operations, validation
+
+    # Create a parent with a child
+    project, parent_id = add_task(
+        empty_project,
+        title="Parent",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    project, child_id = convert_to_parent_task(project, parent_id, "Child 1")
+
+    # Mock validate_dag to raise an exception
+    def mock_validate_dag(project: Project) -> None:
+        raise validation.ValidationError("Mock validation error")
+
+    # Patch in dag_operations module where it's imported
+    monkeypatch.setattr(dag_operations, "validate_dag", mock_validate_dag)
+
+    # Should raise DAGOperationError wrapping the validation error
+    with pytest.raises(DAGOperationError, match="Failed to add sibling subtask"):
+        add_sibling_subtask(project, child_id, "Child 2", None)
