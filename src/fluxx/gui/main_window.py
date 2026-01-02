@@ -28,6 +28,15 @@ class MainWindow(QMainWindow):
     - Window title shows filename and modified state
     """
 
+    def _show_error(self, title: str, message: str) -> None:
+        """Show error message dialog.
+
+        Args:
+            title: Dialog title
+            message: Error message to display
+        """
+        QMessageBox.critical(self, title, message)
+
     def __init__(self) -> None:
         """Initialize the main window."""
         super().__init__()
@@ -329,10 +338,8 @@ class MainWindow(QMainWindow):
             try:
                 self.controller.open_project(Path(file_path))
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error Opening Project",
-                    f"Failed to open project: {e}",
+                self._show_error(
+                    "Error Opening Project", f"Failed to open project: {e}"
                 )
 
     def _on_save(self) -> None:
@@ -344,11 +351,7 @@ class MainWindow(QMainWindow):
             try:
                 self.controller.save_project()
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error Saving Project",
-                    f"Failed to save project: {e}",
-                )
+                self._show_error("Error Saving Project", f"Failed to save project: {e}")
 
     def _on_save_as(self) -> None:
         """Handle Save As menu action."""
@@ -366,11 +369,7 @@ class MainWindow(QMainWindow):
                     path = path.with_suffix(".fluxx")
                 self.controller.save_project_as(path)
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error Saving Project",
-                    f"Failed to save project: {e}",
-                )
+                self._show_error("Error Saving Project", f"Failed to save project: {e}")
 
     # Edit operations
 
@@ -380,11 +379,7 @@ class MainWindow(QMainWindow):
             try:
                 self.controller.undo()
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to undo: {e}",
-                )
+                self._show_error("Error", f"Failed to undo: {e}")
 
     def _on_redo(self) -> None:
         """Handle Redo menu action."""
@@ -392,11 +387,7 @@ class MainWindow(QMainWindow):
             try:
                 self.controller.redo()
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to redo: {e}",
-                )
+                self._show_error("Error", f"Failed to redo: {e}")
 
     def _on_new_task(self) -> None:
         """Handle New Task menu action."""
@@ -417,11 +408,7 @@ class MainWindow(QMainWindow):
                 # Select the new task
                 self.controller.select_node(task_id)
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to create task: {e}",
-                )
+                self._show_error("Error", f"Failed to create task: {e}")
 
     def _on_new_branch(self) -> None:
         """Handle New Branch menu action."""
@@ -442,11 +429,7 @@ class MainWindow(QMainWindow):
                 # Select the new branch
                 self.controller.select_node(branch_id)
             except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Error",
-                    f"Failed to create branch: {e}",
-                )
+                self._show_error("Error", f"Failed to create branch: {e}")
 
     def _on_convert_to_parent(self) -> None:
         """Handle Convert to Parent menu action."""
@@ -472,11 +455,7 @@ class MainWindow(QMainWindow):
             self.controller.convert_to_parent(task_id, child_title)
             # Controller will select the new child automatically
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to convert to parent: {e}",
-            )
+            self._show_error("Error", f"Failed to convert to parent: {e}")
 
     def _on_add_sibling(self) -> None:
         """Handle Add Sibling menu action."""
@@ -503,11 +482,7 @@ class MainWindow(QMainWindow):
             self.controller.add_sibling(task_id, sibling_title, None)
             # Controller will select the new sibling automatically
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to add sibling: {e}",
-            )
+            self._show_error("Error", f"Failed to add sibling: {e}")
 
     def _on_run_simulation(self) -> None:
         """Handle Run Simulation menu action."""
@@ -523,11 +498,7 @@ class MainWindow(QMainWindow):
         try:
             dialog.exec()
         except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Simulation Error",
-                f"Failed to run simulation: {e}",
-            )
+            self._show_error("Simulation Error", f"Failed to run simulation: {e}")
 
     def _on_simulation_completed(self, samples: list[Sample]) -> None:
         """Handle simulation completion.
