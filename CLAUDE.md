@@ -166,11 +166,11 @@ fluxx
 
 ## Common Pitfalls
 
-1. **ID Type Confusion**: Use the typed ID newtypes consistently. Don't pass a string where a `TaskId` is expected without explicitly casting.
+1. **ID Type Confusion**: Use the typed ID newtypes consistently. Don't pass a string where a `TaskId` is expected without explicitly converting.
 
 2. **Qt Environment**: Always set `QT_QPA_PLATFORM=offscreen` for tests. GUI tests will crash in sandboxed environments without this.
 
-3. **Dependency Cycles**: When adding dependencies, always validate for cycles. The dependency graph must be acyclic.
+3. **Dependency Cycles**: When adding dependencies, always validate for cycles. The dependency graph must be acyclic. The cycles are accounted with the endpoints (e.g, start, end, possible world).
 
 4. **Parent/Child Constraints**: When creating subtasks, parent-child temporal constraints (child.start >= parent.start, parent.end >= child.end) are added automatically by the system.
 
