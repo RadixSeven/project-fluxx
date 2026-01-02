@@ -12,6 +12,7 @@ from fluxx.data.models import (
     TaskId,
     Worker,
     WorkerId,
+    type_explode_id,
 )
 
 
@@ -212,7 +213,6 @@ class SimulationState:
         Returns:
             True if the task is reachable, False otherwise
         """
-        from fluxx.data.models import BranchId, PossibleWorldId
 
         try:
             task = self.get_task(task_id)
@@ -222,24 +222,20 @@ class SimulationState:
 
         # Check all dependencies
         for dep in task.dependencies:
-            target_str = str(dep.target_node_id)
-
             # Check if this is a possible world reference (format: "branch_id:world_id")
-            if ":" in target_str:
-                # Extract branch and world IDs
-                branch_id_str, world_id_str = target_str.split(":", 1)
-                branch_id = BranchId(branch_id_str)
-                world_id = PossibleWorldId(world_id_str)
+            _, _, as_world = type_explode_id(dep.target_node_id)
+            if as_world is None:
+                continue
 
-                # Check if branch was resolved
-                if branch_id not in self.resolved_branches:
-                    # Branch not yet resolved - task is still potentially reachable
-                    continue
+            # Check if branch was resolved
+            if as_world.branch_id not in self.resolved_branches:
+                # Branch not yet resolved - task is still potentially reachable
+                continue
 
-                # Check if the branch was resolved to a different world
-                if self.resolved_branches[branch_id] != world_id:
-                    # Task depends on a world that wasn't chosen - unreachable
-                    return False
+            # Check if the branch was resolved to a different world
+            if self.resolved_branches[as_world.branch_id] != as_world.world_id:
+                # Task depends on a world that wasn't chosen - unreachable
+                return False
 
         return True
 

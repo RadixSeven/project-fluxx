@@ -61,7 +61,7 @@ def test_layout_two_tasks_no_dependency() -> None:
 
     assert node_id1 in positions
     assert node_id2 in positions
-    # Both should be at same x position (layer 0) since no dependencies
+    # Both should be at the same x position (layer 0) since no dependencies
     assert positions[node_id1].x() == positions[node_id2].x()
 
 

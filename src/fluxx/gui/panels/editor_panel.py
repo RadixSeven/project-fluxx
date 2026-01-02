@@ -91,9 +91,10 @@ class EditorPanel(QWidget):
         if current_widget not in (self.task_editor, self.branch_editor):
             return True
 
-        # Need to cast to use is_dirty/apply_changes/revert_changes
-        # which are common to TaskEditor and BranchEditor
-        editor: TaskEditor | BranchEditor = current_widget  # type: ignore
+        if not isinstance(current_widget, (TaskEditor, BranchEditor)):
+            return True
+
+        editor = current_widget
 
         if not editor.is_dirty():
             return True

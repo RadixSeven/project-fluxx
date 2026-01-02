@@ -27,7 +27,7 @@ def simple_timeline_data() -> TimelineData:
     """Create simple timeline data for testing."""
     # Create statistics for two tasks
     task_a_stats = TaskStatistics(
-        task_id=TaskId("A"),
+        task_id=TaskId("t_A"),
         task_title="Task A",
         occurrence_fraction=1.0,
         time_statistics=TimeStatistics(
@@ -39,7 +39,7 @@ def simple_timeline_data() -> TimelineData:
     )
 
     task_b_stats = TaskStatistics(
-        task_id=TaskId("B"),
+        task_id=TaskId("t_B"),
         task_title="Task B",
         occurrence_fraction=0.8,
         time_statistics=TimeStatistics(
@@ -52,8 +52,8 @@ def simple_timeline_data() -> TimelineData:
 
     return TimelineData(
         task_statistics={
-            TaskId("A"): task_a_stats,
-            TaskId("B"): task_b_stats,
+            TaskId("t_A"): task_a_stats,
+            TaskId("t_B"): task_b_stats,
         },
         dependencies=[],
         percentile=90.0,
@@ -66,7 +66,7 @@ def simple_timeline_data() -> TimelineData:
 def timeline_data_with_dependencies() -> TimelineData:
     """Create timeline data with dependencies."""
     task_a_stats = TaskStatistics(
-        task_id=TaskId("A"),
+        task_id=TaskId("t_A"),
         task_title="Task A",
         occurrence_fraction=1.0,
         time_statistics=TimeStatistics(
@@ -78,7 +78,7 @@ def timeline_data_with_dependencies() -> TimelineData:
     )
 
     task_b_stats = TaskStatistics(
-        task_id=TaskId("B"),
+        task_id=TaskId("t_B"),
         task_title="Task B",
         occurrence_fraction=1.0,
         time_statistics=TimeStatistics(
@@ -92,17 +92,17 @@ def timeline_data_with_dependencies() -> TimelineData:
     # B depends on A (B.start >= A.end)
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=TaskId("A"),
+        target_node_id=TaskId("t_A"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
-    dep_info = DependencyInfo(source_task_id=TaskId("B"), dependency=dep)
+    dep_info = DependencyInfo(source_task_id=TaskId("t_B"), dependency=dep)
 
     return TimelineData(
         task_statistics={
-            TaskId("A"): task_a_stats,
-            TaskId("B"): task_b_stats,
+            TaskId("t_A"): task_a_stats,
+            TaskId("t_B"): task_b_stats,
         },
         dependencies=[dep_info],
         percentile=90.0,
@@ -257,8 +257,8 @@ def test_widget_handles_single_task(qtbot: QtBot) -> None:
     """Test widget with only one task."""
     single_task_data = TimelineData(
         task_statistics={
-            TaskId("A"): TaskStatistics(
-                task_id=TaskId("A"),
+            TaskId("t_A"): TaskStatistics(
+                task_id=TaskId("t_A"),
                 task_title="Task A",
                 occurrence_fraction=1.0,
                 time_statistics=TimeStatistics(
@@ -287,8 +287,8 @@ def test_widget_with_task_without_time_stats(qtbot: QtBot) -> None:
     """Test widget handles tasks without time statistics."""
     task_data = TimelineData(
         task_statistics={
-            TaskId("A"): TaskStatistics(
-                task_id=TaskId("A"),
+            TaskId("t_A"): TaskStatistics(
+                task_id=TaskId("t_A"),
                 task_title="Task A",
                 occurrence_fraction=0.0,
                 time_statistics=None,  # No time stats

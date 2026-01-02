@@ -188,16 +188,16 @@ def test_detect_self_cycle(base_project: Project) -> None:
 def test_validate_parent_child_hierarchy(base_project: Project) -> None:
     """Test validating parent-child task relationships."""
     parent = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Test",
-        children=[TaskId("child")],
+        children=[TaskId("t_child")],
     )
     child = Task(
-        id=TaskId("child"),
+        id=TaskId("t_child"),
         title="Child",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -215,8 +215,8 @@ def test_validate_parent_child_hierarchy(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child"): PersistentObjectId("pc"),
+                    TaskId("t_parent"): PersistentObjectId("pp"),
+                    TaskId("t_child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -235,7 +235,7 @@ def test_invalid_parent_reference(base_project: Project) -> None:
         id=TaskId("t1"),
         title="Task",
         description="Test",
-        parent_id=TaskId("nonexistent"),
+        parent_id=TaskId("t_nonexistent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -285,19 +285,19 @@ def test_leaf_task_requires_duration(base_project: Project) -> None:
 def test_parent_task_can_have_duration(base_project: Project) -> None:
     """Test parent tasks can have duration (preserved but ignored)."""
     parent = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Test",
-        children=[TaskId("child")],
+        children=[TaskId("t_child")],
         duration_distribution=Triangular(
             min=1.0, mode=2.0, max=3.0
         ),  # Valid - preserved but ignored
     )
     child = Task(
-        id=TaskId("child"),
+        id=TaskId("t_child"),
         title="Child",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -315,8 +315,8 @@ def test_parent_task_can_have_duration(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child"): PersistentObjectId("pc"),
+                    TaskId("t_parent"): PersistentObjectId("pp"),
+                    TaskId("t_child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -576,13 +576,14 @@ def test_validate_dependency_nonexistent_source(base_project: Project) -> None:
     )
 
     with pytest.raises(ValidationError, match="does not exist"):
-        validate_dependency(project, TaskId("nonexistent"), dep)
+        validate_dependency(project, TaskId("t_nonexistent"), dep)
 
 
 def test_validate_dependency_nonexistent_target(base_project: Project) -> None:
     """Test validating dependency with non-existent target node."""
+    task_id = TaskId("t1")
     task = Task(
-        id=TaskId("t1"),
+        id=task_id,
         title="Task",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -596,14 +597,15 @@ def test_validate_dependency_nonexistent_target(base_project: Project) -> None:
     project = Project(
         **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=base_project.dag.model_copy(
-            update={"node_map": {TaskId("t1"): PersistentObjectId("pt1")}}
+            update={"node_map": {task_id: PersistentObjectId("pt1")}}
         ),
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
     )
 
+    nonexistent_task_id = TaskId("t999")
     dep = Dependency(
         source_endpoint=Endpoint.END,
-        target_node_id=TaskId("nonexistent"),
+        target_node_id=nonexistent_task_id,
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -861,7 +863,7 @@ def test_parent_is_branch_not_task(base_project: Project) -> None:
 def test_parent_doesnt_list_child(base_project: Project) -> None:
     """Test error when parent doesn't list task in its children."""
     parent = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Test",
         children=[],  # Should include child but doesn't
@@ -870,10 +872,10 @@ def test_parent_doesnt_list_child(base_project: Project) -> None:
         ),  # Needs duration since it has no children
     )
     child = Task(
-        id=TaskId("child"),
+        id=TaskId("t_child"),
         title="Child",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -891,8 +893,8 @@ def test_parent_doesnt_list_child(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child"): PersistentObjectId("pc"),
+                    TaskId("t_parent"): PersistentObjectId("pp"),
+                    TaskId("t_child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -953,13 +955,13 @@ def test_child_is_branch_not_task(base_project: Project) -> None:
 def test_child_doesnt_reference_parent(base_project: Project) -> None:
     """Test error when child doesn't reference task as its parent."""
     parent = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Test",
-        children=[TaskId("child")],
+        children=[TaskId("t_child")],
     )
     child = Task(
-        id=TaskId("child"),
+        id=TaskId("t_child"),
         title="Child",
         description="Test",
         parent_id=None,  # Should reference parent but doesn't
@@ -980,8 +982,8 @@ def test_child_doesnt_reference_parent(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child"): PersistentObjectId("pc"),
+                    TaskId("t_parent"): PersistentObjectId("pp"),
+                    TaskId("t_child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -1002,7 +1004,7 @@ def test_excluded_worker_tasks_validation(base_project: Project) -> None:
         title="Task",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
-        excluded_worker_tasks=[TaskId("nonexistent")],  # Non-existent task
+        excluded_worker_tasks=[TaskId("t_nonexistent")],  # Non-existent task
     )
 
     persistent_task = PersistentTask(
@@ -1056,10 +1058,10 @@ def test_parent_references_child_not_in_node_map(base_project: Project) -> None:
     """Test error when parent references child not in node_map."""
     # Create a parent that claims to have a child, but the child is not in node_map
     parent = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Test",
-        children=[TaskId("nonexistent_child")],  # Child doesn't exist
+        children=[TaskId("t_nonexistent_child")],  # Child doesn't exist
     )
 
     persistent_parent = PersistentTask(
@@ -1072,7 +1074,7 @@ def test_parent_references_child_not_in_node_map(base_project: Project) -> None:
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
+                    TaskId("t_parent"): PersistentObjectId("pp"),
                     # nonexistent_child is NOT in node_map
                 }
             }
@@ -1089,16 +1091,16 @@ def test_child_missing_current_version_in_hierarchy_check(
 ) -> None:
     """Test validation skips when child task missing current version."""
     parent = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Test",
-        children=[TaskId("child")],
+        children=[TaskId("t_child")],
     )
     child = Task(
-        id=TaskId("child"),
+        id=TaskId("t_child"),
         title="Child",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -1117,8 +1119,8 @@ def test_child_missing_current_version_in_hierarchy_check(
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child"): PersistentObjectId("pc"),
+                    TaskId("t_parent"): PersistentObjectId("pp"),
+                    TaskId("t_child"): PersistentObjectId("pc"),
                 }
             }
         ),
@@ -1177,15 +1179,19 @@ def test_cycle_detection_visits_isolated_end_endpoint(
     """
     # Task ordering matters - we'll visit them alphabetically: a, b, x
     # Task A depends on X.start, so DFS from A will visit X.start
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    task_x_id = TaskId("t3")
+    branch_id = BranchId("b1")
     task_a = Task(
-        id=TaskId("a"),
+        id=task_a_id,
         title="Task A",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=TaskId("x"),
+                target_node_id=task_x_id,
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1193,14 +1199,14 @@ def test_cycle_detection_visits_isolated_end_endpoint(
     )
     # Task X: Its START will be visited by A's DFS, but END has separate edges
     task_x = Task(
-        id=TaskId("x"),
+        id=task_x_id,
         title="Task X",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.END,
-                target_node_id=BranchId("b"),
+                target_node_id=branch_id,
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1208,7 +1214,7 @@ def test_cycle_detection_visits_isolated_end_endpoint(
     )
     # Task B: endpoint for X
     task_b = Task(
-        id=TaskId("b"),
+        id=task_b_id,
         title="Task B",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -1234,9 +1240,9 @@ def test_cycle_detection_visits_isolated_end_endpoint(
         dag=base_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("a"): PersistentObjectId("pa"),
-                    TaskId("x"): PersistentObjectId("px"),
-                    BranchId("b"): PersistentObjectId("pb"),
+                    task_a_id: PersistentObjectId("pa"),
+                    task_x_id: PersistentObjectId("px"),
+                    branch_id: PersistentObjectId("pb"),
                 }
             }
         ),

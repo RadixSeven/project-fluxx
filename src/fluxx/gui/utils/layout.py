@@ -2,18 +2,19 @@
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import cast
 
 import networkx as nx
 from PySide6.QtCore import QPointF
 
 from fluxx.data.models import (
-    BranchId,
+    DependencyTargetIdType,
     Endpoint,
     NodeId,
     PossibleWorldId,
     Project,
     TaskId,
+    extract_node_id,
+    get_dep_id_type,
 )
 
 
@@ -88,18 +89,14 @@ def compute_dag_layout(project: Project) -> DAGLayout:
         for dep in task.dependencies:
             # Dependency: source[source_endpoint] >= target[target_endpoint]
             # Creates edge: target[target_endpoint] -> source[source_endpoint]
-            target_str = str(dep.target_node_id)
-            target_node: NodeId
-            if ":" in target_str:
-                branch_id_str, _ = target_str.split(":", 1)
-                target_node = BranchId(branch_id_str)
-                target_endpoint = Endpoint.OCCURRENCE
-            else:
-                target_node = cast(NodeId, dep.target_node_id)
-                target_endpoint = dep.target_endpoint
+            target_node = extract_node_id(dep.target_node_id)
+            target_endpoint = (
+                Endpoint.OCCURRENCE
+                if get_dep_id_type(target_node) == DependencyTargetIdType.BRANCH
+                else dep.target_endpoint
+            )
             graph.add_edge(
-                (target_node, target_endpoint),
-                (source_node_id, dep.source_endpoint),
+                (target_node, target_endpoint), (source_node_id, dep.source_endpoint)
             )
 
     # Add branch endpoints and dependencies
@@ -134,18 +131,14 @@ def compute_dag_layout(project: Project) -> DAGLayout:
         for dep in branch.dependencies:
             # Dependency: source[source_endpoint] >= target[target_endpoint]
             # Creates edge: target[target_endpoint] -> source[source_endpoint]
-            target_str = str(dep.target_node_id)
-            target_node_branch: NodeId
-            if ":" in target_str:
-                branch_id_str, _ = target_str.split(":", 1)
-                target_node_branch = BranchId(branch_id_str)
-                target_endpoint = Endpoint.OCCURRENCE
-            else:
-                target_node_branch = cast(NodeId, dep.target_node_id)
-                target_endpoint = dep.target_endpoint
+            target_node = extract_node_id(dep.target_node_id)
+            target_endpoint = (
+                Endpoint.OCCURRENCE
+                if get_dep_id_type(target_node) == DependencyTargetIdType.BRANCH
+                else dep.target_endpoint
+            )
             graph.add_edge(
-                (target_node_branch, target_endpoint),
-                (source_node_id, dep.source_endpoint),
+                (target_node, target_endpoint), (source_node_id, dep.source_endpoint)
             )
 
     # Compute endpoint layers using topological sort

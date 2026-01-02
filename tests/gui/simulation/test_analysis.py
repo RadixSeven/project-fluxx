@@ -189,14 +189,14 @@ def test_calculate_statistics() -> None:
 
     # Mean should be 3 days from base
     expected_mean = base + timedelta(days=3)
-    assert abs((stats["mean"] - expected_mean).total_seconds()) < 1  # type: ignore
+    assert abs((stats["mean"] - expected_mean).total_seconds()) < 1
 
     # Median should be 3 days from base
     expected_median = base + timedelta(days=3)
-    assert abs((stats["median"] - expected_median).total_seconds()) < 1  # type: ignore
+    assert abs((stats["median"] - expected_median).total_seconds()) < 1
 
     # Std dev should be approximately sqrt(2) days ≈ 1.41 days
-    std_dev: timedelta = stats["std_dev"]  # type: ignore
+    std_dev = stats["std_dev"]
     assert abs(std_dev.total_seconds() / 86400 - 1.414) < 0.1
 
 

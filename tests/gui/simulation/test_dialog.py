@@ -154,10 +154,12 @@ def test_dialog_run_simulation_small_sample(
     dialog.num_samples_spin.setValue(2)
 
     # Track signal emissions
-    samples_emitted: list[object] = []
+    from fluxx.data.models import Sample
 
-    def on_completed(samples: list[object]) -> None:
-        samples_emitted.append(samples)
+    samples_emitted: list[list[Sample]] = []
+
+    def on_completed(sample_list: list[Sample]) -> None:
+        samples_emitted.append(sample_list)
 
     dialog.simulation_completed.connect(on_completed)
 
@@ -166,12 +168,9 @@ def test_dialog_run_simulation_small_sample(
         dialog._on_run()
 
     # Verify simulation completed
-    from typing import cast
-
-    from fluxx.data.models import Sample
 
     assert len(samples_emitted) == 1
-    samples = cast(list[Sample], samples_emitted[0])
+    samples = samples_emitted[0]
     assert len(samples) == 2
 
     # All samples should be successful for this simple project

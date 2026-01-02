@@ -6,7 +6,7 @@ from simulation samples. All functions are pure (no side effects) for easy testi
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import NewType
+from typing import NewType, TypedDict
 
 import numpy as np
 
@@ -94,9 +94,15 @@ def calculate_success_rate(samples: list[Sample]) -> float:
     return successful / len(samples)
 
 
-def calculate_statistics(
-    times: list[datetime],
-) -> dict[str, datetime | timedelta]:
+class CompletionStatistics(TypedDict):
+    """Statistics for completion times."""
+
+    mean: datetime
+    median: datetime
+    std_dev: timedelta
+
+
+def calculate_statistics(times: list[datetime]) -> CompletionStatistics:
     """Calculate statistical measures for completion times.
 
     Args:

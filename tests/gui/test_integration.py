@@ -3,6 +3,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
 from pytestqt.qtbot import QtBot
 
 from fluxx.data.models import (
@@ -340,7 +341,9 @@ def test_dependency_removal_workflow(qtbot: QtBot) -> None:
     assert len(task2.dependencies) == 0
 
 
-def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
+def test_dependency_editing_ui_workflow(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test UI workflow for dependency editing with inline editor and node selection."""
     from unittest.mock import MagicMock
 
@@ -350,7 +353,7 @@ def test_dependency_editing_ui_workflow(qtbot: QtBot) -> None:
     qtbot.addWidget(window)
 
     # Mock _check_unsaved_changes AFTER window creation to prevent segfault
-    window._check_unsaved_changes = MagicMock(return_value=True)  # type: ignore[method-assign]
+    monkeypatch.setattr(window, "_check_unsaved_changes", MagicMock(return_value=True))
 
     window.show()  # Make window visible
     controller = window.controller

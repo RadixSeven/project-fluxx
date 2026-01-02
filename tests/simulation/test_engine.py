@@ -184,9 +184,9 @@ def test_sample_task_duration_unknown_distribution() -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    # Then directly assign a bogus distribution using cast to bypass type checking
-    # This simulates a corrupted state or future distribution type not yet handled
-    task.duration_distribution = cast(Triangular, "not a distribution")
+    # Simulate an unhandled/corrupt distribution type using cast
+    # to bypass type checking
+    task.duration_distribution = cast(Triangular, cast(object, "not a distribution"))
 
     rng = np.random.default_rng(seed=42)
 
@@ -391,7 +391,7 @@ def test_process_task_completions_task_not_in_version(
     state = SimulationState(simple_project, start_date, base_workers)
 
     # Manually set a worker to have a task that doesn't exist
-    state.worker_states[WorkerId("w1")].current_task = TaskId("nonexistent")
+    state.worker_states[WorkerId("w1")].current_task = TaskId("t_nonexistent")
     state.worker_states[WorkerId("w1")].available_time = start_date
 
     # Should not raise error, just skip
@@ -514,7 +514,7 @@ def test_get_branch_not_in_node_map(
     state = SimulationState(simple_project, start_date, base_workers)
 
     with pytest.raises(KeyError, match="not found in node_map"):
-        get_branch(BranchId("nonexistent"), state)
+        get_branch(BranchId("b_nonexistent"), state)
 
 
 def test_get_branch_not_in_persistent_branches(
@@ -1021,7 +1021,7 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
     """
     # Create a task that must be completed before the branch can be resolved
     prerequisite_task = Task(
-        id=TaskId("prereq"),
+        id=TaskId("t_prereq"),
         title="Prerequisite",
         description="Must complete before branch",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -1040,7 +1040,7 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.OCCURRENCE,
-                target_node_id=TaskId("prereq"),
+                target_node_id=TaskId("t_prereq"),
                 target_endpoint=Endpoint.END,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -1049,7 +1049,7 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
 
     # Create a task that depends on the branch
     dependent_task = Task(
-        id=TaskId("dependent"),
+        id=TaskId("t_dependent"),
         title="Dependent Task",
         description="Depends on branch",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -1084,9 +1084,9 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("prereq"): PersistentObjectId("pt_prereq"),
+            TaskId("t_prereq"): PersistentObjectId("pt_prereq"),
             BranchId("b1"): PersistentObjectId("pb1"),
-            TaskId("dependent"): PersistentObjectId("pt_dependent"),
+            TaskId("t_dependent"): PersistentObjectId("pt_dependent"),
         },
     )
 

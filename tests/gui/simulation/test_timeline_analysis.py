@@ -43,19 +43,19 @@ def simple_project() -> Project:
 
     # Create three leaf tasks
     task_a = Task(
-        id=TaskId("A"),
+        id=TaskId("t_A"),
         title="Task A",
         description="",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
     task_b = Task(
-        id=TaskId("B"),
+        id=TaskId("t_B"),
         title="Task B",
         description="",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
     task_c = Task(
-        id=TaskId("C"),
+        id=TaskId("t_C"),
         title="Task C",
         description="",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -82,9 +82,9 @@ def simple_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("A"): PersistentObjectId("pa"),
-            TaskId("B"): PersistentObjectId("pb"),
-            TaskId("C"): PersistentObjectId("pc"),
+            TaskId("t_A"): PersistentObjectId("pa"),
+            TaskId("t_B"): PersistentObjectId("pb"),
+            TaskId("t_C"): PersistentObjectId("pc"),
         },
     )
 
@@ -109,26 +109,26 @@ def parent_child_project() -> Project:
 
     # Create child tasks
     child1 = Task(
-        id=TaskId("C1"),
+        id=TaskId("t_C1"),
         title="Child 1",
         description="",
-        parent_id=TaskId("P"),
+        parent_id=TaskId("t_P"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
     child2 = Task(
-        id=TaskId("C2"),
+        id=TaskId("t_C2"),
         title="Child 2",
         description="",
-        parent_id=TaskId("P"),
+        parent_id=TaskId("t_P"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Create parent task
     parent = Task(
-        id=TaskId("P"),
+        id=TaskId("t_P"),
         title="Parent",
         description="",
-        children=[TaskId("C1"), TaskId("C2")],
+        children=[TaskId("t_C1"), TaskId("t_C2")],
     )
 
     # Create persistent tasks
@@ -152,9 +152,9 @@ def parent_child_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("P"): PersistentObjectId("p"),
-            TaskId("C1"): PersistentObjectId("c1"),
-            TaskId("C2"): PersistentObjectId("c2"),
+            TaskId("t_P"): PersistentObjectId("p"),
+            TaskId("t_C1"): PersistentObjectId("c1"),
+            TaskId("t_C2"): PersistentObjectId("c2"),
         },
     )
 
@@ -179,52 +179,52 @@ def nested_parent_project() -> Project:
 
     # Create leaf children
     child1 = Task(
-        id=TaskId("C1"),
+        id=TaskId("t_C1"),
         title="Child 1",
         description="",
-        parent_id=TaskId("P1"),
+        parent_id=TaskId("t_P1"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
     child2 = Task(
-        id=TaskId("C2"),
+        id=TaskId("t_C2"),
         title="Child 2",
         description="",
-        parent_id=TaskId("P1"),
+        parent_id=TaskId("t_P1"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Create parent (which is also a child of grandparent)
     parent1 = Task(
-        id=TaskId("P1"),
+        id=TaskId("t_P1"),
         title="Parent 1",
         description="",
-        parent_id=TaskId("GP"),
-        children=[TaskId("C1"), TaskId("C2")],
+        parent_id=TaskId("t_GP"),
+        children=[TaskId("t_C1"), TaskId("t_C2")],
     )
 
     # Create second parent at same level
     parent2 = Task(
-        id=TaskId("P2"),
+        id=TaskId("t_P2"),
         title="Parent 2",
         description="",
-        parent_id=TaskId("GP"),
-        children=[TaskId("C3")],
+        parent_id=TaskId("t_GP"),
+        children=[TaskId("t_C3")],
     )
 
     child3 = Task(
-        id=TaskId("C3"),
+        id=TaskId("t_C3"),
         title="Child 3",
         description="",
-        parent_id=TaskId("P2"),
+        parent_id=TaskId("t_P2"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Create grandparent
     grandparent = Task(
-        id=TaskId("GP"),
+        id=TaskId("t_GP"),
         title="Grandparent",
         description="",
-        children=[TaskId("P1"), TaskId("P2")],
+        children=[TaskId("t_P1"), TaskId("t_P2")],
     )
 
     # Create persistent tasks
@@ -260,12 +260,12 @@ def nested_parent_project() -> Project:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("GP"): PersistentObjectId("gp"),
-            TaskId("P1"): PersistentObjectId("p1"),
-            TaskId("P2"): PersistentObjectId("p2"),
-            TaskId("C1"): PersistentObjectId("c1"),
-            TaskId("C2"): PersistentObjectId("c2"),
-            TaskId("C3"): PersistentObjectId("c3"),
+            TaskId("t_GP"): PersistentObjectId("gp"),
+            TaskId("t_P1"): PersistentObjectId("p1"),
+            TaskId("t_P2"): PersistentObjectId("p2"),
+            TaskId("t_C1"): PersistentObjectId("c1"),
+            TaskId("t_C2"): PersistentObjectId("c2"),
+            TaskId("t_C3"): PersistentObjectId("c3"),
         },
     )
 
@@ -293,25 +293,25 @@ def simple_samples() -> list[Sample]:
         sample_id=SampleId(0),
         events=[
             TaskEvent(
-                node_id=TaskId("A"),
+                node_id=TaskId("t_A"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=TaskId("A"),
+                node_id=TaskId("t_A"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=TaskId("B"),
+                node_id=TaskId("t_B"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=TaskId("B"),
+                node_id=TaskId("t_B"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
                 details={},
@@ -326,25 +326,25 @@ def simple_samples() -> list[Sample]:
         sample_id=SampleId(1),
         events=[
             TaskEvent(
-                node_id=TaskId("A"),
+                node_id=TaskId("t_A"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 2, 9, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=TaskId("A"),
+                node_id=TaskId("t_A"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 2, 11, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=TaskId("C"),
+                node_id=TaskId("t_C"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 2, 11, 0, tzinfo=UTC),
                 details={},
             ),
             TaskEvent(
-                node_id=TaskId("C"),
+                node_id=TaskId("t_C"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 2, 13, 0, tzinfo=UTC),
                 details={},
@@ -362,15 +362,15 @@ def simple_samples() -> list[Sample]:
 
 def test_get_task_from_project(simple_project: Project) -> None:
     """Test retrieving a task from project."""
-    task = get_task_from_project(TaskId("A"), simple_project)
-    assert task.id == TaskId("A")
+    task = get_task_from_project(TaskId("t_A"), simple_project)
+    assert task.id == TaskId("t_A")
     assert task.title == "Task A"
 
 
 def test_get_task_from_project_not_found(simple_project: Project) -> None:
     """Test retrieving non-existent task raises KeyError."""
     with pytest.raises(KeyError, match="not found in node_map"):
-        get_task_from_project(TaskId("INVALID"), simple_project)
+        get_task_from_project(TaskId("t_INVALID"), simple_project)
 
 
 # Tests for get_all_tasks_from_project
@@ -381,7 +381,7 @@ def test_get_all_tasks_from_project(simple_project: Project) -> None:
     tasks = get_all_tasks_from_project(simple_project)
     assert len(tasks) == 3
     task_ids = {t.id for t in tasks}
-    assert task_ids == {TaskId("A"), TaskId("B"), TaskId("C")}
+    assert task_ids == {TaskId("t_A"), TaskId("t_B"), TaskId("t_C")}
 
 
 def test_get_all_tasks_from_parent_child_project(
@@ -391,7 +391,7 @@ def test_get_all_tasks_from_parent_child_project(
     tasks = get_all_tasks_from_project(parent_child_project)
     assert len(tasks) == 3
     task_ids = {t.id for t in tasks}
-    assert task_ids == {TaskId("P"), TaskId("C1"), TaskId("C2")}
+    assert task_ids == {TaskId("t_P"), TaskId("t_C1"), TaskId("t_C2")}
 
 
 # Tests for extract_leaf_task_times
@@ -405,20 +405,20 @@ def test_extract_leaf_task_times(simple_samples: list[Sample]) -> None:
 
     # Sample 0: A and B
     sample0_times = sample_times_list[0]
-    assert TaskId("A") in sample0_times
-    assert TaskId("B") in sample0_times
-    assert TaskId("C") not in sample0_times
+    assert TaskId("t_A") in sample0_times
+    assert TaskId("t_B") in sample0_times
+    assert TaskId("t_C") not in sample0_times
 
     # Check A's times
-    a_start, a_end = sample0_times[TaskId("A")]
+    a_start, a_end = sample0_times[TaskId("t_A")]
     assert a_start == datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
     assert a_end == datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
 
     # Sample 1: A and C
     sample1_times = sample_times_list[1]
-    assert TaskId("A") in sample1_times
-    assert TaskId("B") not in sample1_times
-    assert TaskId("C") in sample1_times
+    assert TaskId("t_A") in sample1_times
+    assert TaskId("t_B") not in sample1_times
+    assert TaskId("t_C") in sample1_times
 
 
 def test_extract_leaf_task_times_empty_samples() -> None:
@@ -433,14 +433,14 @@ def test_extract_leaf_task_times_incomplete_events() -> None:
         sample_id=SampleId(0),
         events=[
             TaskEvent(
-                node_id=TaskId("A"),
+                node_id=TaskId("t_A"),
                 event_type="start",
                 timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                 details={},
             ),
             # No complete event for A
             TaskEvent(
-                node_id=TaskId("B"),
+                node_id=TaskId("t_B"),
                 event_type="complete",
                 timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 details={},
@@ -452,8 +452,8 @@ def test_extract_leaf_task_times_incomplete_events() -> None:
 
     sample_times_list = extract_leaf_task_times([sample])
     assert len(sample_times_list) == 1
-    assert TaskId("A") not in sample_times_list[0]
-    assert TaskId("B") not in sample_times_list[0]
+    assert TaskId("t_A") not in sample_times_list[0]
+    assert TaskId("t_B") not in sample_times_list[0]
 
 
 # Tests for compute_parent_times_per_sample
@@ -463,11 +463,11 @@ def test_compute_parent_times_per_sample() -> None:
     """Test computing parent times from children."""
     sample_times = SampleTaskTimes(
         {
-            TaskId("C1"): (
+            TaskId("t_C1"): (
                 datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                 datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
             ),
-            TaskId("C2"): (
+            TaskId("t_C2"): (
                 datetime(2024, 1, 1, 9, 30, tzinfo=UTC),
                 datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
             ),
@@ -475,7 +475,7 @@ def test_compute_parent_times_per_sample() -> None:
     )
 
     parent_time = compute_parent_times_per_sample(
-        TaskId("P"), [TaskId("C1"), TaskId("C2")], sample_times
+        TaskId("t_P"), [TaskId("t_C1"), TaskId("t_C2")], sample_times
     )
 
     assert parent_time is not None
@@ -491,7 +491,7 @@ def test_compute_parent_times_no_children_in_sample() -> None:
     sample_times = SampleTaskTimes({})
 
     parent_time = compute_parent_times_per_sample(
-        TaskId("P"), [TaskId("C1"), TaskId("C2")], sample_times
+        TaskId("t_P"), [TaskId("t_C1"), TaskId("t_C2")], sample_times
     )
 
     assert parent_time is None
@@ -501,7 +501,7 @@ def test_compute_parent_times_partial_children() -> None:
     """Test parent with only some children in sample."""
     sample_times = SampleTaskTimes(
         {
-            TaskId("C1"): (
+            TaskId("t_C1"): (
                 datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                 datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
             ),
@@ -510,7 +510,7 @@ def test_compute_parent_times_partial_children() -> None:
     )
 
     parent_time = compute_parent_times_per_sample(
-        TaskId("P"), [TaskId("C1"), TaskId("C2")], sample_times
+        TaskId("t_P"), [TaskId("t_C1"), TaskId("t_C2")], sample_times
     )
 
     assert parent_time is not None
@@ -526,7 +526,7 @@ def test_compute_parent_times_partial_children() -> None:
 def test_get_parent_processing_order_simple(parent_child_project: Project) -> None:
     """Test parent processing order with simple parent-child."""
     order = get_parent_processing_order(parent_child_project)
-    assert order == [TaskId("P")]
+    assert order == [TaskId("t_P")]
 
 
 def test_get_parent_processing_order_nested(nested_parent_project: Project) -> None:
@@ -536,10 +536,10 @@ def test_get_parent_processing_order_nested(nested_parent_project: Project) -> N
     # P1 and P2 must come before GP
     # P1 and P2 can be in either order (deterministic via sorted)
     assert len(order) == 3
-    assert order[2] == TaskId("GP")  # Grandparent is last
-    assert set(order[:2]) == {TaskId("P1"), TaskId("P2")}  # Parents first
+    assert order[2] == TaskId("t_GP")  # Grandparent is last
+    assert set(order[:2]) == {TaskId("t_P1"), TaskId("t_P2")}  # Parents first
     # Check deterministic ordering (sorted by string)
-    assert order[:2] == sorted([TaskId("P1"), TaskId("P2")])
+    assert order[:2] == sorted([TaskId("t_P1"), TaskId("t_P2")])
 
 
 def test_get_parent_processing_order_no_parents(simple_project: Project) -> None:
@@ -557,11 +557,11 @@ def test_add_parent_task_times(parent_child_project: Project) -> None:
     sample_times_list = [
         SampleTaskTimes(
             {
-                TaskId("C1"): (
+                TaskId("t_C1"): (
                     datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 ),
-                TaskId("C2"): (
+                TaskId("t_C2"): (
                     datetime(2024, 1, 1, 9, 30, tzinfo=UTC),
                     datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
                 ),
@@ -572,8 +572,8 @@ def test_add_parent_task_times(parent_child_project: Project) -> None:
     add_parent_task_times(sample_times_list, parent_child_project)
 
     # Parent should now be in the sample times
-    assert TaskId("P") in sample_times_list[0]
-    parent_start, parent_end = sample_times_list[0][TaskId("P")]
+    assert TaskId("t_P") in sample_times_list[0]
+    parent_start, parent_end = sample_times_list[0][TaskId("t_P")]
     assert parent_start == datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
     assert parent_end == datetime(2024, 1, 1, 11, 0, tzinfo=UTC)
 
@@ -584,15 +584,15 @@ def test_add_parent_task_times_nested(nested_parent_project: Project) -> None:
     sample_times_list = [
         SampleTaskTimes(
             {
-                TaskId("C1"): (
+                TaskId("t_C1"): (
                     datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 ),
-                TaskId("C2"): (
+                TaskId("t_C2"): (
                     datetime(2024, 1, 1, 9, 30, tzinfo=UTC),
                     datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
                 ),
-                TaskId("C3"): (
+                TaskId("t_C3"): (
                     datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
                 ),
@@ -603,22 +603,22 @@ def test_add_parent_task_times_nested(nested_parent_project: Project) -> None:
     add_parent_task_times(sample_times_list, nested_parent_project)
 
     # All parents should be added
-    assert TaskId("P1") in sample_times_list[0]
-    assert TaskId("P2") in sample_times_list[0]
-    assert TaskId("GP") in sample_times_list[0]
+    assert TaskId("t_P1") in sample_times_list[0]
+    assert TaskId("t_P2") in sample_times_list[0]
+    assert TaskId("t_GP") in sample_times_list[0]
 
     # Check P1 times (from C1 and C2)
-    p1_start, p1_end = sample_times_list[0][TaskId("P1")]
+    p1_start, p1_end = sample_times_list[0][TaskId("t_P1")]
     assert p1_start == datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
     assert p1_end == datetime(2024, 1, 1, 11, 0, tzinfo=UTC)
 
     # Check P2 times (from C3)
-    p2_start, p2_end = sample_times_list[0][TaskId("P2")]
+    p2_start, p2_end = sample_times_list[0][TaskId("t_P2")]
     assert p2_start == datetime(2024, 1, 1, 10, 0, tzinfo=UTC)
     assert p2_end == datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
 
     # Check GP times (from P1 and P2, which span all children)
-    gp_start, gp_end = sample_times_list[0][TaskId("GP")]
+    gp_start, gp_end = sample_times_list[0][TaskId("t_GP")]
     assert gp_start == datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
     assert gp_end == datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
 
@@ -684,11 +684,11 @@ def test_calculate_task_statistics() -> None:
     sample_times_list = [
         SampleTaskTimes(
             {
-                TaskId("A"): (
+                TaskId("t_A"): (
                     datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 ),
-                TaskId("B"): (
+                TaskId("t_B"): (
                     datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
                 ),
@@ -696,7 +696,7 @@ def test_calculate_task_statistics() -> None:
         ),
         SampleTaskTimes(
             {
-                TaskId("A"): (
+                TaskId("t_A"): (
                     datetime(2024, 1, 2, 9, 0, tzinfo=UTC),
                     datetime(2024, 1, 2, 11, 0, tzinfo=UTC),
                 ),
@@ -706,23 +706,23 @@ def test_calculate_task_statistics() -> None:
     ]
 
     # Create task titles mapping
-    task_titles = {TaskId("A"): "Task A", TaskId("B"): "Task B"}
+    task_titles = {TaskId("t_A"): "Task A", TaskId("t_B"): "Task B"}
 
     stats = calculate_task_statistics(
         sample_times_list, num_samples=2, percentile=90.0, task_titles=task_titles
     )
 
     # A occurs in 2/2 samples
-    assert TaskId("A") in stats
-    assert stats[TaskId("A")].task_title == "Task A"
-    assert stats[TaskId("A")].occurrence_fraction == 1.0
-    assert stats[TaskId("A")].time_statistics is not None
+    assert TaskId("t_A") in stats
+    assert stats[TaskId("t_A")].task_title == "Task A"
+    assert stats[TaskId("t_A")].occurrence_fraction == 1.0
+    assert stats[TaskId("t_A")].time_statistics is not None
 
     # B occurs in 1/2 samples
-    assert TaskId("B") in stats
-    assert stats[TaskId("B")].task_title == "Task B"
-    assert stats[TaskId("B")].occurrence_fraction == 0.5
-    assert stats[TaskId("B")].time_statistics is not None
+    assert TaskId("t_B") in stats
+    assert stats[TaskId("t_B")].task_title == "Task B"
+    assert stats[TaskId("t_B")].occurrence_fraction == 0.5
+    assert stats[TaskId("t_B")].time_statistics is not None
 
 
 # Tests for extract_timeline_data
@@ -739,16 +739,16 @@ def test_extract_timeline_data(
     assert timeline_data.percentile == 90.0
 
     # Should have statistics for tasks that occurred
-    assert TaskId("A") in timeline_data.task_statistics
-    assert TaskId("B") in timeline_data.task_statistics
-    assert TaskId("C") in timeline_data.task_statistics
+    assert TaskId("t_A") in timeline_data.task_statistics
+    assert TaskId("t_B") in timeline_data.task_statistics
+    assert TaskId("t_C") in timeline_data.task_statistics
 
     # A occurs in both samples
-    assert timeline_data.task_statistics[TaskId("A")].occurrence_fraction == 1.0
+    assert timeline_data.task_statistics[TaskId("t_A")].occurrence_fraction == 1.0
 
     # B and C each occur in 1/2 samples
-    assert timeline_data.task_statistics[TaskId("B")].occurrence_fraction == 0.5
-    assert timeline_data.task_statistics[TaskId("C")].occurrence_fraction == 0.5
+    assert timeline_data.task_statistics[TaskId("t_B")].occurrence_fraction == 0.5
+    assert timeline_data.task_statistics[TaskId("t_C")].occurrence_fraction == 0.5
 
     # Earliest and latest times should be set
     assert timeline_data.earliest_time is not None
@@ -764,25 +764,25 @@ def test_extract_timeline_data_with_parent(parent_child_project: Project) -> Non
             sample_id=SampleId(0),
             events=[
                 TaskEvent(
-                    node_id=TaskId("C1"),
+                    node_id=TaskId("t_C1"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=TaskId("C1"),
+                    node_id=TaskId("t_C1"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=TaskId("C2"),
+                    node_id=TaskId("t_C2"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=TaskId("C2"),
+                    node_id=TaskId("t_C2"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
                     details={},
@@ -797,12 +797,12 @@ def test_extract_timeline_data_with_parent(parent_child_project: Project) -> Non
     )
 
     # Should have statistics for children
-    assert TaskId("C1") in timeline_data.task_statistics
-    assert TaskId("C2") in timeline_data.task_statistics
+    assert TaskId("t_C1") in timeline_data.task_statistics
+    assert TaskId("t_C2") in timeline_data.task_statistics
 
     # Should also have statistics for parent
-    assert TaskId("P") in timeline_data.task_statistics
-    assert timeline_data.task_statistics[TaskId("P")].occurrence_fraction == 1.0
+    assert TaskId("t_P") in timeline_data.task_statistics
+    assert timeline_data.task_statistics[TaskId("t_P")].occurrence_fraction == 1.0
 
 
 def test_extract_timeline_data_empty_samples(simple_project: Project) -> None:
@@ -828,13 +828,13 @@ def test_extract_timeline_data_dependencies() -> None:
     # Create task A with dependency on task B
     dep_a = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=TaskId("B"),
+        target_node_id=TaskId("t_B"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     task_a = Task(
-        id=TaskId("A"),
+        id=TaskId("t_A"),
         title="Task A",
         description="",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -842,7 +842,7 @@ def test_extract_timeline_data_dependencies() -> None:
     )
 
     task_b = Task(
-        id=TaskId("B"),
+        id=TaskId("t_B"),
         title="Task B",
         description="",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -865,8 +865,8 @@ def test_extract_timeline_data_dependencies() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("A"): PersistentObjectId("pa"),
-            TaskId("B"): PersistentObjectId("pb"),
+            TaskId("t_A"): PersistentObjectId("pa"),
+            TaskId("t_B"): PersistentObjectId("pb"),
         },
     )
 
@@ -887,25 +887,25 @@ def test_extract_timeline_data_dependencies() -> None:
             sample_id=SampleId(0),
             events=[
                 TaskEvent(
-                    node_id=TaskId("A"),
+                    node_id=TaskId("t_A"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=TaskId("A"),
+                    node_id=TaskId("t_A"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 11, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=TaskId("B"),
+                    node_id=TaskId("t_B"),
                     event_type="start",
                     timestamp=datetime(2024, 1, 1, 9, 0, tzinfo=UTC),
                     details={},
                 ),
                 TaskEvent(
-                    node_id=TaskId("B"),
+                    node_id=TaskId("t_B"),
                     event_type="complete",
                     timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                     details={},
@@ -923,7 +923,7 @@ def test_extract_timeline_data_dependencies() -> None:
     # Check dependency info
     dep_info = timeline_data.dependencies[0]
     assert isinstance(dep_info, DependencyInfo)
-    assert dep_info.source_task_id == TaskId("A")
-    assert dep_info.dependency.target_node_id == TaskId("B")
+    assert dep_info.source_task_id == TaskId("t_A")
+    assert dep_info.dependency.target_node_id == TaskId("t_B")
     assert dep_info.dependency.source_endpoint == Endpoint.START
     assert dep_info.dependency.target_endpoint == Endpoint.END

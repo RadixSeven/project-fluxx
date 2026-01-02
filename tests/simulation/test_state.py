@@ -315,8 +315,8 @@ def test_get_task_not_found(
     """Test retrieving a non-existent task raises KeyError."""
     state = SimulationState(simple_project, start_date, base_workers)
 
-    with pytest.raises(KeyError, match="Task nonexistent not found"):
-        state.get_task(TaskId("nonexistent"))
+    with pytest.raises(KeyError, match="Task t_nonexistent not found"):
+        state.get_task(TaskId("t_nonexistent"))
 
 
 def test_get_task_not_in_persistent_tasks(
@@ -328,10 +328,10 @@ def test_get_task_not_in_persistent_tasks(
     state = SimulationState(simple_project, start_date, base_workers)
 
     # Add a node to node_map that doesn't exist in persistent_tasks
-    state.project.dag.node_map[TaskId("orphan")] = PersistentObjectId("missing")
+    state.project.dag.node_map[TaskId("t_orphan")] = PersistentObjectId("missing")
 
-    with pytest.raises(KeyError, match="Task orphan not found in persistent_tasks"):
-        state.get_task(TaskId("orphan"))
+    with pytest.raises(KeyError, match="Task t_orphan not found in persistent_tasks"):
+        state.get_task(TaskId("t_orphan"))
 
 
 def test_get_task_not_in_current_version(
@@ -522,7 +522,7 @@ def test_is_task_reachable_nonexistent_task(
     state = SimulationState(simple_project, start_date, base_workers)
 
     # Task that doesn't exist in the project
-    nonexistent_task = TaskId("nonexistent")
+    nonexistent_task = TaskId("t_nonexistent")
 
     # Should return False for nonexistent tasks
     assert not state.is_task_reachable(nonexistent_task)

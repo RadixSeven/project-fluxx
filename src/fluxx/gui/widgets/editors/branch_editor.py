@@ -23,10 +23,8 @@ from fluxx.data.models import (
     BranchId,
     Dependency,
     NodeId,
-    NodeIdType,
     PossibleWorld,
-    TaskId,
-    get_node_id_type,
+    type_explode_id,
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
@@ -290,15 +288,12 @@ class BranchEditor(QWidget):
             target_title = "Unknown"
 
             # Determine target type using type-safe function
-            target_str = str(target_id)
-
             try:
-                target_type = get_node_id_type(target_str)
+                as_task, as_branch, as_world = type_explode_id(target_id)
 
-                if target_type == NodeIdType.POSSIBLE_WORLD_REFERENCE:
-                    # Parse possible world reference
-                    branch_id_str, world_id_str = target_str.split(":", 1)
-                    branch_node_id = BranchId(branch_id_str)
+                if as_world is not None:
+                    branch_node_id = as_world.branch_id
+                    world_id = as_world.world_id
 
                     # Find the branch and possible world
                     if branch_node_id in project.dag.node_map:
@@ -313,13 +308,13 @@ class BranchEditor(QWidget):
 
                                 # Find the specific possible world
                                 for pw in branch.possible_worlds:
-                                    if pw.id == world_id_str:
+                                    if pw.id == world_id:
                                         target_title = (
                                             f"{pw.title} (from {branch.title})"
                                         )
                                         break
-                elif target_type == NodeIdType.TASK:
-                    task_node_id = TaskId(target_str)
+                elif as_task is not None:
+                    task_node_id = as_task
                     if task_node_id in project.dag.node_map:
                         persistent_id = project.dag.node_map[task_node_id]
 
@@ -329,8 +324,8 @@ class BranchEditor(QWidget):
                                 target_title = persistent_task.versions[
                                     current_version
                                 ].title
-                elif target_type == NodeIdType.BRANCH:
-                    branch_node_id_2 = BranchId(target_str)
+                elif as_branch is not None:
+                    branch_node_id_2 = as_branch
                     if branch_node_id_2 in project.dag.node_map:
                         persistent_id = project.dag.node_map[branch_node_id_2]
 

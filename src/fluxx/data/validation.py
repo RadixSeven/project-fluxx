@@ -3,16 +3,14 @@
 from collections import defaultdict
 
 from fluxx.data.models import (
-    BranchId,
     DAGVersionId,
     Dependency,
+    DependencyTargetId,
     Endpoint,
     NodeId,
-    NodeIdType,
+    PossibleWorldId,
     Project,
-    TaskId,
-    get_node_id_type,
-    str_to_node_id,
+    type_explode_id,
 )
 
 
@@ -85,11 +83,12 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
     # Build adjacency list from dependencies using (node_id, endpoint) as graph nodes
     from fluxx.data.models import Endpoint
 
-    graph: dict[tuple[NodeId, Endpoint], list[tuple[NodeId, Endpoint]]] = defaultdict(
-        list
-    )
+    graph: dict[
+        tuple[NodeId | PossibleWorldId, Endpoint],
+        list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ] = defaultdict(list)
 
-    # Get all nodes in current version
+    # Get all nodes in the current version
     for node_id, persistent_id in project.dag.node_map.items():
         # Check if it's a task
         if persistent_id in project.persistent_tasks:
@@ -102,21 +101,12 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
 
                 # Add explicit dependencies from this task
                 for dep in task.dependencies:
-                    # Dependency: source[source_endpoint] >= target[target_endpoint]
-                    # Creates edge: target[target_endpoint] -> source[source_endpoint]
-                    # Handle possible world references
-                    target_str = str(dep.target_node_id)
-                    if ":" in target_str:
-                        # Possible world reference - use the branch's occurrence
-                        branch_id_str, _ = target_str.split(":", 1)
-                        target_node = str_to_node_id(branch_id_str)
-                        target_endpoint = Endpoint.OCCURRENCE
-                    else:
-                        target_node = dep.target_node_id  # type: ignore[assignment]
-                        target_endpoint = dep.target_endpoint
-
-                    graph[(target_node, target_endpoint)].append(
-                        (node_id, dep.source_endpoint)
+                    add_dep_edge(
+                        node_id,
+                        dep.source_endpoint,
+                        dep.target_node_id,
+                        dep.target_endpoint,
+                        graph,
                     )
 
         # Check if it's a branch
@@ -127,42 +117,36 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
 
                 # Add implicit dependencies: occurrence_point -> each possible world
                 for pw in branch.possible_worlds:
-                    # Use TaskId for cycle detection; it's just a unique
-                    # string identifier.
                     graph[(node_id, Endpoint.OCCURRENCE)].append(
-                        (TaskId(pw.id), Endpoint.OCCURRENCE)
+                        (pw.id, Endpoint.OCCURRENCE)
                     )
 
                 # Add explicit dependencies from this branch
                 for dep in branch.dependencies:
-                    # Dependency: source[source_endpoint] >= target[target_endpoint]
-                    # Creates edge: target[target_endpoint] -> source[source_endpoint]
-                    # Handle possible world references
-                    target_str = str(dep.target_node_id)
-                    if ":" in target_str:
-                        # Possible world reference - use the branch's occurrence
-                        branch_id_str, _ = target_str.split(":", 1)
-                        target_node = str_to_node_id(branch_id_str)
-                        target_endpoint = Endpoint.OCCURRENCE
-                    else:
-                        target_node = dep.target_node_id  # type: ignore[assignment]
-                        target_endpoint = dep.target_endpoint
-
-                    graph[(target_node, target_endpoint)].append(
-                        (node_id, dep.source_endpoint)
+                    add_dep_edge(
+                        node_id,
+                        dep.source_endpoint,
+                        dep.target_node_id,
+                        dep.target_endpoint,
+                        graph,
                     )
 
     # DFS-based cycle detection
     white, gray, black = 0, 1, 2
-    color: dict[tuple[NodeId, Endpoint], int] = defaultdict(lambda: white)
+    color: dict[tuple[NodeId | PossibleWorldId, Endpoint], int] = defaultdict(
+        lambda: white
+    )
 
-    def dfs(node: tuple[NodeId, Endpoint], path: list[tuple[NodeId, Endpoint]]) -> None:
+    def dfs(
+        node: tuple[NodeId | PossibleWorldId, Endpoint],
+        path: list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ) -> None:
         if color[node] == gray:
             # Found a cycle
             cycle_start = path.index(node)
             cycle = path[cycle_start:] + [node]
             cycle_str = " -> ".join(
-                f"{node_id}.{endpoint.value}" for node_id, endpoint in cycle
+                f"{n_id}.{endpoint.value}" for n_id, endpoint in cycle
             )
             raise CycleError(f"Cycle detected in DAG: {cycle_str}")
 
@@ -194,6 +178,55 @@ def _check_for_cycles(project: Project, version_id: DAGVersionId) -> None:
             dfs((node_id, Endpoint.OCCURRENCE), [])
 
 
+def add_dep_edge(
+    source_id: NodeId,
+    source_endpoint: Endpoint,
+    target_id: DependencyTargetId,
+    target_endpoint: Endpoint,
+    graph: dict[
+        tuple[NodeId | PossibleWorldId, Endpoint],
+        list[tuple[NodeId | PossibleWorldId, Endpoint]],
+    ],
+) -> None:
+    """
+    Add a dependency edge to the graph.
+
+    Dependency: source[source_endpoint] >= target[target_endpoint]
+    Creates edge: target[target_endpoint] -> source[source_endpoint]
+
+    Args:
+        source_id: ID of the source node.
+        source_endpoint: Endpoint of the source node.
+        target_id: ID of the target node.
+        target_endpoint: Endpoint of the target node.
+        graph: Dependency graph (modified)
+
+    Returns:
+        None
+
+    Raises:
+        ValidationError: If the target ID is invalid.
+    """
+    try:
+        as_task, as_branch, as_world = type_explode_id(target_id)
+    except ValueError as ve:
+        raise ValidationError(f"Invalid dependency target ID: {target_id}") from ve
+
+    if as_world is not None:
+        target_node: NodeId = as_world[0]
+        target_endpoint = Endpoint.OCCURRENCE
+    elif as_task is not None:
+        target_node = as_task
+        target_endpoint = target_endpoint
+    elif as_branch is not None:
+        target_node = as_branch
+        target_endpoint = target_endpoint
+    else:
+        raise ValidationError(f"Forgot dependency target type: {target_id}")
+
+    graph[(target_node, target_endpoint)].append((source_id, source_endpoint))
+
+
 def _validate_task_hierarchy(project: Project, version_id: DAGVersionId) -> None:
     """Validate task parent/child relationships.
 
@@ -214,7 +247,7 @@ def _validate_task_hierarchy(project: Project, version_id: DAGVersionId) -> None
 
         task = persistent_task.versions[version_id]
 
-        # If task has parent, verify parent exists and lists this as child
+        # If that task has a parent, verify parent exists and lists this as child
         if task.parent_id is not None:
             parent_persistent_id = project.dag.node_map.get(task.parent_id)
             if parent_persistent_id is None:
@@ -236,7 +269,7 @@ def _validate_task_hierarchy(project: Project, version_id: DAGVersionId) -> None
                     f"child"
                 )
 
-        # Verify all children exist and reference this task as parent
+        # Verify all children exist and reference this task as their parent
         for child_id in task.children:
             child_persistent_id = project.dag.node_map.get(child_id)
             if child_persistent_id is None:
@@ -249,7 +282,7 @@ def _validate_task_hierarchy(project: Project, version_id: DAGVersionId) -> None
 
             child_persistent = project.persistent_tasks[child_persistent_id]
             if version_id not in child_persistent.versions:
-                continue  # Skip children not in current version
+                continue  # Skip children not in the current version
 
             child_task = child_persistent.versions[version_id]
             if child_task.parent_id != task.id:
@@ -330,89 +363,71 @@ def validate_dependency(
 
     # Determine source node type
     source_is_task = source_persistent_id in project.persistent_tasks
+    source_is_branch = source_persistent_id in project.persistent_branches
 
-    # Validate target node exists and determine its type
-    target_str = str(dependency.target_node_id)
-
+    # Validate that the target node exists and determine its type
     try:
-        target_type = get_node_id_type(target_str)
+        as_task, as_branch, as_world = type_explode_id(dependency.target_node_id)
     except ValueError as err:
-        # Pattern doesn't match - check if it exists in DAG to determine type
-        # Can't use str_to_node_id since pattern is unknown, so check DAG directly
-        # Try as both types to see which exists
-        task_id: NodeId = TaskId(target_str)
-        branch_id: NodeId = BranchId(target_str)
-
-        task_persistent_id = project.dag.node_map.get(task_id)
-        branch_persistent_id = project.dag.node_map.get(branch_id)
-
-        if (
-            task_persistent_id is not None
-            and task_persistent_id in project.persistent_tasks
-        ):
-            target_type = NodeIdType.TASK
-        elif (
-            branch_persistent_id is not None
-            and branch_persistent_id in project.persistent_branches
-        ):
-            target_type = NodeIdType.BRANCH
-        else:
-            raise ValidationError(f"Target node {target_str} does not exist") from err
+        raise ValidationError(
+            f"Target ID {dependency.target_node_id} does not match a known ID type"
+        ) from err
 
     # Validate target exists based on type
-    if target_type == NodeIdType.POSSIBLE_WORLD_REFERENCE:
-        # Parse possible world reference
-        branch_id_str, world_id_str = target_str.split(":", 1)
-        branch_node_id = str_to_node_id(branch_id_str)
-
+    if as_world is not None:
         # Validate branch exists
-        branch_persistent_id = project.dag.node_map.get(branch_node_id)
+        branch_persistent_id = project.dag.node_map.get(as_world.branch_id)
         if branch_persistent_id is None:
             raise ValidationError(
                 f"Target {dependency.target_node_id} references non-existent "
-                f"branch {branch_id_str}"
+                f"branch {as_world.branch_id}"
             )
 
         if branch_persistent_id not in project.persistent_branches:
             raise ValidationError(
-                f"Target {dependency.target_node_id} references {branch_id_str} "
+                f"Target {dependency.target_node_id} references {as_world.branch_id} "
                 f"which is not a branch"
             )
 
-        # Validate possible world exists in branch
+        # Validate possible world exists in the branch
         current_version = project.dag.current_version_id
         persistent_branch = project.persistent_branches[branch_persistent_id]
 
         if current_version not in persistent_branch.versions:
             raise ValidationError(
-                f"Target branch {branch_id_str} does not exist in current version"
+                f"Target branch {as_world.branch_id} does not exist in current version"
             )
 
         branch = persistent_branch.versions[current_version]
-        world_exists = any(pw.id == world_id_str for pw in branch.possible_worlds)
+        world_exists = any(as_world.world_id == w.id for w in branch.possible_worlds)
 
         if not world_exists:
             raise ValidationError(
                 f"Target {dependency.target_node_id} references non-existent "
-                f"possible world {world_id_str} in branch {branch_id_str}"
+                f"possible world {as_world.world_id} in branch {as_world.branch_id}"
             )
-    elif target_type in (NodeIdType.TASK, NodeIdType.BRANCH):
-        # Regular node reference - must exist in node_map
-        target_node_id = str_to_node_id(target_str)
+    else:
+        if as_task is not None:
+            as_node_id: NodeId = as_task
+        elif as_branch is not None:
+            as_node_id = as_branch
+        else:
+            ValidationError(f"Forgot to add pattern for: {dependency.target_node_id}")
+            raise AssertionError(
+                "Forgot to add pattern for: {dependency.target_node_id}"
+            )
 
-        target_persistent_id = project.dag.node_map.get(target_node_id)
+        target_persistent_id = project.dag.node_map.get(as_node_id)
         if target_persistent_id is None:
-            raise ValidationError(f"Target node {target_node_id} does not exist")
+            raise ValidationError(f"Target node {as_node_id} does not exist")
 
         # Verify type matches
-        if target_type == NodeIdType.TASK:
+        if as_task is not None:
             if target_persistent_id not in project.persistent_tasks:
-                raise ValidationError(f"Node {target_node_id} is not a task")
+                raise ValidationError(f"Node {as_node_id} is not a task")
         else:  # BRANCH
             if target_persistent_id not in project.persistent_branches:
-                raise ValidationError(f"Node {target_node_id} is not a branch")
-    else:
-        raise ValidationError(f"Unknown target type: {target_type}")
+                raise ValidationError(f"Node {as_node_id} is not a branch")
 
     # Validate endpoint compatibility
     # Tasks have START and END endpoints
@@ -424,7 +439,7 @@ def validate_dependency(
             f"Task {source_node_id} cannot use OCCURRENCE endpoint (only branches can)"
         )
 
-    if not source_is_task and dependency.source_endpoint in (
+    if source_is_branch and dependency.source_endpoint in (
         Endpoint.START,
         Endpoint.END,
     ):
@@ -433,25 +448,19 @@ def validate_dependency(
         )
 
     # Target endpoint validation
-    if (
-        target_type == NodeIdType.TASK
-        and dependency.target_endpoint == Endpoint.OCCURRENCE
-    ):
+    if as_task is not None and dependency.target_endpoint == Endpoint.OCCURRENCE:
         raise EndpointError(
             f"Task {dependency.target_node_id} cannot use OCCURRENCE endpoint "
             f"(only branches/possible worlds can)"
         )
 
-    if (
-        target_type == NodeIdType.POSSIBLE_WORLD_REFERENCE
-        and dependency.target_endpoint != Endpoint.OCCURRENCE
-    ):
+    if as_world is not None and dependency.target_endpoint != Endpoint.OCCURRENCE:
         raise EndpointError(
             f"Possible world {dependency.target_node_id} can only use OCCURRENCE "
             f"endpoint"
         )
 
-    if target_type == NodeIdType.BRANCH and dependency.target_endpoint in (
+    if as_branch is not None and dependency.target_endpoint in (
         Endpoint.START,
         Endpoint.END,
     ):

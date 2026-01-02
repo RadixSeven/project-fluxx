@@ -944,11 +944,10 @@ def add_sibling_subtask(
         DAGOperationError: If the task doesn't have a parent or doesn't exist
     """
     # Validate task exists and has a parent
-    node_id = task_id
-    if node_id not in project.dag.node_map:
+    if task_id not in project.dag.node_map:
         raise DAGOperationError(f"Task {task_id} not found")
 
-    persistent_id = project.dag.node_map[node_id]
+    persistent_id = project.dag.node_map[task_id]
     if persistent_id not in project.persistent_tasks:
         raise DAGOperationError(f"Task {task_id} is not a task")
 

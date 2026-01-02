@@ -13,15 +13,11 @@ from PySide6.QtWidgets import (
 )
 
 from fluxx.data.models import (
-    BranchId,
     ConstraintType,
     Dependency,
     DependencyTargetId,
     Endpoint,
-    NodeIdType,
-    PossibleWorldId,
-    TaskId,
-    get_node_id_type,
+    type_explode_id,
 )
 from fluxx.gui.controller import ProjectController
 
@@ -169,21 +165,19 @@ class DependencyEditorWidget(QWidget):
         current_version = project.dag.current_version_id
 
         # Determine node type using type-safe function
-        node_str = str(node_id)
 
         try:
-            node_type = get_node_id_type(node_str)
+            as_task, as_branch, as_world = type_explode_id(node_id)
         except ValueError:
             # Invalid node ID pattern
             self.target_display.setText("<Invalid node>")
             self.target_display.setStyleSheet("color: red; font-style: italic;")
             return
 
-        if node_type == NodeIdType.POSSIBLE_WORLD_REFERENCE:
+        if as_world is not None:
             # Parse possible world reference
-            branch_id_str, world_id_str = node_str.split(":", 1)
-            branch_node_id = BranchId(branch_id_str)
-            pw_id = PossibleWorldId(world_id_str)
+            branch_node_id = as_world.branch_id
+            pw_id = as_world.world_id
 
             # Find the branch and possible world
             branch_persistent_id = project.dag.node_map.get(branch_node_id)
@@ -224,9 +218,9 @@ class DependencyEditorWidget(QWidget):
             self.target_display.setStyleSheet("color: red; font-style: italic;")
             return
 
-        elif node_type == NodeIdType.TASK:
+        elif as_task is not None:
             # Regular task node
-            task_node_id = TaskId(node_str)
+            task_node_id = as_task
             persistent_id = project.dag.node_map.get(task_node_id)
 
             if persistent_id is not None and persistent_id in project.persistent_tasks:
@@ -248,9 +242,9 @@ class DependencyEditorWidget(QWidget):
                     self._on_field_changed()
                     return
 
-        elif node_type == NodeIdType.BRANCH:
+        elif as_branch is not None:
             # Regular branch node
-            branch_node_id_2 = BranchId(node_str)
+            branch_node_id_2 = as_branch
             persistent_id = project.dag.node_map.get(branch_node_id_2)
 
             if (

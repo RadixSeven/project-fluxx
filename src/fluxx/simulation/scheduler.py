@@ -6,7 +6,6 @@ designed to be small and focused for easy testing.
 """
 
 from dataclasses import dataclass
-from typing import cast
 
 import numpy as np
 
@@ -15,10 +14,10 @@ from fluxx.data.models import (
     Dependency,
     Endpoint,
     NodeId,
-    PossibleWorldId,
     Task,
     TaskId,
     WorkerId,
+    type_explode_id,
 )
 from fluxx.simulation.state import SimulationState
 
@@ -89,18 +88,14 @@ def is_dependency_satisfied(
         True if the dependency is satisfied, False otherwise
     """
     target_node_id = dep.target_node_id
-    node_str = str(target_node_id)
+    as_task, as_branch, as_world = type_explode_id(target_node_id)
 
     # Check if this is a possible world reference (format: "branch_id:world_id")
-    if ":" in node_str:
-        # Extract branch and world IDs
-        branch_id_str, world_id_str = node_str.split(":", 1)
-        branch_id = BranchId(branch_id_str)
-        branch_node_id: NodeId = branch_id
-        world_id = PossibleWorldId(world_id_str)
+    if as_world is not None:
+        branch_id, world_id = as_world
 
         # Check that the branch exists
-        if not is_branch_node(branch_node_id, state):
+        if not is_branch_node(branch_id, state):
             return False
 
         # Branch must be resolved to this specific world
@@ -108,15 +103,11 @@ def is_dependency_satisfied(
             return False
         return state.resolved_branches[branch_id] == world_id
 
-    node_id = cast(NodeId, target_node_id)
-
     # Check if target is a task
-    if is_task_node(node_id, state):
-        task_id = TaskId(node_str)
-
+    if as_task is not None and is_task_node(as_task, state):
         # Get the task to check if it's a parent task
         try:
-            target_task = state.get_task(task_id)
+            target_task = state.get_task(as_task)
         except KeyError:
             return False
 
@@ -132,13 +123,13 @@ def is_dependency_satisfied(
                 )
             else:
                 # Regular task must be completed
-                return state.is_task_completed(task_id)
+                return state.is_task_completed(as_task)
         elif is_dependency_on_task_start(dep):
             if is_parent_task:
                 # Parent task START depends on whether source is a child or not
                 # If source is a child: always satisfied (children can start freely)
                 # If source is not a child: satisfied when any child has started
-                if source_task and source_task.parent_id == task_id:
+                if source_task and source_task.parent_id == as_task:
                     # Source is a child of this parent - always satisfied
                     # This allows children to start, which causes parent to "start"
                     return True
@@ -150,16 +141,15 @@ def is_dependency_satisfied(
                     )
             else:
                 # Regular task must have started (in progress or completed)
-                return state.has_task_started(task_id)
+                return state.has_task_started(as_task)
         else:
             # Unknown endpoint for task
             return False
 
     # Check if target is a branch (just the branch itself, not a specific world)
-    elif is_branch_node(node_id, state):
+    elif as_branch is not None and is_branch_node(as_branch, state):
         # This is a branch ID - just check if resolved
-        branch_id = BranchId(node_str)
-        return branch_id in state.resolved_branches
+        return as_branch in state.resolved_branches
 
     # Unknown node type
     return False

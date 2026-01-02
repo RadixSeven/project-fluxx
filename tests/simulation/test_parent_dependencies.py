@@ -35,24 +35,24 @@ def test_child_tasks_depend_on_parent_start() -> None:
     """
     # Create parent task B with children B.1 and B.2
     task_b = Task(
-        id=TaskId("B"),
+        id=TaskId("t_B"),
         title="B",
         description="Parent task",
         duration_distribution=None,  # Parent has no distribution
-        children=[TaskId("B.1"), TaskId("B.2")],
+        children=[TaskId("t_B.1"), TaskId("t_B.2")],
     )
 
     # Child B.1 depends on parent B's START
     task_b1 = Task(
-        id=TaskId("B.1"),
+        id=TaskId("t_B.1"),
         title="B.1",
         description="Child 1",
-        parent_id=TaskId("B"),
+        parent_id=TaskId("t_B"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=TaskId("B"),
+                target_node_id=TaskId("t_B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -61,15 +61,15 @@ def test_child_tasks_depend_on_parent_start() -> None:
 
     # Child B.2 depends on parent B's START
     task_b2 = Task(
-        id=TaskId("B.2"),
+        id=TaskId("t_B.2"),
         title="B.2",
         description="Child 2",
-        parent_id=TaskId("B"),
+        parent_id=TaskId("t_B"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=TaskId("B"),
+                target_node_id=TaskId("t_B"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -80,13 +80,13 @@ def test_child_tasks_depend_on_parent_start() -> None:
     task_b.dependencies = [
         Dependency(
             source_endpoint=Endpoint.END,
-            target_node_id=TaskId("B.1"),
+            target_node_id=TaskId("t_B.1"),
             target_endpoint=Endpoint.END,
             constraint_type=ConstraintType.GREATER_EQUAL,
         ),
         Dependency(
             source_endpoint=Endpoint.END,
-            target_node_id=TaskId("B.2"),
+            target_node_id=TaskId("t_B.2"),
             target_endpoint=Endpoint.END,
             constraint_type=ConstraintType.GREATER_EQUAL,
         ),
@@ -112,9 +112,9 @@ def test_child_tasks_depend_on_parent_start() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("B"): PersistentObjectId("pB"),
-            TaskId("B.1"): PersistentObjectId("pB.1"),
-            TaskId("B.2"): PersistentObjectId("pB.2"),
+            TaskId("t_B"): PersistentObjectId("pB"),
+            TaskId("t_B.1"): PersistentObjectId("pB.1"),
+            TaskId("t_B.2"): PersistentObjectId("pB.2"),
         },
     )
 
@@ -149,8 +149,8 @@ def test_child_tasks_depend_on_parent_start() -> None:
 
     # Should have events for B.1 and B.2 (children), but NOT for B (parent)
     task_ids_in_events = {event.node_id for event in sample.events}
-    assert TaskId("B.1") in task_ids_in_events
-    assert TaskId("B.2") in task_ids_in_events
+    assert TaskId("t_B.1") in task_ids_in_events
+    assert TaskId("t_B.2") in task_ids_in_events
 
 
 def test_non_child_waits_for_parent_start() -> None:
@@ -160,31 +160,31 @@ def test_non_child_waits_for_parent_start() -> None:
     """
     # Create parent task P with child P.1
     task_p = Task(
-        id=TaskId("P"),
+        id=TaskId("t_P"),
         title="P",
         description="Parent task",
         duration_distribution=None,
-        children=[TaskId("P.1")],
+        children=[TaskId("t_P.1")],
     )
 
     task_p1 = Task(
-        id=TaskId("P.1"),
+        id=TaskId("t_P.1"),
         title="P.1",
         description="Child of P",
-        parent_id=TaskId("P"),
+        parent_id=TaskId("t_P"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Task X depends on parent P's START (not a child of P)
     task_x = Task(
-        id=TaskId("X"),
+        id=TaskId("t_X"),
         title="X",
         description="Task waiting for parent to start",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
         dependencies=[
             Dependency(
                 source_endpoint=Endpoint.START,
-                target_node_id=TaskId("P"),
+                target_node_id=TaskId("t_P"),
                 target_endpoint=Endpoint.START,
                 constraint_type=ConstraintType.GREATER_EQUAL,
             )
@@ -195,7 +195,7 @@ def test_non_child_waits_for_parent_start() -> None:
     task_p.dependencies = [
         Dependency(
             source_endpoint=Endpoint.END,
-            target_node_id=TaskId("P.1"),
+            target_node_id=TaskId("t_P.1"),
             target_endpoint=Endpoint.END,
             constraint_type=ConstraintType.GREATER_EQUAL,
         ),
@@ -221,9 +221,9 @@ def test_non_child_waits_for_parent_start() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("P"): PersistentObjectId("pP"),
-            TaskId("P.1"): PersistentObjectId("pP.1"),
-            TaskId("X"): PersistentObjectId("pX"),
+            TaskId("t_P"): PersistentObjectId("pP"),
+            TaskId("t_P.1"): PersistentObjectId("pP.1"),
+            TaskId("t_X"): PersistentObjectId("pX"),
         },
     )
 
@@ -260,17 +260,17 @@ def test_non_child_waits_for_parent_start() -> None:
 
     # All tasks should have completed
     task_ids_in_events = {event.node_id for event in sample.events}
-    assert TaskId("P.1") in task_ids_in_events
-    assert TaskId("X") in task_ids_in_events
+    assert TaskId("t_P.1") in task_ids_in_events
+    assert TaskId("t_X") in task_ids_in_events
 
     # Verify timing: X should start after P.1 starts
     p1_start_time = None
     x_start_time = None
 
     for event in sample.events:
-        if event.node_id == TaskId("P.1") and event.event_type == "start":
+        if event.node_id == TaskId("t_P.1") and event.event_type == "start":
             p1_start_time = event.timestamp
-        if event.node_id == TaskId("X") and event.event_type == "start":
+        if event.node_id == TaskId("t_X") and event.event_type == "start":
             x_start_time = event.timestamp
 
     assert p1_start_time is not None, "P.1 should have started"

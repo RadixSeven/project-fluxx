@@ -15,14 +15,22 @@ if TYPE_CHECKING:
     from pytestqt.qtbot import QtBot
 
 
+def _set_check_unsaved_changes(
+    monkeypatch: pytest.MonkeyPatch, window: MainWindow, value: bool
+) -> MagicMock:
+    mock = MagicMock(return_value=value)
+    monkeypatch.setattr(window, "_check_unsaved_changes", mock)
+    return mock
+
+
 @pytest.fixture
-def window(qtbot: "QtBot") -> Generator[MainWindow]:
+def window(qtbot: "QtBot", monkeypatch: pytest.MonkeyPatch) -> Generator[MainWindow]:
     """Create a MainWindow for testing."""
     win = MainWindow()
     qtbot.addWidget(win)
     # Mock _check_unsaved_changes to always return True (discard changes)
     # This prevents the unsaved changes modal from appearing during test cleanup
-    win._check_unsaved_changes = MagicMock(return_value=True)  # type: ignore[method-assign]
+    _set_check_unsaved_changes(monkeypatch, win, True)
     yield win
 
 
@@ -49,7 +57,7 @@ def test_menu_bar_creation(window: MainWindow) -> None:
     for action in menubar.actions():
         text = action.text()
         if text == "&File":
-            # Cast needed: PySide6 stubs incorrectly type menu() as returning QObject
+            # Need cast: PySide6 stubs incorrectly type menu() as returning QObject
             file_menu = cast(QMenu | None, action.menu())
             # Check File menu actions immediately while menu is valid
             if file_menu is not None:
@@ -61,7 +69,7 @@ def test_menu_bar_creation(window: MainWindow) -> None:
                 assert "E&xit" in file_actions
                 file_menu_found = True
         elif text == "&Edit":
-            # Cast needed: PySide6 stubs incorrectly type menu() as returning QObject
+            # Need cast: PySide6 stubs incorrectly type menu() as returning QObject
             edit_menu = cast(QMenu | None, action.menu())
             # Check Edit menu actions immediately while menu is valid
             if edit_menu is not None:
@@ -260,7 +268,9 @@ def test_open_with_file_dialog(
         mock_critical.assert_not_called()
 
 
-def test_unsaved_changes_on_new(window: MainWindow) -> None:
+def test_unsaved_changes_on_new(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test unsaved changes warning on New."""
     # Create task to make project modified
     window.controller.create_task(
@@ -269,19 +279,21 @@ def test_unsaved_changes_on_new(window: MainWindow) -> None:
     )
 
     # Mock _check_unsaved_changes to return True (discard changes)
-    window._check_unsaved_changes = MagicMock(return_value=True)  # type: ignore[method-assign]
+    check_mock = _set_check_unsaved_changes(monkeypatch, window, True)
 
     # Trigger new
     window._on_new()
 
     # Should have called check method
-    window._check_unsaved_changes.assert_called_once()
+    check_mock.assert_called_once()
 
     # Should have created new project
     assert len(window.controller.get_project().dag.node_map) == 0
 
 
-def test_unsaved_changes_on_new_cancel(window: MainWindow) -> None:
+def test_unsaved_changes_on_new_cancel(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test canceling unsaved changes warning on New."""
     # Create task
     task_id = window.controller.create_task(
@@ -290,19 +302,21 @@ def test_unsaved_changes_on_new_cancel(window: MainWindow) -> None:
     )
 
     # Mock _check_unsaved_changes to return False (cancel)
-    window._check_unsaved_changes = MagicMock(return_value=False)  # type: ignore[method-assign]
+    check_mock = _set_check_unsaved_changes(monkeypatch, window, False)
 
     # Trigger new
     window._on_new()
 
     # Should have called check method
-    window._check_unsaved_changes.assert_called_once()
+    check_mock.assert_called_once()
 
     # Should NOT have created new project (task still exists)
     assert task_id in window.controller.get_project().dag.node_map
 
 
-def test_unsaved_changes_on_new_save(window: MainWindow) -> None:
+def test_unsaved_changes_on_new_save(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test saving via unsaved changes warning on New."""
     with TemporaryDirectory() as tmpdir:
         file_path = Path(tmpdir) / "test.fluxx"
@@ -321,13 +335,13 @@ def test_unsaved_changes_on_new_save(window: MainWindow) -> None:
         )
 
         # Mock _check_unsaved_changes to return True (saved successfully)
-        window._check_unsaved_changes = MagicMock(return_value=True)  # type: ignore[method-assign]
+        check_mock = _set_check_unsaved_changes(monkeypatch, window, True)
 
         # Trigger new
         window._on_new()
 
         # Should have called check method
-        window._check_unsaved_changes.assert_called_once()
+        check_mock.assert_called_once()
 
         # Should have created new project
         assert len(window.controller.get_project().dag.node_map) == 0
@@ -397,7 +411,9 @@ def test_two_panel_layout(window: MainWindow) -> None:
     assert window.editor_panel is not None
 
 
-def test_close_event_with_unsaved_changes(window: MainWindow, qtbot: "QtBot") -> None:
+def test_close_event_with_unsaved_changes(
+    window: MainWindow, qtbot: "QtBot", monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test close event with unsaved changes."""
     # Create task to make project modified
     window.controller.create_task(
@@ -406,16 +422,18 @@ def test_close_event_with_unsaved_changes(window: MainWindow, qtbot: "QtBot") ->
     )
 
     # Mock _check_unsaved_changes to return True (discard changes)
-    window._check_unsaved_changes = MagicMock(return_value=True)  # type: ignore[method-assign]
+    check_mock = _set_check_unsaved_changes(monkeypatch, window, True)
 
     # Trigger close
     window.close()
 
     # Should have called check method
-    window._check_unsaved_changes.assert_called_once()
+    check_mock.assert_called_once()
 
 
-def test_close_event_cancel(window: MainWindow, qtbot: "QtBot") -> None:
+def test_close_event_cancel(
+    window: MainWindow, qtbot: "QtBot", monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Test canceling close event with unsaved changes."""
     # Create task to make project modified
     window.controller.create_task(
@@ -424,7 +442,7 @@ def test_close_event_cancel(window: MainWindow, qtbot: "QtBot") -> None:
     )
 
     # Mock _check_unsaved_changes to return False (cancel)
-    window._check_unsaved_changes = MagicMock(return_value=False)  # type: ignore[method-assign]
+    check_mock = _set_check_unsaved_changes(monkeypatch, window, False)
 
     # Create close event
     from PySide6.QtGui import QCloseEvent
@@ -435,7 +453,7 @@ def test_close_event_cancel(window: MainWindow, qtbot: "QtBot") -> None:
     window.closeEvent(event)
 
     # Should have called check method
-    window._check_unsaved_changes.assert_called_once()
+    check_mock.assert_called_once()
 
     # Event should be ignored (not accepted)
     assert event.isAccepted() is False

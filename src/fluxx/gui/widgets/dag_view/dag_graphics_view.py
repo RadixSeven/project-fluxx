@@ -1,17 +1,15 @@
 """Graphics view for DAG visualization."""
 
-from typing import cast
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPen, QWheelEvent
 from PySide6.QtWidgets import QGraphicsLineItem, QGraphicsScene, QGraphicsView
 
 from fluxx.data.models import (
-    BranchId,
     NodeId,
     PossibleWorldId,
     PossibleWorldReference,
     Project,
+    extract_node_id,
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.utils.layout import compute_dag_layout
@@ -212,13 +210,7 @@ class DAGGraphicsView(QGraphicsView):
             # Create edge items for each dependency
             for dep in dependencies:
                 # Skip if source or target node not in view
-                target_str = str(dep.target_node_id)
-                target_node_id: NodeId
-                if ":" in target_str:
-                    branch_id_str, _ = target_str.split(":", 1)
-                    target_node_id = BranchId(branch_id_str)
-                else:
-                    target_node_id = cast(NodeId, dep.target_node_id)
+                target_node_id = extract_node_id(dep.target_node_id)
 
                 if (
                     node_id not in self.node_items

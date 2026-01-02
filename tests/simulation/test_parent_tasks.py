@@ -30,26 +30,26 @@ def test_simulation_with_parent_task_should_skip_parent() -> None:
     """
     # Create a parent task B with two children B.1 and B.2
     task_b = Task(
-        id=TaskId("B"),
+        id=TaskId("t_B"),
         title="B",
         description="Parent task",
         duration_distribution=None,  # Parent has no distribution!
-        children=[TaskId("B.1"), TaskId("B.2")],
+        children=[TaskId("t_B.1"), TaskId("t_B.2")],
     )
 
     task_b1 = Task(
-        id=TaskId("B.1"),
+        id=TaskId("t_B.1"),
         title="B.1",
         description="Child 1",
-        parent_id=TaskId("B"),
+        parent_id=TaskId("t_B"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     task_b2 = Task(
-        id=TaskId("B.2"),
+        id=TaskId("t_B.2"),
         title="B.2",
         description="Child 2",
-        parent_id=TaskId("B"),
+        parent_id=TaskId("t_B"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -73,9 +73,9 @@ def test_simulation_with_parent_task_should_skip_parent() -> None:
         id=DAGId("dag1"),
         current_version_id=version_id,
         node_map={
-            TaskId("B"): PersistentObjectId("pB"),
-            TaskId("B.1"): PersistentObjectId("pB.1"),
-            TaskId("B.2"): PersistentObjectId("pB.2"),
+            TaskId("t_B"): PersistentObjectId("pB"),
+            TaskId("t_B.1"): PersistentObjectId("pB.1"),
+            TaskId("t_B.2"): PersistentObjectId("pB.2"),
         },
     )
 
@@ -109,7 +109,7 @@ def test_simulation_with_parent_task_should_skip_parent() -> None:
 
     # Should have events for B.1 and B.2 (children), but NOT for B (parent)
     task_ids_in_events = {event.node_id for event in sample.events}
-    assert TaskId("B.1") in task_ids_in_events
-    assert TaskId("B.2") in task_ids_in_events
+    assert TaskId("t_B.1") in task_ids_in_events
+    assert TaskId("t_B.2") in task_ids_in_events
     # Parent task B should not have start/complete events
     # (its times are inferred from children)

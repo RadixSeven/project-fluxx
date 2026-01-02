@@ -202,7 +202,7 @@ def test_is_task_node(
 
     assert is_task_node(TaskId("t1"), state)
     assert is_task_node(TaskId("t2"), state)
-    assert not is_task_node(TaskId("nonexistent"), state)
+    assert not is_task_node(TaskId("t_nonexistent"), state)
 
 
 def test_is_branch_node(
@@ -229,7 +229,7 @@ def test_is_branch_node(
 
     assert is_branch_node(BranchId("b1"), state)
     assert not is_branch_node(TaskId("t1"), state)
-    assert not is_branch_node(BranchId("nonexistent"), state)
+    assert not is_branch_node(BranchId("b_nonexistent"), state)
 
 
 # Tests for dependency satisfaction
@@ -370,7 +370,7 @@ def test_is_dependency_satisfied_unknown_node(
 
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=TaskId("nonexistent"),
+        target_node_id=TaskId("t_nonexistent"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -484,7 +484,7 @@ def test_is_worker_excluded_nonexistent_task(
         title="Task 3",
         description="Test task",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
-        excluded_worker_tasks=[TaskId("nonexistent")],
+        excluded_worker_tasks=[TaskId("t_nonexistent")],
     )
 
     # Should not raise error, just skip the nonexistent task
@@ -741,8 +741,8 @@ def test_select_next_action_none(
 
     # Make task 2 unable to start (no workers)
     state.completed_tasks.add(TaskId("t1"))
-    state.worker_states[WorkerId("w1")].current_task = TaskId("other")
-    state.worker_states[WorkerId("w2")].current_task = TaskId("other")
+    state.worker_states[WorkerId("w1")].current_task = TaskId("t_other")
+    state.worker_states[WorkerId("w2")].current_task = TaskId("t_other")
 
     action = select_next_action(state, rng)
 
@@ -907,7 +907,7 @@ def test_is_dependency_satisfied_task_not_found(
     # Create a task that exists in persistent_tasks but NOT in current version
     old_version = DAGVersionId("v0")
     old_task = Task(
-        id=TaskId("old_task"),
+        id=TaskId("t_old_task"),
         title="Old Task",
         description="Task only in old version",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -919,13 +919,13 @@ def test_is_dependency_satisfied_task_not_found(
     )
 
     # Add to project
-    state.project.dag.node_map[TaskId("old_task")] = PersistentObjectId("pt_old")
+    state.project.dag.node_map[TaskId("t_old_task")] = PersistentObjectId("pt_old")
     state.project.persistent_tasks[PersistentObjectId("pt_old")] = persistent_old
 
     # Now is_task_node() will return True, but get_task() will raise KeyError
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=TaskId("old_task"),
+        target_node_id=TaskId("t_old_task"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -940,26 +940,26 @@ def test_is_dependency_satisfied_parent_task_end_incomplete(
     """Test parent task END dependency is not satisfied when children incomplete."""
     # Create parent task with children
     parent_task = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Parent task",
         duration_distribution=None,
-        children=[TaskId("child1"), TaskId("child2")],
+        children=[TaskId("t_child1"), TaskId("t_child2")],
     )
 
     child1 = Task(
-        id=TaskId("child1"),
+        id=TaskId("t_child1"),
         title="Child 1",
         description="First child",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     child2 = Task(
-        id=TaskId("child2"),
+        id=TaskId("t_child2"),
         title="Child 2",
         description="Second child",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -974,9 +974,9 @@ def test_is_dependency_satisfied_parent_task_end_incomplete(
             id=DAGId("dag1"),
             current_version_id=version_id,
             node_map={
-                TaskId("parent"): PersistentObjectId("pp"),
-                TaskId("child1"): PersistentObjectId("pc1"),
-                TaskId("child2"): PersistentObjectId("pc2"),
+                TaskId("t_parent"): PersistentObjectId("pp"),
+                TaskId("t_child1"): PersistentObjectId("pc1"),
+                TaskId("t_child2"): PersistentObjectId("pc2"),
             },
         ),
         persistent_tasks={
@@ -997,7 +997,7 @@ def test_is_dependency_satisfied_parent_task_end_incomplete(
     # Dependency on parent task END
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=TaskId("parent"),
+        target_node_id=TaskId("t_parent"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
@@ -1006,7 +1006,7 @@ def test_is_dependency_satisfied_parent_task_end_incomplete(
     assert not is_dependency_satisfied(dep, state)
 
     # Complete child1 but not child2 - still not satisfied
-    state.completed_tasks.add(TaskId("child1"))
+    state.completed_tasks.add(TaskId("t_child1"))
     assert not is_dependency_satisfied(dep, state)
 
 
@@ -1016,26 +1016,26 @@ def test_is_dependency_satisfied_parent_task_end_complete(
     """Test parent task END dependency is satisfied when all children complete."""
     # Create parent task with children
     parent_task = Task(
-        id=TaskId("parent"),
+        id=TaskId("t_parent"),
         title="Parent",
         description="Parent task",
         duration_distribution=None,
-        children=[TaskId("child1"), TaskId("child2")],
+        children=[TaskId("t_child1"), TaskId("t_child2")],
     )
 
     child1 = Task(
-        id=TaskId("child1"),
+        id=TaskId("t_child1"),
         title="Child 1",
         description="First child",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     child2 = Task(
-        id=TaskId("child2"),
+        id=TaskId("t_child2"),
         title="Child 2",
         description="Second child",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -1050,9 +1050,9 @@ def test_is_dependency_satisfied_parent_task_end_complete(
             id=DAGId("dag1"),
             current_version_id=version_id,
             node_map={
-                TaskId("parent"): PersistentObjectId("pp"),
-                TaskId("child1"): PersistentObjectId("pc1"),
-                TaskId("child2"): PersistentObjectId("pc2"),
+                TaskId("t_parent"): PersistentObjectId("pp"),
+                TaskId("t_child1"): PersistentObjectId("pc1"),
+                TaskId("t_child2"): PersistentObjectId("pc2"),
             },
         ),
         persistent_tasks={
@@ -1073,14 +1073,14 @@ def test_is_dependency_satisfied_parent_task_end_complete(
     # Dependency on parent task END
     dep = Dependency(
         source_endpoint=Endpoint.START,
-        target_node_id=TaskId("parent"),
+        target_node_id=TaskId("t_parent"),
         target_endpoint=Endpoint.END,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
 
     # Complete both children - dependency satisfied
-    state.completed_tasks.add(TaskId("child1"))
-    state.completed_tasks.add(TaskId("child2"))
+    state.completed_tasks.add(TaskId("t_child1"))
+    state.completed_tasks.add(TaskId("t_child2"))
     assert is_dependency_satisfied(dep, state)
 
 
@@ -1124,7 +1124,7 @@ def test_is_branch_eligible_nonexistent_branch(
     state = SimulationState(simple_project, start_date, base_workers)
 
     # Branch that doesn't exist in the project
-    nonexistent_branch = BranchId("nonexistent")
+    nonexistent_branch = BranchId("b_nonexistent")
 
     # Should return False for nonexistent branches
     assert not is_branch_eligible(nonexistent_branch, state)

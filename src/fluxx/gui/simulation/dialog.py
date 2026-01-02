@@ -35,7 +35,7 @@ class SimulationDialog(QDialog):
             with list of Sample objects as parameter
     """
 
-    simulation_completed = Signal(list)  # list[Sample]
+    simulation_completed: Signal = Signal(list)
 
     def __init__(self, project: Project, parent: QWidget | None = None) -> None:
         """Initialize the simulation dialog.

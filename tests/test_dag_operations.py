@@ -463,7 +463,7 @@ def test_add_dependency_with_nonexistent_source(empty_project: Project) -> None:
     )
 
     with pytest.raises(DAGOperationError, match="Source node.*does not exist"):
-        add_dependency(project, TaskId("nonexistent"), dep)
+        add_dependency(project, TaskId("t_nonexistent"), dep)
 
 
 def test_add_dependency_to_branch(empty_project: Project) -> None:
@@ -563,7 +563,7 @@ def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
     from fluxx.data.models import PersistentBranch
 
     corrupted_branch = Branch(
-        id=BranchId("corrupt"),
+        id=BranchId("b_corrupt"),
         title="Corrupt",
         description="Test",
         possible_worlds=[
@@ -573,7 +573,7 @@ def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
             # Self-reference creates a cycle
             Dependency(
                 source_endpoint=Endpoint.OCCURRENCE,
-                target_node_id=BranchId("corrupt"),
+                target_node_id=BranchId("b_corrupt"),
                 target_endpoint=Endpoint.OCCURRENCE,
                 constraint_type=ConstraintType.EQUAL,
             )
@@ -592,7 +592,7 @@ def test_add_branch_that_creates_invalid_dag(empty_project: Project) -> None:
             update={
                 "node_map": {
                     **project.dag.node_map,
-                    BranchId("corrupt"): persistent_corrupt.id,
+                    BranchId("b_corrupt"): persistent_corrupt.id,
                 }
             }
         ),
@@ -704,7 +704,7 @@ def test_update_task_nonexistent(empty_project: Project) -> None:
     with pytest.raises(DAGOperationError, match="Task.*not found"):
         update_task(
             empty_project,
-            TaskId("nonexistent"),
+            TaskId("t_nonexistent"),
             title="New Title",
         )
 
@@ -816,7 +816,7 @@ def test_update_branch_nonexistent(empty_project: Project) -> None:
     with pytest.raises(DAGOperationError, match="Branch.*not found"):
         update_branch(
             empty_project,
-            BranchId("nonexistent"),
+            BranchId("b_nonexistent"),
             title="New Title",
         )
 
@@ -917,7 +917,7 @@ def test_remove_dependency_nonexistent_node(empty_project: Project) -> None:
     )
 
     with pytest.raises(DAGOperationError, match="Node.*not found"):
-        remove_dependency(empty_project, TaskId("nonexistent"), dep)
+        remove_dependency(empty_project, TaskId("t_nonexistent"), dep)
 
 
 def test_remove_dependency_preserves_other_dependencies(empty_project: Project) -> None:
@@ -1051,7 +1051,7 @@ def test_convert_to_parent_fails_if_already_parent(empty_project: Project) -> No
 def test_convert_to_parent_fails_if_task_not_found(empty_project: Project) -> None:
     """Test that converting a non-existent task fails."""
     with pytest.raises(DAGOperationError, match="not found"):
-        convert_to_parent_task(empty_project, TaskId("nonexistent"), "Child")
+        convert_to_parent_task(empty_project, TaskId("t_nonexistent"), "Child")
 
 
 def test_add_sibling_creates_sibling(empty_project: Project) -> None:
@@ -1128,7 +1128,7 @@ def test_add_sibling_fails_if_not_subtask(empty_project: Project) -> None:
 def test_add_sibling_fails_if_task_not_found(empty_project: Project) -> None:
     """Test that adding a sibling to a non-existent task fails."""
     with pytest.raises(DAGOperationError, match="not found"):
-        add_sibling_subtask(empty_project, TaskId("nonexistent"), "Sibling", None)
+        add_sibling_subtask(empty_project, TaskId("t_nonexistent"), "Sibling", None)
 
 
 def test_convert_to_parent_fails_if_branch_not_task(empty_project: Project) -> None:
@@ -1203,8 +1203,9 @@ def test_convert_to_parent_uses_default_distribution_when_none(
     from fluxx.data.models import ShiftedLognormal
 
     # Create a leaf task with no distribution
+    leaf_id = TaskId("t1")
     leaf = Task(
-        id=TaskId("leaf"),
+        id=leaf_id,
         title="Leaf",
         description="Test",
         duration_distribution=None,  # No distribution
@@ -1217,14 +1218,14 @@ def test_convert_to_parent_uses_default_distribution_when_none(
     project_with_leaf = Project(
         **empty_project.model_dump(exclude={"persistent_tasks", "dag"}),
         dag=empty_project.dag.model_copy(
-            update={"node_map": {TaskId("leaf"): PersistentObjectId("pl")}}
+            update={"node_map": {leaf_id: PersistentObjectId("pl")}}
         ),
         persistent_tasks={PersistentObjectId("pl"): persistent_leaf},
     )
 
     # Convert to parent - should use default distribution for child
     updated_project, child_id = convert_to_parent_task(
-        project_with_leaf, TaskId("leaf"), "New Child"
+        project_with_leaf, leaf_id, "New Child"
     )
 
     # Verify child has the default distribution
@@ -1262,7 +1263,7 @@ def test_convert_to_parent_with_old_version_tasks_and_branches(
 
     # Create an old task that's not in current version
     old_task = Task(
-        id=TaskId("old_task"),
+        id=TaskId("t_old_task"),
         title="Old Task",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -1270,7 +1271,7 @@ def test_convert_to_parent_with_old_version_tasks_and_branches(
 
     # Create an old branch that's not in current version
     old_branch = Branch(
-        id=BranchId("old_branch"),
+        id=BranchId("b_old_branch"),
         title="Old Branch",
         description="Test",
         possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="Option A")],
@@ -1297,8 +1298,8 @@ def test_convert_to_parent_with_old_version_tasks_and_branches(
             update={
                 "node_map": {
                     TaskId("t1"): PersistentObjectId("pt1"),
-                    TaskId("old_task"): PersistentObjectId("pot"),
-                    BranchId("old_branch"): PersistentObjectId("pob"),
+                    TaskId("t_old_task"): PersistentObjectId("pot"),
+                    BranchId("b_old_branch"): PersistentObjectId("pob"),
                 }
             }
         ),
@@ -1360,7 +1361,7 @@ def test_add_sibling_fails_if_not_in_current_version(empty_project: Project) -> 
         id=TaskId("t1"),
         title="Task",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=TaskId("t_parent"),
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
@@ -1394,31 +1395,35 @@ def test_add_sibling_with_old_version_tasks_and_branches(
     )
 
     # Create parent and child
+    parent_id = TaskId("t100")
+    child1_id = TaskId("t200")
     parent = Task(
-        id=TaskId("parent"),
+        id=parent_id,
         title="Parent",
         description="Test",
-        children=[TaskId("child1")],
+        children=[child1_id],
     )
     child1 = Task(
-        id=TaskId("child1"),
+        id=child1_id,
         title="Child 1",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=parent_id,
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Create an old task that's not in current version
+    old_task_id = TaskId("t0")
     old_task = Task(
-        id=TaskId("old_task"),
+        id=old_task_id,
         title="Old Task",
         description="Test",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Create an old branch that's not in current version
+    old_branch_id = BranchId("b0")
     old_branch = Branch(
-        id=BranchId("old_branch"),
+        id=old_branch_id,
         title="Old Branch",
         description="Test",
         possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="Option A")],
@@ -1448,10 +1453,10 @@ def test_add_sibling_with_old_version_tasks_and_branches(
         dag=empty_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child1"): PersistentObjectId("pc1"),
-                    TaskId("old_task"): PersistentObjectId("pot"),
-                    BranchId("old_branch"): PersistentObjectId("pob"),
+                    parent_id: PersistentObjectId("pp"),
+                    child1_id: PersistentObjectId("pc1"),
+                    old_task_id: PersistentObjectId("pot"),
+                    old_branch_id: PersistentObjectId("pob"),
                 }
             }
         ),
@@ -1465,7 +1470,7 @@ def test_add_sibling_with_old_version_tasks_and_branches(
 
     # Add sibling - should succeed and handle old versions
     updated_project, sibling_id = add_sibling_subtask(
-        project, TaskId("child1"), "Child 2", None
+        project, child1_id, "Child 2", None
     )
 
     # Verify old task/branch are still in result
@@ -1584,29 +1589,32 @@ def test_add_sibling_with_multiple_current_version_tasks(
     )
 
     # Create parent and child
+    parent_id = TaskId("t100")
+    child1_id = TaskId("t200")
     parent = Task(
-        id=TaskId("parent"),
+        id=parent_id,
         title="Parent",
         description="Test",
-        children=[TaskId("child1")],
+        children=[child1_id],
     )
     child1 = Task(
-        id=TaskId("child1"),
+        id=child1_id,
         title="Child 1",
         description="Test",
-        parent_id=TaskId("parent"),
+        parent_id=parent_id,
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     # Create a branch with both old and current versions
+    branch_id = BranchId("b1")
     branch_old = Branch(
-        id=BranchId("b1"),
+        id=branch_id,
         title="Old Branch",
         description="Old",
         possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="Option A")],
     )
     branch_current = Branch(
-        id=BranchId("b1"),
+        id=branch_id,
         title="Current Branch",
         description="Current",
         possible_worlds=[PossibleWorld(id=PossibleWorldId("pw1"), title="Option A")],
@@ -1635,9 +1643,9 @@ def test_add_sibling_with_multiple_current_version_tasks(
         dag=empty_project.dag.model_copy(
             update={
                 "node_map": {
-                    TaskId("parent"): PersistentObjectId("pp"),
-                    TaskId("child1"): PersistentObjectId("pc1"),
-                    BranchId("b1"): PersistentObjectId("pb1"),
+                    parent_id: PersistentObjectId("pp"),
+                    child1_id: PersistentObjectId("pc1"),
+                    branch_id: PersistentObjectId("pb1"),
                 }
             }
         ),
@@ -1650,7 +1658,7 @@ def test_add_sibling_with_multiple_current_version_tasks(
 
     # Add sibling - branch should be copied to new version
     updated_project, sibling_id = add_sibling_subtask(
-        project, TaskId("child1"), "Child 2", None
+        project, child1_id, "Child 2", None
     )
 
     # Verify branch has old version and new current version

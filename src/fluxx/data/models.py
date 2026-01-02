@@ -7,7 +7,7 @@ import re
 from abc import ABC
 from datetime import datetime
 from enum import Enum
-from typing import Any, NewType
+from typing import Any, NamedTuple, NewType, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -25,31 +25,107 @@ SimulationId = NewType("SimulationId", str)
 PersistentObjectId = NewType("PersistentObjectId", str)
 SampleId = NewType("SampleId", int)
 
+###
 # Union types for nodes and dependency targets
-NodeId = (
-    TaskId | BranchId
-)  # Nodes that exist in the DAG (use get_node_id_type to distinguish)
+###
+
+# Nodes that exist in the DAG (use get_node_id_type to distinguish)
+NodeId = TaskId | BranchId
+
 PossibleWorldReference = NewType(
     "PossibleWorldReference", str
 )  # Format: "branch_id:world_id"
-DependencyTargetId = (
-    NodeId | PossibleWorldReference
-)  # Things that can be dependency targets (use get_node_id_type to distinguish)
+
+# Things that can be dependency targets (use get_node_id_type to distinguish)
+DependencyTargetId = NodeId | PossibleWorldReference
 
 
-class NodeIdType(str, Enum):
-    """Type of node ID for pattern-based type discrimination."""
+class PossibleWorldReferencePair(NamedTuple):
+    branch_id: BranchId
+    world_id: PossibleWorldId
+
+
+def split_world_reference(ref: PossibleWorldReference) -> PossibleWorldReferencePair:
+    """
+    Split a possible world reference into its branch and world ID components.
+
+    Args:
+        ref: The possible world reference string
+
+    Returns:
+        A tuple containing the branch ID and world ID
+
+    Raises:
+        ValueError: If the reference does not match the expected format
+    """
+    branch_id_str, world_id_str = ref.split(":", 1)
+    return PossibleWorldReferencePair(
+        branch_id=BranchId(branch_id_str),
+        world_id=PossibleWorldId(world_id_str),
+    )
+
+
+class DependencyTargetIdType(str, Enum):
+    """Type of dependency target ID for pattern-based type discrimination."""
 
     TASK = "task"
     BRANCH = "branch"
     POSSIBLE_WORLD_REFERENCE = "possible_world_reference"
 
 
-def get_node_id_type(node_id: str) -> NodeIdType:
-    """Determine the type of a node ID based on its pattern.
+def type_explode_id(
+    ref: DependencyTargetId,
+) -> tuple[TaskId | None, BranchId | None, PossibleWorldReferencePair | None]:
+    """Return a tuple of the possible IDs ``ref`` could be. Exactly one will
+    not be None, the one with the correct type. (This throws if the ID
+    doesn't match any known pattern)
 
     Args:
-        node_id: The node ID string to check
+        ref: The dependency target ID to type-explode
+
+    Returns:
+        A tuple of the possible IDs that ``ref`` could be, with exactly
+        one element not being None -- the one with the correct type.
+
+    Raises:
+        ValueError: If the ID doesn't match any known pattern
+    """
+    # The casts are OK in this function because its purpose is
+    # validating and propagating the type information
+
+    # Check for possible world reference (contains colon)
+    if ":" in ref:
+        return None, None, split_world_reference(cast(PossibleWorldReference, ref))
+
+    # Check for task ID patterns (production and test)
+    if re.match(r"^task_\d+_[0-9a-f]+$", ref) or re.match(r"^t\d*(?:_[.\w]+)?$", ref):
+        return cast(TaskId, ref), None, None
+
+    # Check for branch ID patterns (production and test)
+    if re.match(r"^branch_\d+_[0-9a-f]+$", ref) or re.match(r"^b\d*(?:_[.\w]+)?$", ref):
+        return None, cast(BranchId, ref), None
+
+    raise ValueError(f"Unknown dependency target ID pattern: {ref}")
+
+
+def extract_node_id(id_: DependencyTargetId) -> NodeId:
+    """Extract the DAG node id from dependency target ID by using the branch part
+    of a possible world reference."""
+    as_task, as_branch, as_world = type_explode_id(id_)
+    if as_task is not None:
+        return as_task
+    if as_branch is not None:
+        return as_branch
+    if as_world is not None:
+        return as_world.branch_id
+    raise ValueError(f"Forgot to add branch to force_node_id for id type of {id_}")
+
+
+def get_dep_id_type(id_: DependencyTargetId) -> DependencyTargetIdType:
+    """Determine the type of an ID based on its pattern.
+
+    Args:
+        id_: The dependency target ID string to check
 
     Returns:
         The type of the node ID
@@ -57,23 +133,17 @@ def get_node_id_type(node_id: str) -> NodeIdType:
     Raises:
         ValueError: If the ID doesn't match any known pattern
     """
-    # Check for possible world reference (contains colon)
-    if ":" in node_id:
-        return NodeIdType.POSSIBLE_WORLD_REFERENCE
-
-    # Check for task ID patterns (production and test)
-    if re.match(r"^task_\d+_[0-9a-f]+$", node_id) or re.match(r"^t\d+$", node_id):
-        return NodeIdType.TASK
-
-    # Check for branch ID patterns (production and test)
-    if re.match(r"^branch_\d+_[0-9a-f]+$", node_id) or re.match(r"^b\d+$", node_id):
-        return NodeIdType.BRANCH
-
-    raise ValueError(f"Unknown node ID pattern: {node_id}")
+    # This will throw - so we know exactly one is not None
+    t, b, w = type_explode_id(id_)
+    if t is not None:
+        return DependencyTargetIdType.TASK
+    if b is not None:
+        return DependencyTargetIdType.BRANCH
+    return DependencyTargetIdType.POSSIBLE_WORLD_REFERENCE
 
 
 def str_to_node_id(node_id_str: str) -> NodeId:
-    """Convert a string to a properly-typed NodeId.
+    """Convert a string to a properly typed NodeId.
 
     Args:
         node_id_str: The node ID string
@@ -84,17 +154,17 @@ def str_to_node_id(node_id_str: str) -> NodeId:
     Raises:
         ValueError: If the ID doesn't match any known node pattern
     """
-    node_type = get_node_id_type(node_id_str)
+    # This cast is OK because this function is a utility to
+    # safely avoid other casts.
+    as_task, as_branch, _ = type_explode_id(cast(NodeId, node_id_str))
 
-    if node_type == NodeIdType.TASK:
-        return TaskId(node_id_str)
-    elif node_type == NodeIdType.BRANCH:
-        return BranchId(node_id_str)
-    else:
-        raise ValueError(
-            f"Cannot convert '{node_id_str}' to NodeId: "
-            f"it's a {node_type}, not a task or branch"
-        )
+    if as_task is not None:
+        return as_task
+    elif as_branch is not None:
+        return as_branch
+    raise ValueError(
+        f"Cannot convert '{node_id_str}' to NodeId: it's not a task or branch ID"
+    )
 
 
 class DurationDistribution(BaseModel, ABC):

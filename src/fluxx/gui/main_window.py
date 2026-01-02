@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
-from fluxx.data.models import NodeId, Triangular
+from fluxx.data.models import NodeId, Sample, Triangular
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.panels import DAGPanel, EditorPanel
 
@@ -529,22 +529,16 @@ class MainWindow(QMainWindow):
                 f"Failed to run simulation: {e}",
             )
 
-    def _on_simulation_completed(self, samples: list[object]) -> None:
+    def _on_simulation_completed(self, samples: list[Sample]) -> None:
         """Handle simulation completion.
 
         Args:
             samples: List of Sample objects from simulation
         """
-        from typing import cast
-
-        from fluxx.data.models import Sample
         from fluxx.gui.simulation import SimulationResultsDialog
-
-        # Cast samples list (we know it contains Sample objects from signal)
-        sample_list = cast(list[Sample], samples)
 
         # Show results in a new dialog
         results_dialog = SimulationResultsDialog(
-            sample_list, self.controller.get_project(), parent=self
+            samples, self.controller.get_project(), parent=self
         )
         results_dialog.show()

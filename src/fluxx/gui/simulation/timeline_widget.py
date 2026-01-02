@@ -90,8 +90,8 @@ class ProbabilisticTimelineWidget(QWidget):
             f"P95: {percentiles_dict[95].strftime('%Y-%m-%d')}",
             "",
             "<b>Statistics:</b>",
-            f"Mean: {stats['mean'].strftime('%Y-%m-%d')}",  # type: ignore
-            f"Std Dev: {stats['std_dev'].days} days",  # type: ignore
+            f"Mean: {stats['mean'].strftime('%Y-%m-%d')}",
+            f"Std Dev: {stats['std_dev'].days} days",
         ]
 
         self.stats_label.setText("<br>".join(lines))
