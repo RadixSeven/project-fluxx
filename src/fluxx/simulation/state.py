@@ -204,8 +204,8 @@ class SimulationState:
     def is_task_reachable(self, task_id: TaskId) -> bool:
         """Check if a task is reachable given current branch resolutions.
 
-        A task is reachable if all of its dependencies on specific possible worlds
-        point to worlds that were actually chosen.
+        A task is reachable if AT LEAST ONE of its possible world dependencies
+        points to a world that was actually chosen (OR semantics).
 
         Args:
             task_id: ID of the task to check
@@ -220,24 +220,34 @@ class SimulationState:
             # Task doesn't exist
             return False
 
-        # Check all dependencies
+        # Separate possible world dependencies from other dependencies
+        possible_world_deps = []
         for dep in task.dependencies:
-            # Check if this is a possible world reference (format: "branch_id:world_id")
             _, _, as_world = type_explode_id(dep.target_node_id)
-            if as_world is None:
-                continue
+            if as_world is not None:
+                possible_world_deps.append(as_world)
 
+        # If no possible world dependencies, task is reachable
+        if not possible_world_deps:
+            return True
+
+        # With OR semantics: at least ONE possible world dependency must be
+        # satisfied. A dependency is satisfied if:
+        # - The branch hasn't been resolved yet (still potentially satisfiable), OR
+        # - The branch was resolved to this specific world
+        for as_world in possible_world_deps:
             # Check if branch was resolved
             if as_world.branch_id not in self.resolved_branches:
                 # Branch not yet resolved - task is still potentially reachable
-                continue
+                return True
 
-            # Check if the branch was resolved to a different world
-            if self.resolved_branches[as_world.branch_id] != as_world.world_id:
-                # Task depends on a world that wasn't chosen - unreachable
-                return False
+            # Check if the branch was resolved to this world
+            if self.resolved_branches[as_world.branch_id] == as_world.world_id:
+                # This possible world was chosen - task is reachable
+                return True
 
-        return True
+        # All possible world dependencies were resolved to different worlds
+        return False
 
     def all_tasks_completed(self) -> bool:
         """Check if all reachable leaf tasks have been completed.
