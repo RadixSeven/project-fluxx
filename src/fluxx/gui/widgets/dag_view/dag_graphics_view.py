@@ -270,7 +270,7 @@ class DAGGraphicsView(QGraphicsView):
             event: Mouse event
         """
         # Check if we clicked on a node or possible world
-        item = self.itemAt(event.pos())
+        item = self.itemAt(event.position().toPoint())
 
         if isinstance(item, PossibleWorldItem):
             if self._select_target_mode:
