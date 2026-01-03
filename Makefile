@@ -1,4 +1,4 @@
-.PHONY: all_checks test coverage verify-coverage lint format type-check clean install help
+.PHONY: all_checks test coverage verify-coverage lint format type-check clean install help regenerate-suppressions
 
 # Use bash for process substitution support
 SHELL := /bin/bash
@@ -33,15 +33,16 @@ export COVERAGE_CHECK_SCRIPT
 help:
 	@echo "Project Fluxx - Makefile Commands"
 	@echo ""
-	@echo "  make all_checks      - Run all tests and static analysis, verify coverage"
-	@echo "  make test            - Run pytest with coverage"
-	@echo "  make coverage        - Show coverage report (files not at 100%)"
-	@echo "  make verify-coverage - Verify coverage thresholds and suppression list"
-	@echo "  make lint            - Run ruff linter"
-	@echo "  make format          - Format code with ruff"
-	@echo "  make type-check      - Run mypy type checker"
-	@echo "  make install         - Install package in development mode"
-	@echo "  make clean           - Remove generated files"
+	@echo "  make all_checks              - Run all tests and static analysis, verify coverage"
+	@echo "  make test                    - Run pytest with coverage"
+	@echo "  make coverage                - Show coverage report (files not at 100%)"
+	@echo "  make verify-coverage         - Verify coverage thresholds and suppression list"
+	@echo "  make lint                    - Run ruff linter"
+	@echo "  make format                  - Format code with ruff"
+	@echo "  make type-check              - Run mypy type checker"
+	@echo "  make install                 - Install package in development mode"
+	@echo "  make regenerate-suppressions - Regenerate allowed suppression list (human review required)"
+	@echo "  make clean                   - Remove generated files"
 	@echo ""
 
 install:
@@ -86,18 +87,21 @@ verify-coverage:
 			exit 1; \
 		fi; \
 		echo "  Coverage thresholds: OK"; \
-		if ! diff <(rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover") allowed_static_analysis_suppression.txt > /dev/null 2>&1; then \
+		if ! diff <(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/') allowed_static_analysis_suppression.txt > /dev/null 2>&1; then \
 			echo "  FAIL: Suppression list mismatch!"; \
 			echo "  New or removed suppressions detected:"; \
-			diff <(rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover") allowed_static_analysis_suppression.txt || true; \
+			diff <(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/') allowed_static_analysis_suppression.txt || true; \
 			echo ""; \
 			echo "  To add new suppressions or documentation mentioning suppressions:"; \
 			echo "    1. Create file: touch dont_commit_waiting_for_review"; \
 			echo "    2. Run checks (will pass with bypass)"; \
 			echo "    3. Have a human review the changes"; \
 			echo "    4. Have a human update the suppression list:"; \
-			echo "       rg --sort=path '-g!allowed_static_analysis_suppression.txt' 'type: ignore|pragma: no cover' > allowed_static_analysis_suppression.txt"; \
-			echo "    5. Have the human remove the bypass and commit the updated list: rm dont_commit_waiting_for_review; git add allowed_static_analysis_suppression.txt; git commit"; \
+			echo "       make regenerate-suppressions"; \
+			echo "    5. Have the human remove the bypass and commit the updated list:"; \
+			echo "       rm dont_commit_waiting_for_review"; \
+			echo "       git add allowed_static_analysis_suppression.txt"; \
+			echo "       git commit"; \
 			exit 1; \
 		fi; \
 		echo "  Suppression list: OK"; \
@@ -134,6 +138,17 @@ all_checks: format lint type-check test coverage verify-coverage
 	@echo "All checks completed!"
 	@echo "========================================="
 	@echo ""
+
+regenerate-suppressions:
+	@echo "==> Regenerating allowed_static_analysis_suppression.txt..."
+	@find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) \
+		-type f ! -path "./.git/*" ! -path "./venv/*" \
+		-exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null \
+		| sed 's|^\./||' \
+		| sort -t: -k1,1 -k2,2n \
+		| sed 's/^\([^:]*\):[0-9]*:/\1:/' \
+		> allowed_static_analysis_suppression.txt
+	@echo "  Done. Review and commit allowed_static_analysis_suppression.txt"
 
 clean:
 	@echo "==> Cleaning generated files..."

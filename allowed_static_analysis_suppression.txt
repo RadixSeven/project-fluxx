@@ -1,9 +1,9 @@
+.claude/hooks/stop_check.py:    return json.load(sys.stdin)  # type: ignore[no-any-return]
 CLAUDE.md:The codebase tracks all `type: ignore` and `pragma: no cover` comments in `allowed_static_analysis_suppression.txt`. This file is checked during `make all_checks` to ensure no new suppressions are added without human review.
 CLAUDE.md:**To add a new suppression (type: ignore or pragma: no cover) or mention those terms in other files:**
-CLAUDE.md:   rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover" > allowed_static_analysis_suppression.txt
-Makefile:		if ! diff <(rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover") allowed_static_analysis_suppression.txt > /dev/null 2>&1; then \
-Makefile:			diff <(rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover") allowed_static_analysis_suppression.txt || true; \
-Makefile:			echo "       rg --sort=path '-g!allowed_static_analysis_suppression.txt' 'type: ignore|pragma: no cover' > allowed_static_analysis_suppression.txt"; \
+Makefile:		if ! diff <(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/') allowed_static_analysis_suppression.txt > /dev/null 2>&1; then \
+Makefile:			diff <(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/') allowed_static_analysis_suppression.txt || true; \
+Makefile:		-exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null \
 pyproject.toml:    "pragma: no cover",
 src/fluxx/data/dag_operations.py:        raise DAGOperationError(f"Node {source_node_id} not found")  # pragma: no cover
 src/fluxx/gui/simulation/gantt_optimizer.py:from pyomo.environ import (  # type: ignore[import-untyped]

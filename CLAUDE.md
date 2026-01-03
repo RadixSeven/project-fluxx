@@ -122,10 +122,9 @@ The codebase tracks all `type: ignore` and `pragma: no cover` comments in `allow
    ```
 3. Have a human review the change and update the suppression list:
    ```bash
-   rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover" > allowed_static_analysis_suppression.txt
+   make regenerate-suppressions
    ```
-   IMPORTANT: The Bash tool does not handle ' correctly, so you will get incorrect results if you run the rg command with your Bash tool. Always run it through the Makefile.
-4. Have a human Remove the bypass file:
+4. Have a human remove the bypass file:
    ```bash
    rm dont_commit_waiting_for_review
    ```
