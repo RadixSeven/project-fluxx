@@ -567,7 +567,8 @@ Located above the DAG view, contains:
   - If populated: List with + button to add, trashcan to remove
 - **Excluded Assignees**:
   - List of tasks whose assignees cannot be assigned here
-  - + button to add task, trashcan to remove
+  - **Add Task** button enters "select-task-node mode" (see Section 5.3.4)
+  - Trashcan to remove
 
 **Subtask Management** (leaf tasks):
 - **Convert to Parent** button: Adds first child and navigates to it
@@ -621,7 +622,15 @@ When selecting target:
 
 **Select Task Node Mode**:
 
-Used when adding excluded assignee tasks. Similar to select-target-node mode but only task nodes are selectable.
+Used when adding excluded assignee tasks. Activated when user clicks "Add Task" in the Excluded Assignees section.
+
+Behavior:
+- Similar to select-target-node mode but only task nodes are selectable (branches/possible worlds are not valid targets)
+- Status bar or visual indicator shows "Select a task to exclude..."
+- User navigates DAG (or list view) and clicks on a task node
+- If task lacks required dependency (this_task.start >= excluded_task.start), user is prompted to add it automatically
+- **Cancel** button or Escape key aborts selection mode
+- Other editing and DAG modifications are disabled during selection
 
 #### 5.3.5 Navigation and Change Management
 

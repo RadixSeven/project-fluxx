@@ -478,8 +478,11 @@ def test_node_selected_for_dependency_task_editor(
     window.controller.select_node(task1_id)
     assert window.editor_panel.stack.currentWidget() == window.editor_panel.task_editor
 
-    # Call node selected for dependency with task2
-    window._on_node_selected_for_dependency(task2_id)
+    # Simulate entering dependency selection mode
+    window._on_select_dependency_target_requested()
+
+    # Call node selected in select mode with task2
+    window._on_node_selected_in_select_mode(task2_id)
 
     # This should call set_dependency_target on task editor
     # We can't easily verify without accessing internals, but code path is covered
@@ -505,11 +508,36 @@ def test_node_selected_for_dependency_branch_editor(
         window.editor_panel.stack.currentWidget() == window.editor_panel.branch_editor
     )
 
-    # Call node selected for dependency with task
-    window._on_node_selected_for_dependency(task_id)
+    # Simulate entering dependency selection mode
+    window._on_select_dependency_target_requested()
+
+    # Call node selected in select mode with task
+    window._on_node_selected_in_select_mode(task_id)
 
     # This should call set_dependency_target on branch editor
     # Code path is covered
+
+
+def test_node_selected_for_exclusion(
+    window: MainWindow,
+) -> None:
+    """Test node selection for exclusion when task editor is active."""
+
+    # Create a task
+    task1_id = window.controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Select task1 and ensure task editor is active
+    window.controller.select_node(task1_id)
+    assert window.editor_panel.stack.currentWidget() == window.editor_panel.task_editor
+
+    # Simulate entering exclusion selection mode
+    window._on_select_excluded_task_requested()
+
+    # Verify we're in exclusion selection mode
+    assert window._selection_mode == "exclusion"
 
 
 def test_update_subtask_actions_node_not_in_map(window: MainWindow) -> None:

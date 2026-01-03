@@ -51,9 +51,12 @@ class TaskEditor(QWidget):
     Signals:
         select_dependency_target_requested: Emitted when user wants to select
             a dependency target from the DAG view
+        select_excluded_task_requested: Emitted when user wants to select
+            a task to exclude (for excluded assignees feature)
     """
 
     select_dependency_target_requested = Signal()
+    select_excluded_task_requested = Signal()
 
     def __init__(self, controller: ProjectController) -> None:
         """Initialize task editor.
@@ -1223,41 +1226,67 @@ class TaskEditor(QWidget):
         return available_tasks
 
     def _on_add_excluded_task(self) -> None:
-        """Add a task to the excluded assignees list."""
-        available_tasks = self._get_available_tasks_for_exclusion()
+        """Enter select-task mode to add a task to the excluded assignees list."""
+        if self.current_task_id is None:
+            return
 
-        if not available_tasks:
-            QMessageBox.information(
+        # Emit signal to enter select-task mode
+        self.select_excluded_task_requested.emit()
+
+    def set_excluded_task(self, node_id: NodeId) -> None:
+        """Handle a task selected for exclusion.
+
+        Called by MainWindow when user selects a task in select-task mode.
+
+        Args:
+            node_id: The ID of the selected node
+        """
+        # Validate it's a task (not a branch) using type_explode_id
+        as_task, as_branch, _ = type_explode_id(node_id)
+        if as_task is None:
+            QMessageBox.warning(
                 self,
-                "No Tasks Available",
-                "There are no other tasks that can be added to the exclusion list.",
+                "Invalid Selection",
+                "Please select a task, not a branch.",
             )
             return
 
-        # Show dialog to select a task
-        task_names = [title for _, title in available_tasks]
+        selected_task_id = as_task
 
-        selected_name, ok = QInputDialog.getItem(
-            self,
-            "Add Excluded Task",
-            "Select a task to exclude its assignee:",
-            task_names,
-            0,
-            False,
-        )
-
-        if not ok:
+        # Check if it's the current task
+        if selected_task_id == self.current_task_id:
+            QMessageBox.warning(
+                self,
+                "Invalid Selection",
+                "A task cannot exclude its own assignee.",
+            )
             return
 
-        # Find the selected task
-        selected_index = task_names.index(selected_name)
-        selected_task_id = available_tasks[selected_index][0]
+        # Check if already in exclusion list
+        current_excluded = self._get_current_excluded_tasks()
+        if selected_task_id in current_excluded:
+            QMessageBox.information(
+                self,
+                "Already Excluded",
+                "This task is already in the exclusion list.",
+            )
+            return
+
+        # Get task name for messages
+        project = self.controller.get_project()
+        current_version = project.dag.current_version_id
+        selected_name = "the selected task"
+
+        persistent_id = project.dag.node_map.get(selected_task_id)
+        if persistent_id and persistent_id in project.persistent_tasks:
+            persistent_task = project.persistent_tasks[persistent_id]
+            if current_version in persistent_task.versions:
+                selected_name = persistent_task.versions[current_version].title
 
         # Check if the required dependency exists
         if self.current_task_id is None:
             return
 
-        project = self.controller.get_project()
         has_dep = has_required_exclusion_dependency(
             project, self.current_task_id, selected_task_id
         )
@@ -1288,7 +1317,6 @@ class TaskEditor(QWidget):
                 return  # User chose not to add, cancel the operation
 
         # Add to the list
-        current_excluded = self._get_current_excluded_tasks()
         current_excluded.append(selected_task_id)
         self.pending_changes["excluded_worker_tasks"] = current_excluded
         self._load_excluded_assignees(current_excluded)

@@ -187,21 +187,55 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
     def _connect_dependency_editing_signals(self) -> None:
-        """Connect signals for dependency editing workflow."""
-        # Connect editor signals to enter select-target mode
+        """Connect signals for dependency and exclusion editing workflow."""
+        # Track which selection mode is active
+        self._selection_mode: str | None = None  # "dependency" or "exclusion"
+
+        # Connect editor signals to enter select-target mode for dependencies
         self.editor_panel.task_editor.select_dependency_target_requested.connect(
-            self.dag_panel.dag_view.enter_select_target_mode
+            self._on_select_dependency_target_requested
         )
         self.editor_panel.branch_editor.select_dependency_target_requested.connect(
-            self.dag_panel.dag_view.enter_select_target_mode
+            self._on_select_dependency_target_requested
+        )
+
+        # Connect editor signal to enter select-task mode for exclusions
+        self.editor_panel.task_editor.select_excluded_task_requested.connect(
+            self._on_select_excluded_task_requested
         )
 
         # Connect DAG view signal to handle node selection
         self.dag_panel.dag_view.node_selected_for_dependency.connect(
-            self._on_node_selected_for_dependency
+            self._on_node_selected_in_select_mode
         )
 
-    def _on_node_selected_for_dependency(self, node_id: NodeId) -> None:
+    def _on_select_dependency_target_requested(self) -> None:
+        """Handle request to enter dependency target selection mode."""
+        self._selection_mode = "dependency"
+        self.dag_panel.dag_view.enter_select_target_mode()
+
+    def _on_select_excluded_task_requested(self) -> None:
+        """Handle request to enter excluded task selection mode."""
+        self._selection_mode = "exclusion"
+        self.dag_panel.dag_view.enter_select_target_mode()
+
+    def _on_node_selected_in_select_mode(self, node_id: NodeId) -> None:
+        """Handle node selection in any select mode.
+
+        Routes the selection to the appropriate handler based on active mode.
+
+        Args:
+            node_id: Selected node ID
+        """
+        if self._selection_mode == "dependency":
+            self._handle_dependency_selection(node_id)
+        elif self._selection_mode == "exclusion":
+            self._handle_exclusion_selection(node_id)
+
+        # Clear selection mode
+        self._selection_mode = None
+
+    def _handle_dependency_selection(self, node_id: NodeId) -> None:
         """Handle node selection for dependency editing.
 
         Args:
@@ -216,6 +250,15 @@ class MainWindow(QMainWindow):
         elif current_widget == self.editor_panel.branch_editor:
             # Set target on branch editor
             self.editor_panel.branch_editor.set_dependency_target(node_id)
+
+    def _handle_exclusion_selection(self, node_id: NodeId) -> None:
+        """Handle node selection for excluded assignee.
+
+        Args:
+            node_id: Selected node ID
+        """
+        # Only task editor supports exclusions
+        self.editor_panel.task_editor.set_excluded_task(node_id)
 
     def _update_window_title(self) -> None:
         """Update window title based on file path and modified state."""

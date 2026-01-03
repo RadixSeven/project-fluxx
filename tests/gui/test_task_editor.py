@@ -1912,11 +1912,34 @@ def test_task_editor_add_allowed_worker_cancelled(
         assert task_editor.pending_changes["allowed_workers"] == []
 
 
-def test_task_editor_add_excluded_task_no_tasks(
+def test_task_editor_add_excluded_task_emits_signal(
     task_editor: TaskEditor, controller: ProjectController
 ) -> None:
-    """Test adding excluded task when no other tasks exist."""
+    """Test that clicking add excluded task emits the selection signal."""
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Track signal emission
+    signal_received = []
+    task_editor.select_excluded_task_requested.connect(
+        lambda: signal_received.append(True)
+    )
+
+    task_editor._on_add_excluded_task()
+
+    assert len(signal_received) == 1
+
+
+def test_task_editor_set_excluded_task_invalid_branch(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test set_excluded_task rejects branch nodes."""
     from unittest.mock import patch
+
+    from fluxx.data.models import BranchId
 
     task_id = controller.create_task(
         title="Task",
@@ -1924,47 +1947,21 @@ def test_task_editor_add_excluded_task_no_tasks(
     )
     task_editor.load_task(task_id)
 
-    # Mock QMessageBox
+    # Try to set a branch as excluded task (using valid branch ID pattern)
     with patch(
-        "fluxx.gui.widgets.editors.task_editor.QMessageBox.information"
-    ) as mock_info:
-        task_editor._on_add_excluded_task()
-        mock_info.assert_called_once()
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.warning"
+    ) as mock_warning:
+        task_editor.set_excluded_task(BranchId("b1"))
+        mock_warning.assert_called_once()
+
+    # Should not have added anything
+    assert "excluded_worker_tasks" not in task_editor.pending_changes
 
 
-def test_task_editor_add_excluded_task_cancelled(
+def test_task_editor_set_excluded_task_with_existing_dep(
     task_editor: TaskEditor, controller: ProjectController
 ) -> None:
-    """Test cancelling the add excluded task dialog."""
-    from unittest.mock import patch
-
-    task1_id = controller.create_task(
-        title="Task 1",
-        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
-    )
-    controller.create_task(
-        title="Task 2",
-        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
-    )
-    task_editor.load_task(task1_id)
-
-    # Mock dialog returning cancelled
-    with patch(
-        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
-    ) as mock_dialog:
-        mock_dialog.return_value = ("", False)
-        task_editor._on_add_excluded_task()
-
-        # excluded_worker_tasks should not be in pending changes
-        assert "excluded_worker_tasks" not in task_editor.pending_changes
-
-
-def test_task_editor_add_excluded_task_with_existing_dep(
-    task_editor: TaskEditor, controller: ProjectController
-) -> None:
-    """Test adding excluded task when dependency already exists."""
-    from unittest.mock import patch
-
+    """Test set_excluded_task when dependency already exists."""
     from fluxx.data.models import ConstraintType, Dependency, Endpoint
 
     task1_id = controller.create_task(
@@ -1987,22 +1984,18 @@ def test_task_editor_add_excluded_task_with_existing_dep(
 
     task_editor.load_task(task1_id)
 
-    # Mock dialog to select Task 2
-    with patch(
-        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
-    ) as mock_dialog:
-        mock_dialog.return_value = ("Task 2", True)
-        task_editor._on_add_excluded_task()
+    # Directly call set_excluded_task (simulating DAG selection)
+    task_editor.set_excluded_task(task2_id)
 
-        # Should have added Task 2 to exclusion list
-        assert "excluded_worker_tasks" in task_editor.pending_changes
-        assert task2_id in task_editor.pending_changes["excluded_worker_tasks"]
+    # Should have added Task 2 to exclusion list
+    assert "excluded_worker_tasks" in task_editor.pending_changes
+    assert task2_id in task_editor.pending_changes["excluded_worker_tasks"]
 
 
-def test_task_editor_add_excluded_task_add_dep_accepted(
+def test_task_editor_set_excluded_task_add_dep_accepted(
     task_editor: TaskEditor, controller: ProjectController
 ) -> None:
-    """Test adding excluded task with auto-add dependency accepted."""
+    """Test set_excluded_task with auto-add dependency accepted."""
     from unittest.mock import patch
 
     from PySide6.QtWidgets import QMessageBox
@@ -2018,19 +2011,13 @@ def test_task_editor_add_excluded_task_add_dep_accepted(
 
     task_editor.load_task(task1_id)
 
-    # Mock both dialogs
-    with (
-        patch(
-            "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
-        ) as mock_input,
-        patch(
-            "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
-        ) as mock_question,
-    ):
-        mock_input.return_value = ("Task 2", True)
+    # Mock the question dialog - user accepts adding dependency
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
+    ) as mock_question:
         mock_question.return_value = QMessageBox.StandardButton.Yes
 
-        task_editor._on_add_excluded_task()
+        task_editor.set_excluded_task(task2_id)
 
         # Should have added both the exclusion and the dependency
         assert "excluded_worker_tasks" in task_editor.pending_changes
@@ -2038,10 +2025,10 @@ def test_task_editor_add_excluded_task_add_dep_accepted(
         assert "dependencies" in task_editor.pending_changes
 
 
-def test_task_editor_add_excluded_task_add_dep_rejected(
+def test_task_editor_set_excluded_task_add_dep_rejected(
     task_editor: TaskEditor, controller: ProjectController
 ) -> None:
-    """Test adding excluded task with auto-add dependency rejected."""
+    """Test set_excluded_task with auto-add dependency rejected."""
     from unittest.mock import patch
 
     from PySide6.QtWidgets import QMessageBox
@@ -2050,29 +2037,86 @@ def test_task_editor_add_excluded_task_add_dep_rejected(
         title="Task 1",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
-    controller.create_task(
+    task2_id = controller.create_task(
         title="Task 2",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
     task_editor.load_task(task1_id)
 
-    # Mock both dialogs - user rejects adding dependency
-    with (
-        patch(
-            "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
-        ) as mock_input,
-        patch(
-            "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
-        ) as mock_question,
-    ):
-        mock_input.return_value = ("Task 2", True)
+    # Mock the question dialog - user rejects adding dependency
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
+    ) as mock_question:
         mock_question.return_value = QMessageBox.StandardButton.No
 
-        task_editor._on_add_excluded_task()
+        task_editor.set_excluded_task(task2_id)
 
         # Should NOT have added the exclusion
         assert "excluded_worker_tasks" not in task_editor.pending_changes
+
+
+def test_task_editor_set_excluded_task_self_reference(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test set_excluded_task rejects self-reference."""
+    from unittest.mock import patch
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Try to exclude same task
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.warning"
+    ) as mock_warning:
+        task_editor.set_excluded_task(task_id)
+        mock_warning.assert_called_once()
+
+    # Should not have added anything
+    assert "excluded_worker_tasks" not in task_editor.pending_changes
+
+
+def test_task_editor_set_excluded_task_already_excluded(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test set_excluded_task rejects already excluded task."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add required dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task2_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task1_id, dep)
+    controller.update_task(task1_id, excluded_worker_tasks=[task2_id])
+
+    task_editor.load_task(task1_id)
+
+    # Try to add same task again
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.information"
+    ) as mock_info:
+        task_editor.set_excluded_task(task2_id)
+        mock_info.assert_called_once()
+
+    # Should not have modified pending changes
+    assert "excluded_worker_tasks" not in task_editor.pending_changes
 
 
 def test_task_editor_add_allowed_worker_with_worker_id(
