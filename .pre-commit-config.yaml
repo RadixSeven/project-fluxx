@@ -1,4 +1,13 @@
 repos:
+  - repo: local
+    hooks:
+      - id: no-bypass-file
+        name: Check for dont_commit_waiting_for_review
+        entry: bash -c 'test ! -f dont_commit_waiting_for_review || (echo "ERROR - dont_commit_waiting_for_review exists. Remove it and update allowed_static_analysis_suppression.txt before committing." && exit 1)'
+        language: system
+        pass_filenames: false
+        always_run: true
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
