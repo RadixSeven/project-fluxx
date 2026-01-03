@@ -100,10 +100,39 @@ The codebase is organized into three main packages:
 
 ## Code Quality Requirements
 
-- **100% test coverage** required (enforced via pytest-cov)
+- **100% test coverage** required for non-GUI code (enforced via `make verify-coverage`)
+- **≥90% test coverage** required for GUI code (enforced via `make verify-coverage`)
 - **Full type annotations** required (enforced via mypy --strict)
 - **Pydantic validation** for all data schemas
 - **Pre-commit hooks** must pass before commits
+
+### Static Analysis Suppressions
+
+The codebase tracks all `type: ignore` and `pragma: no cover` comments in `allowed_static_analysis_suppression.txt`. This file is checked during `make all_checks` to ensure no new suppressions are added without human review.
+
+**To add a new suppression (type: ignore or pragma: no cover) or mention those terms in other files:**
+
+1. Create the bypass file:
+   ```bash
+   touch dont_commit_waiting_for_review
+   ```
+2. Add your suppression and run checks (will pass with bypass):
+   ```bash
+   make all_checks
+   ```
+3. Have a human review the change and update the suppression list:
+   ```bash
+   rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover" > allowed_static_analysis_suppression.txt
+   ```
+   IMPORTANT: The Bash tool does not handle ' correctly, so you will get incorrect results if you run the rg command with your Bash tool. Always run it through the Makefile.
+4. Have a human Remove the bypass file:
+   ```bash
+   rm dont_commit_waiting_for_review
+   ```
+5. Have a human commit the updated suppression list
+6. Continue with your code or documentation changes.
+
+**Note**: Pre-commit hooks will block commits if `dont_commit_waiting_for_review` exists, ensuring the bypass is only temporary.
 
 See also:
 - **[testing.md](testing.md)** - Detailed testing patterns, mocking strategies, and common pitfalls

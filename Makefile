@@ -1,4 +1,7 @@
-.PHONY: all_checks test coverage lint format type-check clean install help
+.PHONY: all_checks test coverage verify-coverage lint format type-check clean install help
+
+# Use bash for process substitution support
+SHELL := /bin/bash
 
 # Default Python interpreter
 PYTHON := python3
@@ -7,17 +10,38 @@ PYTHON := python3
 SRC_DIR := src/fluxx
 TEST_DIR := tests
 
+# Coverage check script (exported as environment variable for use in shell)
+define COVERAGE_CHECK_SCRIPT
+import json, sys
+data = json.load(open('coverage.json'))
+failed = False
+for path, info in sorted(data['files'].items()):
+    pct = info['summary']['percent_covered']
+    is_gui = '/gui/' in path
+    if is_gui:
+        if pct < 90:
+            print(f'  FAIL: {path}: {pct:.2f}% (requires >=90%)')
+            failed = True
+    else:
+        if pct < 100:
+            print(f'  FAIL: {path}: {pct:.2f}% (requires 100%)')
+            failed = True
+sys.exit(1 if failed else 0)
+endef
+export COVERAGE_CHECK_SCRIPT
+
 help:
 	@echo "Project Fluxx - Makefile Commands"
 	@echo ""
-	@echo "  make all_checks    - Run all tests and static analysis, show incomplete coverage"
-	@echo "  make test          - Run pytest with coverage"
-	@echo "  make coverage      - Show coverage report (files not at 100%)"
-	@echo "  make lint          - Run ruff linter"
-	@echo "  make format        - Format code with ruff"
-	@echo "  make type-check    - Run mypy type checker"
-	@echo "  make install       - Install package in development mode"
-	@echo "  make clean         - Remove generated files"
+	@echo "  make all_checks      - Run all tests and static analysis, verify coverage"
+	@echo "  make test            - Run pytest with coverage"
+	@echo "  make coverage        - Show coverage report (files not at 100%)"
+	@echo "  make verify-coverage - Verify coverage thresholds and suppression list"
+	@echo "  make lint            - Run ruff linter"
+	@echo "  make format          - Format code with ruff"
+	@echo "  make type-check      - Run mypy type checker"
+	@echo "  make install         - Install package in development mode"
+	@echo "  make clean           - Remove generated files"
 	@echo ""
 
 install:
@@ -51,6 +75,46 @@ coverage:
 	@$(PYTHON) -c "import json; data = json.load(open('coverage.json')); files = data['files']; incomplete = {k: v for k, v in files.items() if v['summary']['percent_covered'] < 100}; [print(f'  {file:60s} {info[\"summary\"][\"percent_covered\"]:6.2f}% ({len(info[\"missing_lines\"])} lines missing)') for file, info in sorted(incomplete.items())] if incomplete else print('  All files have 100% coverage! ✓')"
 	@echo ""
 
+verify-coverage:
+	@echo "==> Verifying coverage thresholds and suppression list..."
+	@if [ -f dont_commit_waiting_for_review ]; then \
+		echo "  [BYPASS] dont_commit_waiting_for_review exists - skipping verification"; \
+		echo "  WARNING: Remove this file and update allowed_static_analysis_suppression.txt before committing"; \
+	else \
+		if ! $(PYTHON) -c "$$COVERAGE_CHECK_SCRIPT"; then \
+			echo "Coverage thresholds not met!"; \
+			exit 1; \
+		fi; \
+		echo "  Coverage thresholds: OK"; \
+		if ! diff <(rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover") allowed_static_analysis_suppression.txt > /dev/null 2>&1; then \
+			echo "  FAIL: Suppression list mismatch!"; \
+			echo "  New or removed suppressions detected:"; \
+			diff <(rg --sort=path '-g!allowed_static_analysis_suppression.txt' "type: ignore|pragma: no cover") allowed_static_analysis_suppression.txt || true; \
+			echo ""; \
+			echo "  To add new suppressions or documentation mentioning suppressions:"; \
+			echo "    1. Create file: touch dont_commit_waiting_for_review"; \
+			echo "    2. Run checks (will pass with bypass)"; \
+			echo "    3. Have a human review the changes"; \
+			echo "    4. Have a human update the suppression list:"; \
+			echo "       rg --sort=path '-g!allowed_static_analysis_suppression.txt' 'type: ignore|pragma: no cover' > allowed_static_analysis_suppression.txt"; \
+			echo "    5. Have the human remove the bypass and commit the updated list: rm dont_commit_waiting_for_review; git add allowed_static_analysis_suppression.txt; git commit"; \
+			exit 1; \
+		fi; \
+		echo "  Suppression list: OK"; \
+		if git diff --name-only | grep -q "allowed_static_analysis_suppression.txt"; then \
+			echo "  FAIL: allowed_static_analysis_suppression.txt has uncommitted changes!"; \
+			echo "  A human must review and commit changes to the suppression list."; \
+			exit 1; \
+		fi; \
+		if git diff --cached --name-only | grep -q "allowed_static_analysis_suppression.txt"; then \
+			echo "  FAIL: allowed_static_analysis_suppression.txt is staged but not committed!"; \
+			echo "  A human must review and commit changes to the suppression list."; \
+			exit 1; \
+		fi; \
+		echo "  Suppression list not modified: OK"; \
+		echo "  All coverage checks passed!"; \
+	fi
+
 lint:
 	@echo "==> Running ruff linter..."
 	ruff check $(SRC_DIR) $(TEST_DIR)
@@ -64,7 +128,7 @@ type-check:
 	@echo "==> Running mypy type checker..."
 	mypy --strict $(SRC_DIR) $(TEST_DIR)
 
-all_checks: format lint type-check test coverage
+all_checks: format lint type-check test coverage verify-coverage
 	@echo ""
 	@echo "========================================="
 	@echo "All checks completed!"
