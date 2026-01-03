@@ -1,6 +1,7 @@
 """Tests for NodeItem graphics items."""
 
 from PySide6.QtWidgets import QGraphicsItem
+from pytestqt.qtbot import QtBot
 
 from fluxx.data.models import (
     Branch,
@@ -11,7 +12,12 @@ from fluxx.data.models import (
     TaskId,
     Triangular,
 )
-from fluxx.gui.widgets.dag_view.node_item import BranchNodeItem, NodeItem, TaskNodeItem
+from fluxx.gui.widgets.dag_view.node_item import (
+    BranchNodeItem,
+    NodeItem,
+    PossibleWorldItem,
+    TaskNodeItem,
+)
 
 
 def test_node_item_initialization() -> None:
@@ -176,3 +182,302 @@ def test_branch_node_item_colors() -> None:
     assert node._base_color.red() == 255
     assert node._base_color.green() == 200
     assert node._base_color.blue() == 150
+
+
+def test_node_item_paint_via_scene_normal(qtbot: QtBot) -> None:
+    """Test NodeItem paint method in normal state via scene rendering."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    scene = QGraphicsScene()
+    node = NodeItem(TaskId("task_1"), "Test Task")
+    node._is_hovered = False
+    node.setSelected(False)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+
+def test_node_item_paint_via_scene_hovered(qtbot: QtBot) -> None:
+    """Test NodeItem paint method in hovered state via scene rendering."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    scene = QGraphicsScene()
+    node = NodeItem(TaskId("task_1"), "Test Task")
+    node._is_hovered = True
+    node.setSelected(False)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+
+def test_node_item_paint_via_scene_selected(qtbot: QtBot) -> None:
+    """Test NodeItem paint method in selected state via scene rendering."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    scene = QGraphicsScene()
+    node = NodeItem(TaskId("task_1"), "Test Task")
+    node._is_hovered = False
+    node.setSelected(True)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+
+def test_node_item_hover_enter_event() -> None:
+    """Test NodeItem hoverEnterEvent updates state."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QGraphicsSceneHoverEvent
+
+    node = NodeItem(TaskId("task_1"), "Test Task")
+    assert node._is_hovered is False
+
+    # Create hover event
+    event = QGraphicsSceneHoverEvent(
+        QGraphicsSceneHoverEvent.Type.GraphicsSceneHoverEnter
+    )
+    event.setPos(QPointF(10, 10))
+
+    node.hoverEnterEvent(event)
+
+    assert node._is_hovered is True
+
+
+def test_node_item_hover_leave_event() -> None:
+    """Test NodeItem hoverLeaveEvent updates state."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QGraphicsSceneHoverEvent
+
+    node = NodeItem(TaskId("task_1"), "Test Task")
+    node._is_hovered = True
+
+    # Create hover leave event
+    event = QGraphicsSceneHoverEvent(
+        QGraphicsSceneHoverEvent.Type.GraphicsSceneHoverLeave
+    )
+    event.setPos(QPointF(10, 10))
+
+    node.hoverLeaveEvent(event)
+
+    assert node._is_hovered is False
+
+
+def test_branch_node_item_paint_none_painter() -> None:
+    """Test BranchNodeItem paint with None painter does nothing."""
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    node = BranchNodeItem(branch.id, branch)
+
+    # Should not raise exception when painter is None
+    option = QStyleOptionGraphicsItem()
+    node.paint(None, option, None)
+
+
+def test_branch_node_item_paint_via_scene_normal(qtbot: QtBot) -> None:
+    """Test BranchNodeItem paint method in normal state via scene rendering."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    scene = QGraphicsScene()
+    node = BranchNodeItem(branch.id, branch)
+    node._is_hovered = False
+    node.setSelected(False)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(100, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+
+def test_branch_node_item_paint_via_scene_hovered(qtbot: QtBot) -> None:
+    """Test BranchNodeItem paint method in hovered state via scene rendering."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    scene = QGraphicsScene()
+    node = BranchNodeItem(branch.id, branch)
+    node._is_hovered = True
+    node.setSelected(False)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(100, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+
+def test_branch_node_item_paint_via_scene_selected(qtbot: QtBot) -> None:
+    """Test BranchNodeItem paint method in selected state via scene rendering."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    scene = QGraphicsScene()
+    node = BranchNodeItem(branch.id, branch)
+    node._is_hovered = False
+    node.setSelected(True)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(100, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+
+def test_branch_node_item_hover_enter_event() -> None:
+    """Test BranchNodeItem hoverEnterEvent updates state."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QGraphicsSceneHoverEvent
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    node = BranchNodeItem(branch.id, branch)
+    assert node._is_hovered is False
+
+    # Create hover event
+    event = QGraphicsSceneHoverEvent(
+        QGraphicsSceneHoverEvent.Type.GraphicsSceneHoverEnter
+    )
+    event.setPos(QPointF(5, 5))
+
+    node.hoverEnterEvent(event)
+
+    assert node._is_hovered is True
+
+
+def test_branch_node_item_hover_leave_event() -> None:
+    """Test BranchNodeItem hoverLeaveEvent updates state."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QGraphicsSceneHoverEvent
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    node = BranchNodeItem(branch.id, branch)
+    node._is_hovered = True
+
+    # Create hover leave event
+    event = QGraphicsSceneHoverEvent(
+        QGraphicsSceneHoverEvent.Type.GraphicsSceneHoverLeave
+    )
+    event.setPos(QPointF(5, 5))
+
+    node.hoverLeaveEvent(event)
+
+    assert node._is_hovered is False
+
+
+def test_branch_node_item_selectable() -> None:
+    """Test that BranchNodeItem is selectable."""
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    node = BranchNodeItem(branch.id, branch)
+
+    assert node.flags() & QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+
+
+def test_branch_node_item_accepts_hover() -> None:
+    """Test that BranchNodeItem accepts hover events."""
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+
+    node = BranchNodeItem(branch.id, branch)
+
+    assert node.acceptHoverEvents() is True
+
+
+def test_possible_world_item_initialization() -> None:
+    """Test PossibleWorldItem initialization."""
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+    possible_world = PossibleWorld(
+        id=PossibleWorldId("pw_1"),
+        title="World 1",
+        description="First world",
+    )
+
+    node = PossibleWorldItem(branch.id, branch, possible_world)
+
+    assert node.node_id == branch.id
+    assert node.branch == branch
+    assert node.possible_world == possible_world
+    assert node.title == "World 1"
+
+
+def test_possible_world_item_colors() -> None:
+    """Test PossibleWorldItem has specific colors."""
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+    possible_world = PossibleWorld(
+        id=PossibleWorldId("pw_1"),
+        title="World 1",
+        description="First world",
+    )
+
+    node = PossibleWorldItem(branch.id, branch, possible_world)
+
+    # Verify green colors
+    assert node._base_color.red() == 200
+    assert node._base_color.green() == 255
+    assert node._base_color.blue() == 200
