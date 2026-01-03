@@ -18,16 +18,16 @@ make install
 ### Testing
 ```bash
 # Run all tests with coverage
-make test
+. venv/bin/activate && make test
 
 # Show files with incomplete coverage
-make coverage
+. venv/bin/activate && make coverage
 
 # Run a single test file
-QT_QPA_PLATFORM=offscreen pytest tests/test_models.py -v
+. venv/bin/activate && QT_QPA_PLATFORM=offscreen pytest tests/test_models.py -v
 
 # Run a single test function
-QT_QPA_PLATFORM=offscreen pytest tests/test_models.py::test_function_name -v
+. venv/bin/activate && QT_QPA_PLATFORM=offscreen pytest tests/test_models.py::test_function_name -v
 ```
 
 **Important**: Always use `QT_QPA_PLATFORM=offscreen` when running pytest to prevent GUI crashes in sandboxed environments.
@@ -35,22 +35,22 @@ QT_QPA_PLATFORM=offscreen pytest tests/test_models.py::test_function_name -v
 ### Code Quality
 ```bash
 # Run all checks (format, lint, type-check, test, coverage)
-make all_checks
+. venv/bin/activate && make all_checks
 
 # Format code with ruff
-make format
+. venv/bin/activate && make format
 
 # Run ruff linter
-make lint
+. venv/bin/activate && make lint
 
 # Run mypy type checker
-make type-check
+. venv/bin/activate && make type-check
 ```
 
 ### Pre-commit Hooks
 Pre-commit hooks automatically run ruff and mypy. Install with:
 ```bash
-pre-commit install
+. venv/bin/activate && pre-commit install
 ```
 
 ## Architecture
