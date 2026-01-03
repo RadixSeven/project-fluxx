@@ -3,9 +3,10 @@
 from datetime import UTC, datetime
 from typing import TypedDict
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QDateTime, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDateTimeEdit,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -305,20 +306,38 @@ class TaskEditor(QWidget):
         self.completion_status_label = QLabel("Status: Not Started")
         completion_layout.addWidget(self.completion_status_label)
 
-        # Hours logged display (for started/done tasks)
-        self.hours_logged_container = QWidget()
-        hours_logged_layout = QFormLayout()
-        hours_logged_layout.setContentsMargins(0, 0, 0, 0)
+        # Completion details (for started/done tasks)
+        self.completion_details_container = QWidget()
+        completion_details_layout = QFormLayout()
+        completion_details_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Start time editor (no calendar popup - allows direct date and time editing)
+        self.start_time_edit = QDateTimeEdit()
+        self.start_time_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.start_time_edit.dateTimeChanged.connect(self._on_start_time_changed)
+        completion_details_layout.addRow("Started:", self.start_time_edit)
+
+        # Hours logged spinbox
         self.hours_logged_spinbox = QDoubleSpinBox()
         self.hours_logged_spinbox.setRange(0.0, 10000.0)
         self.hours_logged_spinbox.setDecimals(1)
         self.hours_logged_spinbox.setSingleStep(0.5)
         self.hours_logged_spinbox.setSuffix(" hours")
         self.hours_logged_spinbox.valueChanged.connect(self._on_hours_logged_changed)
-        hours_logged_layout.addRow("Hours Logged:", self.hours_logged_spinbox)
-        self.hours_logged_container.setLayout(hours_logged_layout)
-        self.hours_logged_container.setVisible(False)
-        completion_layout.addWidget(self.hours_logged_container)
+        completion_details_layout.addRow("Hours Logged:", self.hours_logged_spinbox)
+
+        # End time editor (only shown for done tasks)
+        self.end_time_edit = QDateTimeEdit()
+        self.end_time_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.end_time_edit.dateTimeChanged.connect(self._on_end_time_changed)
+        self.end_time_label = QLabel("Completed:")
+        completion_details_layout.addRow(self.end_time_label, self.end_time_edit)
+        self.end_time_label.setVisible(False)
+        self.end_time_edit.setVisible(False)
+
+        self.completion_details_container.setLayout(completion_details_layout)
+        self.completion_details_container.setVisible(False)
+        completion_layout.addWidget(self.completion_details_container)
 
         # State transition buttons
         completion_button_layout = QHBoxLayout()
@@ -1477,7 +1496,7 @@ class TaskEditor(QWidget):
 
         if isinstance(completion, NotStartedCompletion):
             self.completion_status_label.setText("Status: Not Started")
-            self.hours_logged_container.setVisible(False)
+            self.completion_details_container.setVisible(False)
             self.start_task_button.setVisible(True)
             self.complete_task_button.setVisible(False)
             self.become_not_started_button.setVisible(False)
@@ -1487,10 +1506,10 @@ class TaskEditor(QWidget):
             self.completion_status_label.setText(
                 f"Status: In Progress (assigned to {worker_name})"
             )
-            self.hours_logged_container.setVisible(True)
-            self.hours_logged_spinbox.blockSignals(True)
-            self.hours_logged_spinbox.setValue(completion.hours_logged)
-            self.hours_logged_spinbox.blockSignals(False)
+            self.completion_details_container.setVisible(True)
+            self._load_completion_details(
+                completion.start_time, completion.hours_logged, editable=True
+            )
             self.start_task_button.setVisible(False)
             self.complete_task_button.setVisible(True)
             self.become_not_started_button.setVisible(True)
@@ -1501,7 +1520,13 @@ class TaskEditor(QWidget):
                 f"Status: Complete ({completion.hours_logged:.1f} hours, "
                 f"completed by {worker_name})"
             )
-            self.hours_logged_container.setVisible(False)
+            self.completion_details_container.setVisible(True)
+            self._load_completion_details(
+                completion.start_time,
+                completion.hours_logged,
+                editable=True,
+                end_time=completion.end_time,
+            )
             self.start_task_button.setVisible(False)
             self.complete_task_button.setVisible(False)
             self.become_not_started_button.setVisible(False)
@@ -1522,6 +1547,111 @@ class TaskEditor(QWidget):
                 return worker.name
         return str(worker_id)
 
+    def _load_completion_details(
+        self,
+        start_time: datetime,
+        hours_logged: float,
+        *,
+        editable: bool,
+        end_time: datetime | None = None,
+    ) -> None:
+        """Load completion details into the UI widgets.
+
+        Args:
+            start_time: When the task was started
+            hours_logged: Hours logged on the task
+            editable: Whether the fields should be editable
+            end_time: When the task was completed (only for done tasks)
+        """
+        # Convert start datetime to QDateTime for the widget
+        q_start_datetime = QDateTime(
+            start_time.year,
+            start_time.month,
+            start_time.day,
+            start_time.hour,
+            start_time.minute,
+            start_time.second,
+        )
+
+        self.start_time_edit.blockSignals(True)
+        self.start_time_edit.setDateTime(q_start_datetime)
+        self.start_time_edit.setReadOnly(not editable)
+        self.start_time_edit.blockSignals(False)
+
+        self.hours_logged_spinbox.blockSignals(True)
+        self.hours_logged_spinbox.setValue(hours_logged)
+        self.hours_logged_spinbox.setReadOnly(not editable)
+        self.hours_logged_spinbox.blockSignals(False)
+
+        # Show/hide end time for done tasks
+        if end_time is not None:
+            q_end_datetime = QDateTime(
+                end_time.year,
+                end_time.month,
+                end_time.day,
+                end_time.hour,
+                end_time.minute,
+                end_time.second,
+            )
+            self.end_time_edit.blockSignals(True)
+            self.end_time_edit.setDateTime(q_end_datetime)
+            self.end_time_edit.setReadOnly(not editable)
+            self.end_time_edit.blockSignals(False)
+            self.end_time_label.setVisible(True)
+            self.end_time_edit.setVisible(True)
+        else:
+            self.end_time_label.setVisible(False)
+            self.end_time_edit.setVisible(False)
+
+    def _on_start_time_changed(self, q_datetime: QDateTime) -> None:
+        """Handle changes to start time editor.
+
+        Updates the task's completion with new start_time value.
+
+        Args:
+            q_datetime: New start time from the widget
+        """
+        if self.current_task_id is None:
+            return
+
+        if not hasattr(self, "_current_completion"):
+            return
+
+        completion = self._current_completion
+
+        # Convert QDateTime to Python datetime with UTC timezone
+        py_datetime = q_datetime.toPython()
+        if not isinstance(py_datetime, datetime):
+            return
+        start_time = py_datetime.replace(tzinfo=UTC)
+
+        if isinstance(completion, StartedCompletion):
+            # Create updated StartedCompletion with new start_time
+            new_completion: TaskCompletion = StartedCompletion(
+                assignee=completion.assignee,
+                start_time=start_time,
+                hours_logged=self.hours_logged_spinbox.value(),
+            )
+        elif isinstance(completion, DoneCompletion):
+            # Create updated DoneCompletion with new start_time
+            end_py = self.end_time_edit.dateTime().toPython()
+            if isinstance(end_py, datetime):
+                end_time = end_py.replace(tzinfo=UTC)
+            else:
+                end_time = completion.end_time
+            new_completion = DoneCompletion(
+                assignee=completion.assignee,
+                start_time=start_time,
+                hours_logged=self.hours_logged_spinbox.value(),
+                end_time=end_time,
+            )
+        else:
+            return
+
+        self.pending_changes["completion"] = new_completion
+        self._current_completion = new_completion
+        self._update_button_states()
+
     def _on_hours_logged_changed(self, value: float) -> None:
         """Handle changes to hours logged spinbox.
 
@@ -1537,14 +1667,80 @@ class TaskEditor(QWidget):
             return
 
         completion = self._current_completion
-        if not isinstance(completion, StartedCompletion):
+
+        # Get start_time from widget (in case it has pending changes)
+        py_datetime = self.start_time_edit.dateTime().toPython()
+        if isinstance(py_datetime, datetime):
+            start_time = py_datetime.replace(tzinfo=UTC)
+        elif isinstance(completion, (StartedCompletion, DoneCompletion)):
+            start_time = completion.start_time
+        else:
             return
 
-        # Create updated completion with new hours_logged
-        new_completion = StartedCompletion(
+        if isinstance(completion, StartedCompletion):
+            # Create updated StartedCompletion with new hours_logged
+            new_completion: TaskCompletion = StartedCompletion(
+                assignee=completion.assignee,
+                start_time=start_time,
+                hours_logged=value,
+            )
+        elif isinstance(completion, DoneCompletion):
+            # Create updated DoneCompletion with new hours_logged
+            end_py = self.end_time_edit.dateTime().toPython()
+            if isinstance(end_py, datetime):
+                end_time = end_py.replace(tzinfo=UTC)
+            else:
+                end_time = completion.end_time
+            new_completion = DoneCompletion(
+                assignee=completion.assignee,
+                start_time=start_time,
+                hours_logged=value,
+                end_time=end_time,
+            )
+        else:
+            return
+
+        self.pending_changes["completion"] = new_completion
+        self._current_completion = new_completion
+        self._update_button_states()
+
+    def _on_end_time_changed(self, q_datetime: QDateTime) -> None:
+        """Handle changes to end time editor.
+
+        Updates the task's completion with new end_time value.
+
+        Args:
+            q_datetime: New end time from the widget
+        """
+        if self.current_task_id is None:
+            return
+
+        if not hasattr(self, "_current_completion"):
+            return
+
+        completion = self._current_completion
+        if not isinstance(completion, DoneCompletion):
+            return
+
+        # Convert QDateTime to Python datetime with UTC timezone
+        py_datetime = q_datetime.toPython()
+        if not isinstance(py_datetime, datetime):
+            return
+        end_time = py_datetime.replace(tzinfo=UTC)
+
+        # Get start_time from widget (in case it has pending changes)
+        start_py = self.start_time_edit.dateTime().toPython()
+        if isinstance(start_py, datetime):
+            start_time = start_py.replace(tzinfo=UTC)
+        else:
+            start_time = completion.start_time
+
+        # Create updated DoneCompletion with new end_time
+        new_completion = DoneCompletion(
             assignee=completion.assignee,
-            start_time=completion.start_time,
-            hours_logged=value,
+            start_time=start_time,
+            hours_logged=self.hours_logged_spinbox.value(),
+            end_time=end_time,
         )
         self.pending_changes["completion"] = new_completion
         self._current_completion = new_completion

@@ -2241,8 +2241,8 @@ def test_task_editor_load_not_started_completion(
 
     # Should show "Not Started" status
     assert "Not Started" in task_editor.completion_status_label.text()
-    # Hours logged container should be hidden
-    assert not task_editor.hours_logged_container.isVisibleTo(task_editor)
+    # Completion details container should be hidden
+    assert not task_editor.completion_details_container.isVisibleTo(task_editor)
 
 
 def test_task_editor_load_started_completion(
@@ -2276,9 +2276,14 @@ def test_task_editor_load_started_completion(
     # Should show "In Progress" status with worker name
     assert "In Progress" in task_editor.completion_status_label.text()
     assert "Alice" in task_editor.completion_status_label.text()
-    # Hours logged container should be visible with correct value
-    assert task_editor.hours_logged_container.isVisibleTo(task_editor)
+    # Completion details container should be visible with correct values
+    assert task_editor.completion_details_container.isVisibleTo(task_editor)
     assert task_editor.hours_logged_spinbox.value() == 5.5
+    # Start time should be editable
+    assert not task_editor.start_time_edit.isReadOnly()
+    # End time should be hidden for started tasks
+    assert not task_editor.end_time_label.isVisibleTo(task_editor)
+    assert not task_editor.end_time_edit.isVisibleTo(task_editor)
     # Should show appropriate buttons
     assert not task_editor.start_task_button.isVisibleTo(task_editor)
     assert task_editor.complete_task_button.isVisibleTo(task_editor)
@@ -2321,8 +2326,14 @@ def test_task_editor_load_done_completion(
     assert "Complete" in task_editor.completion_status_label.text()
     assert "Bob" in task_editor.completion_status_label.text()
     assert "10.0 hours" in task_editor.completion_status_label.text()
-    # Hours logged container should be hidden (not editable for done tasks)
-    assert not task_editor.hours_logged_container.isVisibleTo(task_editor)
+    # Completion details container should be visible and editable
+    assert task_editor.completion_details_container.isVisibleTo(task_editor)
+    assert not task_editor.start_time_edit.isReadOnly()
+    assert not task_editor.hours_logged_spinbox.isReadOnly()
+    # End time should be visible and editable
+    assert task_editor.end_time_label.isVisibleTo(task_editor)
+    assert task_editor.end_time_edit.isVisibleTo(task_editor)
+    assert not task_editor.end_time_edit.isReadOnly()
     # Should show only reopen button
     assert not task_editor.start_task_button.isVisibleTo(task_editor)
     assert not task_editor.complete_task_button.isVisibleTo(task_editor)
@@ -2674,6 +2685,68 @@ def test_task_editor_hours_logged_change(
     assert "completion" in task_editor.pending_changes
     assert isinstance(task_editor.pending_changes["completion"], StartedCompletion)
     assert task_editor.pending_changes["completion"].hours_logged == 5.0
+
+
+def test_task_editor_done_completion_field_changes(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test editing fields on a done task creates pending changes."""
+    from datetime import UTC, datetime, timedelta
+
+    from fluxx.data.models import DoneCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Done Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Complete the task
+    start_time = datetime.now(UTC) - timedelta(days=2)
+    end_time = datetime.now(UTC)
+    done_completion = DoneCompletion(
+        assignee=worker_id,
+        start_time=start_time,
+        hours_logged=10.0,
+        end_time=end_time,
+    )
+    controller.update_task(task_id, completion=done_completion)
+
+    task_editor.load_task(task_id)
+
+    # Change hours logged
+    task_editor.hours_logged_spinbox.setValue(15.0)
+
+    # Should have pending completion change with DoneCompletion
+    assert "completion" in task_editor.pending_changes
+    assert isinstance(task_editor.pending_changes["completion"], DoneCompletion)
+    assert task_editor.pending_changes["completion"].hours_logged == 15.0
+
+    # Clear pending and reload
+    task_editor.load_task(task_id)
+
+    # Change end time (must be after start_time, which is 2 days ago)
+    from PySide6.QtCore import QDateTime
+
+    # Use a time that's definitely after the start_time (2 days from now)
+    future_end = datetime.now(UTC) + timedelta(days=2)
+    new_end = QDateTime(
+        future_end.year,
+        future_end.month,
+        future_end.day,
+        14,
+        30,
+        0,
+    )
+    task_editor.end_time_edit.setDateTime(new_end)
+
+    # Should have pending completion change
+    assert "completion" in task_editor.pending_changes
+    assert isinstance(task_editor.pending_changes["completion"], DoneCompletion)
+    # End time should be updated
+    assert task_editor.pending_changes["completion"].end_time.year == future_end.year
+    assert task_editor.pending_changes["completion"].end_time.month == future_end.month
+    assert task_editor.pending_changes["completion"].end_time.day == future_end.day
 
 
 def test_task_editor_get_worker_name_found(
