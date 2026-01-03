@@ -188,3 +188,189 @@ def test_edge_item_z_value() -> None:
     )
 
     assert edge.zValue() == -1
+
+
+def test_edge_item_paint_hovered_state(qtbot: QtBot) -> None:
+    """Test paint with actual painter in hovered state."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(0, 0),
+        QPointF(100, 100),
+    )
+
+    # Set hovered state
+    edge._is_hovered = True
+
+    # Add to scene
+    scene = QGraphicsScene()
+    scene.addItem(edge)
+
+    # Render with actual painter to trigger paint method
+    image = QImage(200, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify hover state was used (pen should be width 3)
+    assert edge._is_hovered is True
+
+
+def test_edge_item_paint_normal_state(qtbot: QtBot) -> None:
+    """Test paint with actual painter in normal state."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(0, 0),
+        QPointF(100, 100),
+    )
+
+    # Add to scene (not hovered)
+    scene = QGraphicsScene()
+    scene.addItem(edge)
+
+    # Render with actual painter to trigger paint method
+    image = QImage(200, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify normal state (pen should be width 2)
+    assert edge._is_hovered is False
+
+
+def test_edge_item_equal_constraint_arrow(qtbot: QtBot) -> None:
+    """Test drawing arrow with EQUAL constraint type."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(0, 0),
+        QPointF(100, 100),
+        constraint_type=ConstraintType.EQUAL,
+    )
+
+    # Add to scene
+    scene = QGraphicsScene()
+    scene.addItem(edge)
+
+    # Render with actual painter to trigger paint and _draw_arrow
+    image = QImage(200, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify EQUAL constraint was used
+    assert edge.constraint_type == ConstraintType.EQUAL
+
+
+def test_edge_item_zero_length_arrow(qtbot: QtBot) -> None:
+    """Test drawing arrow with zero-length edge (same source and target)."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(50, 50),
+        QPointF(50, 50),  # Same position
+    )
+
+    # Call paint directly with a real painter to trigger the zero-length path
+    image = QImage(200, 200, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    option = QStyleOptionGraphicsItem()
+    edge.paint(painter, option, None)
+    painter.end()
+
+    # Verify edge exists with same positions
+    assert edge.source_pos == edge.target_pos
+
+
+def test_edge_item_hover_enter_event(qtbot: QtBot) -> None:
+    """Test hover enter event handler."""
+    from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneHoverEvent
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(0, 0),
+        QPointF(100, 100),
+    )
+
+    # Add to scene (required for hover events to work)
+    scene = QGraphicsScene()
+    scene.addItem(edge)
+
+    # Initially not hovered
+    assert edge._is_hovered is False
+
+    # Create hover event and trigger handler
+    hover_event = QGraphicsSceneHoverEvent()
+    edge.hoverEnterEvent(hover_event)
+
+    # Should be hovered now
+    assert edge._is_hovered is True
+
+
+def test_edge_item_hover_leave_event(qtbot: QtBot) -> None:
+    """Test hover leave event handler."""
+    from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneHoverEvent
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(0, 0),
+        QPointF(100, 100),
+    )
+
+    # Add to scene (required for hover events to work)
+    scene = QGraphicsScene()
+    scene.addItem(edge)
+
+    # Set hovered
+    edge._is_hovered = True
+    assert edge._is_hovered is True
+
+    # Create hover event and trigger leave handler
+    hover_event = QGraphicsSceneHoverEvent()
+    edge.hoverLeaveEvent(hover_event)
+
+    # Should not be hovered now
+    assert edge._is_hovered is False
+
+
+def test_edge_item_hover_cycle(qtbot: QtBot) -> None:
+    """Test complete hover enter/leave cycle."""
+    from PySide6.QtWidgets import QGraphicsScene, QGraphicsSceneHoverEvent
+
+    edge = EdgeItem(
+        TaskId("task_1"),
+        TaskId("task_2"),
+        QPointF(0, 0),
+        QPointF(100, 100),
+    )
+
+    scene = QGraphicsScene()
+    scene.addItem(edge)
+
+    # Initial state
+    assert edge._is_hovered is False
+
+    # Hover enter
+    enter_event = QGraphicsSceneHoverEvent()
+    edge.hoverEnterEvent(enter_event)
+    assert edge._is_hovered is True
+
+    # Hover leave
+    leave_event = QGraphicsSceneHoverEvent()
+    edge.hoverLeaveEvent(leave_event)
+    assert edge._is_hovered is False

@@ -170,6 +170,73 @@ def is_dependency_satisfied(
     return False
 
 
+def _is_regular_dep_satisfiable(
+    dep: Dependency, state: SimulationState, visited: set[TaskId]
+) -> bool:
+    """Check if a regular (non-possible-world) dependency is satisfiable.
+
+    Args:
+        dep: The dependency to check
+        state: Current simulation state
+        visited: Set of already visited task IDs to prevent infinite recursion
+
+    Returns:
+        True if the dependency can be satisfied
+    """
+    as_task, as_branch, as_world = type_explode_id(dep.target_node_id)
+
+    # If this is a task dependency, recursively check if that task is runnable
+    if as_task is not None and is_task_node(as_task, state):
+        try:
+            dep_task = state.get_task(as_task)
+            # If dependency is a parent task, check if its runnable children
+            # can complete
+            if len(dep_task.children) > 0:
+                # At least one child must be runnable for parent to be runnable
+                return any(
+                    is_child_runnable_in_current_world(child, state, visited)
+                    for child in dep_task.children
+                )
+            else:
+                # Regular task - recursively check its dependencies
+                return is_child_runnable_in_current_world(as_task, state, visited)
+        except KeyError:
+            return False
+
+    # Non-task dependencies (branches) are satisfiable
+    return True
+
+
+def _has_any_satisfiable_possible_world_dep(
+    deps: list[Dependency], state: SimulationState
+) -> bool:
+    """Check if at least one possible world dependency is satisfiable.
+
+    Args:
+        deps: List of possible world dependencies
+        state: Current simulation state
+
+    Returns:
+        True if at least one dependency can be satisfied
+    """
+    for dep in deps:
+        as_task, as_branch, as_world = type_explode_id(dep.target_node_id)
+        if as_world is None:
+            # Not a possible world dependency, skip
+            continue
+        branch_id, world_id = as_world
+
+        # If branch not resolved yet, this world is potentially satisfiable
+        if branch_id not in state.resolved_branches:
+            return True
+
+        # If branch resolved to this world, it's satisfiable
+        if state.resolved_branches[branch_id] == world_id:
+            return True
+
+    return False
+
+
 def is_child_runnable_in_current_world(
     child_id: TaskId, state: SimulationState, visited: set[TaskId] | None = None
 ) -> bool:
@@ -214,53 +281,17 @@ def is_child_runnable_in_current_world(
             regular_deps.append(dep)
 
     # Check regular (non-possible-world) dependencies - ALL must be satisfiable
-    for dep in regular_deps:
-        as_task, as_branch, as_world = type_explode_id(dep.target_node_id)
+    all_regular_deps_satisfiable = all(
+        _is_regular_dep_satisfiable(dep, state, visited) for dep in regular_deps
+    )
+    if not all_regular_deps_satisfiable:
+        return False
 
-        # If this is a task dependency, recursively check if that task is runnable
-        if as_task is not None and is_task_node(as_task, state):
-            try:
-                dep_task = state.get_task(as_task)
-                # If dependency is a parent task, check if its runnable children
-                # can complete
-                if len(dep_task.children) > 0:
-                    # At least one child must be runnable for parent to be runnable
-                    if not any(
-                        is_child_runnable_in_current_world(child, state, visited)
-                        for child in dep_task.children
-                    ):
-                        return False
-                else:
-                    # Regular task - recursively check its dependencies
-                    if not is_child_runnable_in_current_world(as_task, state, visited):
-                        return False
-            except KeyError:
-                return False
-
-    # Check possible world dependencies - at least ONE must be satisfiable
-    if possible_world_deps:
-        any_satisfiable = False
-        for dep in possible_world_deps:
-            as_task, as_branch, as_world = type_explode_id(dep.target_node_id)
-            if as_world is None:
-                # Should not happen since we filtered for possible world deps
-                continue
-            branch_id, world_id = as_world
-
-            # If branch not resolved yet, this world is potentially satisfiable
-            if branch_id not in state.resolved_branches:
-                any_satisfiable = True
-                continue
-
-            # If branch resolved to this world, it's satisfiable
-            if state.resolved_branches[branch_id] == world_id:
-                any_satisfiable = True
-                break
-
-        if not any_satisfiable:
-            return False
-
-    return True
+    # Check possible world dependencies
+    # If there are any, at least ONE must be satisfiable
+    return not possible_world_deps or _has_any_satisfiable_possible_world_dep(
+        possible_world_deps, state
+    )
 
 
 def are_all_dependencies_satisfied(task: Task, state: SimulationState) -> bool:

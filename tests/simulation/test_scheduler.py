@@ -1577,3 +1577,228 @@ def test_is_child_runnable_with_parent_dependency_no_runnable_children(
 
     # Dependent should NOT be runnable because parent has no runnable children
     assert not is_child_runnable_in_current_world(dependent_id, state)
+
+
+def test_is_child_runnable_leaf_task_not_runnable(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable when leaf task dependency is not runnable."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    # Create a branch
+    branch_id = BranchId("b1")
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("pw2"), title="World 2", weight=1.0),
+        ],
+    )
+
+    # Create task1 (leaf) that depends on a specific possible world
+    task1_id = TaskId("t1")
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=PossibleWorldReference(f"{branch_id}:pw1"),
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create task2 that depends on task1 (leaf task dependency)
+    task2_id = TaskId("t2")
+    task2 = Task(
+        id=task2_id,
+        title="Task 2",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task1_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Build project
+    project = Project(
+        **simple_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    task1_id: PersistentObjectId("p1"),
+                    task2_id: PersistentObjectId("p2"),
+                    branch_id: PersistentObjectId("pb"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("p1"): PersistentTask(
+                id=PersistentObjectId("p1"),
+                versions={simple_project.dag.current_version_id: task1},
+            ),
+            PersistentObjectId("p2"): PersistentTask(
+                id=PersistentObjectId("p2"),
+                versions={simple_project.dag.current_version_id: task2},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={simple_project.dag.current_version_id: branch},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Resolve branch to pw2 (NOT pw1 which task1 depends on)
+    state.resolve_branch(branch_id, PossibleWorldId("pw2"))
+
+    # task2 should NOT be runnable because task1 (leaf) is not runnable
+    # This tests line 235-236: recursive check on leaf task fails
+    assert not is_child_runnable_in_current_world(task2_id, state)
+
+
+def test_is_child_runnable_task_dependency_not_in_version(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test is_child_runnable when task dependency exists but not in current version."""
+    from fluxx.simulation.scheduler import is_child_runnable_in_current_world
+
+    # Create task in old version only
+    old_version_id = DAGVersionId("v0")
+    old_task_id = TaskId("t_old")
+    old_task = Task(
+        id=old_task_id,
+        title="Old Task",
+        description="Task only in old version",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Create task that depends on old task
+    new_task_id = TaskId("t_new")
+    new_task = Task(
+        id=new_task_id,
+        title="New Task",
+        description="Task that depends on old task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=old_task_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Build project
+    project = Project(
+        **simple_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=simple_project.dag.model_copy(
+            update={
+                "node_map": {
+                    old_task_id: PersistentObjectId("p_old"),
+                    new_task_id: PersistentObjectId("p_new"),
+                }
+            }
+        ),
+        persistent_tasks={
+            # old_task only in old version, not in current version
+            PersistentObjectId("p_old"): PersistentTask(
+                id=PersistentObjectId("p_old"),
+                versions={old_version_id: old_task},
+            ),
+            # new_task in current version
+            PersistentObjectId("p_new"): PersistentTask(
+                id=PersistentObjectId("p_new"),
+                versions={simple_project.dag.current_version_id: new_task},
+            ),
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # new_task should NOT be runnable because old_task dependency raises KeyError
+    # This tests line 237-238: KeyError when get_task fails
+    assert not is_child_runnable_in_current_world(new_task_id, state)
+
+
+def test_is_regular_dep_satisfiable_branch_dependency(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test _is_regular_dep_satisfiable returns True for branch dependencies."""
+    from fluxx.simulation.scheduler import _is_regular_dep_satisfiable
+
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Add a branch to the project
+    branch_id = BranchId("b1")
+    branch = Branch(
+        id=branch_id,
+        title="Branch 1",
+        description="Test branch",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1", weight=1.0)
+        ],
+    )
+    persistent_branch = PersistentBranch(
+        id=PersistentObjectId("pb1"),
+        versions={simple_project.dag.current_version_id: branch},
+    )
+    state.project.dag.node_map[branch_id] = PersistentObjectId("pb1")
+    state.project.persistent_branches[PersistentObjectId("pb1")] = persistent_branch
+
+    # Dependency on branch (regular dependency, not possible world)
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=branch_id,
+        target_endpoint=Endpoint.OCCURRENCE,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    visited: set[TaskId] = set()
+    # Branch dependencies are considered satisfiable (return True at line 207)
+    assert _is_regular_dep_satisfiable(dep, state, visited)
+
+
+def test_has_any_satisfiable_possible_world_dep_with_non_pw_dep(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test _has_any_satisfiable_possible_world_dep handles non-PW deps via mocking."""
+    from unittest.mock import patch
+
+    from fluxx.simulation.scheduler import _has_any_satisfiable_possible_world_dep
+
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Create a dependency that looks like a possible world dep
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=TaskId("fake_task"),  # Not actually a PW reference
+        target_endpoint=Endpoint.END,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+
+    # Mock type_explode_id to return None for as_world (simulating malformed input)
+    with patch(
+        "fluxx.simulation.scheduler.type_explode_id",
+        return_value=(None, None, None),
+    ):
+        # Should return False because no satisfiable deps found (continues past None)
+        result = _has_any_satisfiable_possible_world_dep([dep], state)
+        assert result is False
