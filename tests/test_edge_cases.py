@@ -811,6 +811,16 @@ def test_update_task_excluded_worker_tasks(empty_project: Project) -> None:
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
+    # Add required dependency: task1.start >= task2.start
+    # This is required for excluded_worker_tasks validation
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task2_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    project = add_dependency(project, task1_id, dep)
+
     # Update task1's excluded_worker_tasks
     project = update_task(project, task1_id, excluded_worker_tasks=[task2_id])
 

@@ -1,5 +1,6 @@
 """Left panel containing DAG visualization and list view."""
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from fluxx.gui.controller import ProjectController
@@ -14,7 +15,12 @@ class DAGPanel(QWidget):
     This panel contains:
     - Control bar with history label and view toggle button
     - Stacked widget switching between DAG graphics view and list view
+
+    Signals:
+        edit_workers_requested: Emitted when Edit Workers button is clicked
     """
+
+    edit_workers_requested = Signal()
 
     def __init__(self, controller: ProjectController) -> None:
         """Initialize the DAG panel.
@@ -28,6 +34,7 @@ class DAGPanel(QWidget):
         # Create control bar
         self.control_bar = ControlBar(controller)
         self.control_bar.view_toggle_button.clicked.connect(self._switch_view)
+        self.control_bar.edit_workers_clicked.connect(self.edit_workers_requested.emit)
 
         # Create stacked widget for views
         self.view_stack = QStackedWidget()

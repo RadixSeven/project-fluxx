@@ -1,5 +1,6 @@
 """Control bar for DAG panel."""
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from fluxx.gui.controller import ProjectController
@@ -11,8 +12,14 @@ class ControlBar(QWidget):
     Features:
     - View toggle button (DAG/List)
     - History label
+    - Edit Workers button
     - Add root node button (future)
+
+    Signals:
+        edit_workers_clicked: Emitted when Edit Workers button is clicked
     """
+
+    edit_workers_clicked = Signal()
 
     def __init__(self, controller: ProjectController) -> None:
         """Initialize control bar.
@@ -43,6 +50,12 @@ class ControlBar(QWidget):
         self.view_toggle_button.clicked.connect(self._on_toggle_view)
         layout.addWidget(self.view_toggle_button)
 
+        # Edit Workers button
+        self.edit_workers_button = QPushButton("Edit Workers")
+        self.edit_workers_button.setToolTip("Open worker list editor")
+        self.edit_workers_button.clicked.connect(self._on_edit_workers)
+        layout.addWidget(self.edit_workers_button)
+
         # Add root node button (future feature)
         # self.add_root_button = QPushButton("Add Root Node")
         # layout.addWidget(self.add_root_button)
@@ -69,3 +82,7 @@ class ControlBar(QWidget):
             "list" or "dag"
         """
         return "list" if self.is_list_view else "dag"
+
+    def _on_edit_workers(self) -> None:
+        """Handle Edit Workers button click."""
+        self.edit_workers_clicked.emit()

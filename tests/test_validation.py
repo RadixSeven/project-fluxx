@@ -1025,6 +1025,363 @@ def test_excluded_worker_tasks_validation(base_project: Project) -> None:
         validate_dag(project)
 
 
+def test_excluded_worker_tasks_requires_dependency(base_project: Project) -> None:
+    """Test that excluded_worker_tasks requires the start dependency."""
+    # Task 1 excludes task 2's assignee but has no dependency on task 2
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        excluded_worker_tasks=[TaskId("t2")],  # Missing required dependency
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={base_project.dag.current_version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={base_project.dag.current_version_id: task2},
+    )
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    with pytest.raises(WorkerConstraintError, match="missing required dependency"):
+        validate_dag(project)
+
+
+def test_excluded_worker_tasks_with_dependency_passes(base_project: Project) -> None:
+    """Test that excluded_worker_tasks with required dependency passes validation."""
+    # Task 1 excludes task 2's assignee and has the required dependency
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        excluded_worker_tasks=[TaskId("t2")],
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=TaskId("t2"),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={base_project.dag.current_version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={base_project.dag.current_version_id: task2},
+    )
+
+    project = Project(
+        **base_project.model_dump(exclude={"persistent_tasks", "dag"}),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    # Should pass validation
+    validate_dag(project)
+
+
+def test_has_required_exclusion_dependency() -> None:
+    """Test the has_required_exclusion_dependency helper function."""
+    from fluxx.data.validation import has_required_exclusion_dependency
+
+    now = datetime.now(UTC)
+    metadata = ProjectMetadata(name="Test", created=now, last_modified=now)
+    version_id = DAGVersionId("v1")
+    dag = DAG(id=DAGId("dag1"), current_version_id=version_id)
+
+    # Task with the required dependency
+    task_with_dep = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=TaskId("t2"),
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Task without the required dependency
+    task_without_dep = Task(
+        id=TaskId("t3"),
+        title="Task 3",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag.model_copy(
+            update={
+                "node_map": {
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                    TaskId("t3"): PersistentObjectId("pt3"),
+                }
+            }
+        ),
+        workers=[],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task_with_dep},
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={
+                    version_id: Task(
+                        id=TaskId("t2"),
+                        title="Task 2",
+                        description="Test",
+                        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+                    )
+                },
+            ),
+            PersistentObjectId("pt3"): PersistentTask(
+                id=PersistentObjectId("pt3"),
+                versions={version_id: task_without_dep},
+            ),
+        },
+    )
+
+    # Task 1 has dependency on Task 2
+    assert has_required_exclusion_dependency(project, TaskId("t1"), TaskId("t2"))
+
+    # Task 1 does NOT have dependency on Task 3
+    assert not has_required_exclusion_dependency(project, TaskId("t1"), TaskId("t3"))
+
+    # Task 3 has no dependencies at all
+    assert not has_required_exclusion_dependency(project, TaskId("t3"), TaskId("t1"))
+
+    # Non-existent task
+    assert not has_required_exclusion_dependency(
+        project, TaskId("t_nonexistent"), TaskId("t1")
+    )
+
+
+def test_has_required_exclusion_dependency_branch_node() -> None:
+    """Test has_required_exclusion_dependency when source is a branch node."""
+    from fluxx.data.validation import has_required_exclusion_dependency
+
+    now = datetime.now(UTC)
+    metadata = ProjectMetadata(name="Test", created=now, last_modified=now)
+    version_id = DAGVersionId("v1")
+    dag = DAG(id=DAGId("dag1"), current_version_id=version_id)
+
+    # Create project with a branch (which is in node_map but NOT in persistent_tasks)
+    branch = Branch(
+        id=BranchId("b1"),
+        title="Branch 1",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World", weight=1.0)
+        ],
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag.model_copy(
+            update={
+                "node_map": {
+                    BranchId("b1"): PersistentObjectId("pb1"),
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                }
+            }
+        ),
+        workers=[],
+        persistent_branches={
+            PersistentObjectId("pb1"): PersistentBranch(
+                id=PersistentObjectId("pb1"),
+                versions={version_id: branch},
+            ),
+        },
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={
+                    version_id: Task(
+                        id=TaskId("t1"),
+                        title="Task 1",
+                        description="Test",
+                        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+                    )
+                },
+            ),
+        },
+    )
+
+    # This should return False because the source node is a branch, not a task
+    # (line 567 - source_persistent_id not in project.persistent_tasks)
+    result = has_required_exclusion_dependency(project, TaskId("b1"), TaskId("t1"))
+    assert result is False
+
+
+def test_has_required_exclusion_dependency_task_missing_version() -> None:
+    """Test has_required_exclusion_dependency when task missing current version."""
+    from fluxx.data.validation import has_required_exclusion_dependency
+
+    now = datetime.now(UTC)
+    metadata = ProjectMetadata(name="Test", created=now, last_modified=now)
+    version_id = DAGVersionId("v1")
+    old_version_id = DAGVersionId("v0")
+    dag = DAG(id=DAGId("dag1"), current_version_id=version_id)
+
+    # Task that only exists in old version, not current version
+    old_task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag.model_copy(
+            update={
+                "node_map": {
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                }
+            }
+        ),
+        workers=[],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={old_version_id: old_task},  # Only old version, not current!
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={
+                    version_id: Task(
+                        id=TaskId("t2"),
+                        title="Task 2",
+                        description="Test",
+                        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+                    )
+                },
+            ),
+        },
+    )
+
+    # This should return False because the task doesn't have current version
+    # (line 572 - current_version not in persistent_task.versions)
+    result = has_required_exclusion_dependency(project, TaskId("t1"), TaskId("t2"))
+    assert result is False
+
+
+def test_get_required_exclusion_dependency() -> None:
+    """Test the get_required_exclusion_dependency helper function."""
+    from fluxx.data.validation import get_required_exclusion_dependency
+
+    dep = get_required_exclusion_dependency(TaskId("t2"))
+
+    assert dep.source_endpoint == Endpoint.START
+    assert dep.target_node_id == TaskId("t2")
+    assert dep.target_endpoint == Endpoint.START
+    assert dep.constraint_type == ConstraintType.GREATER_EQUAL
+
+
+def test_validate_excluded_assignee_raises_error() -> None:
+    """Test that validate_excluded_assignee raises error without dependency."""
+    from fluxx.data.validation import validate_excluded_assignee
+
+    now = datetime.now(UTC)
+    metadata = ProjectMetadata(name="Test", created=now, last_modified=now)
+    version_id = DAGVersionId("v1")
+    dag = DAG(id=DAGId("dag1"), current_version_id=version_id)
+
+    # Task without required dependency
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag.model_copy(
+            update={
+                "node_map": {
+                    TaskId("t1"): PersistentObjectId("pt1"),
+                    TaskId("t2"): PersistentObjectId("pt2"),
+                }
+            }
+        ),
+        workers=[],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task},
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={
+                    version_id: Task(
+                        id=TaskId("t2"),
+                        title="Task 2",
+                        description="Test",
+                        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+                    )
+                },
+            ),
+        },
+    )
+
+    with pytest.raises(WorkerConstraintError, match="Missing required dependency"):
+        validate_excluded_assignee(project, TaskId("t1"), TaskId("t2"))
+
+
 def test_task_missing_current_version_in_hierarchy_check(
     base_project: Project,
 ) -> None:

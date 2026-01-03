@@ -172,6 +172,9 @@ class MainWindow(QMainWindow):
         # Connect dependency editing signals
         self._connect_dependency_editing_signals()
 
+        # Connect Edit Workers signal
+        self.dag_panel.edit_workers_requested.connect(self._on_edit_workers)
+
         # Create splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.dag_panel)
@@ -513,3 +516,11 @@ class MainWindow(QMainWindow):
             samples, self.controller.get_project(), parent=self
         )
         results_dialog.show()
+
+    def _on_edit_workers(self) -> None:
+        """Handle Edit Workers button click."""
+        # Clear the current selection to avoid unsaved changes prompt
+        # for node being edited
+        self.controller.select_node(None)
+        # Show worker editor in the editor panel
+        self.editor_panel.show_worker_editor()

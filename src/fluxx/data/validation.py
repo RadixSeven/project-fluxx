@@ -3,6 +3,7 @@
 from collections import defaultdict
 
 from fluxx.data.models import (
+    ConstraintType,
     DAGVersionId,
     Dependency,
     DependencyTargetId,
@@ -10,6 +11,8 @@ from fluxx.data.models import (
     NodeId,
     PossibleWorldId,
     Project,
+    Task,
+    TaskId,
     type_explode_id,
 )
 
@@ -370,6 +373,40 @@ def _validate_worker_constraints(project: Project, version_id: DAGVersionId) -> 
                     f"in excluded_worker_tasks"
                 )
 
+            # Validate required dependency exists for each exclusion
+            # According to spec, if task N excludes assignee of task M,
+            # there must be a dependency: N.start >= M.start
+            if not _has_required_exclusion_dep(task, excluded_task_id):
+                raise WorkerConstraintError(
+                    f"Task {node_id} excludes assignee of {excluded_task_id} "
+                    f"but missing required dependency: "
+                    f"{node_id}.start >= {excluded_task_id}.start"
+                )
+
+
+def _has_required_exclusion_dep(
+    task: Task,
+    excluded_task_id: TaskId,
+) -> bool:
+    """Check if task has the required dependency for an exclusion.
+
+    Args:
+        task: The task to check
+        excluded_task_id: The excluded task ID
+
+    Returns:
+        True if the required dependency exists
+    """
+    for dep in task.dependencies:
+        if (
+            dep.source_endpoint == Endpoint.START
+            and dep.target_node_id == excluded_task_id
+            and dep.target_endpoint == Endpoint.START
+            and dep.constraint_type == ConstraintType.GREATER_EQUAL
+        ):
+            return True
+    return False
+
 
 def validate_dependency(
     project: Project,
@@ -499,3 +536,96 @@ def validate_dependency(
             f"Branch {dependency.target_node_id} cannot use START/END endpoint "
             f"(only tasks can)"
         )
+
+
+def has_required_exclusion_dependency(
+    project: Project,
+    source_task_id: TaskId,
+    excluded_task_id: TaskId,
+) -> bool:
+    """Check if the required dependency for an exclusion exists.
+
+    According to the spec, if task N excludes the assignee of task M, there must be
+    a dependency: N.start >= M.start. This ensures M's assignee is known before N
+    starts in the simulation.
+
+    Args:
+        project: The project containing the tasks
+        source_task_id: The task that has the exclusion (task N)
+        excluded_task_id: The task whose assignee is excluded (task M)
+
+    Returns:
+        True if the required dependency exists, False otherwise
+    """
+    # Get source task
+    source_node_id: NodeId = source_task_id
+    source_persistent_id = project.dag.node_map.get(source_node_id)
+    if source_persistent_id is None:
+        return False
+
+    if source_persistent_id not in project.persistent_tasks:
+        return False
+
+    persistent_task = project.persistent_tasks[source_persistent_id]
+    current_version = project.dag.current_version_id
+    if current_version not in persistent_task.versions:
+        return False
+
+    task = persistent_task.versions[current_version]
+
+    # Check if the required dependency exists:
+    # source_task.start >= excluded_task.start
+    for dep in task.dependencies:
+        if (
+            dep.source_endpoint == Endpoint.START
+            and dep.target_node_id == excluded_task_id
+            and dep.target_endpoint == Endpoint.START
+            and dep.constraint_type == ConstraintType.GREATER_EQUAL
+        ):
+            return True
+
+    return False
+
+
+def validate_excluded_assignee(
+    project: Project,
+    source_task_id: TaskId,
+    excluded_task_id: TaskId,
+) -> None:
+    """Validate that an excluded assignee can be added.
+
+    This checks that the required dependency (source.start >= excluded.start) exists.
+
+    Args:
+        project: The project containing the tasks
+        source_task_id: The task that will have the exclusion
+        excluded_task_id: The task whose assignee will be excluded
+
+    Raises:
+        WorkerConstraintError: If the required dependency doesn't exist
+    """
+    if not has_required_exclusion_dependency(project, source_task_id, excluded_task_id):
+        raise WorkerConstraintError(
+            f"Cannot exclude assignee of task {excluded_task_id}: "
+            f"Missing required dependency. Add dependency "
+            f"'{source_task_id}.start >= {excluded_task_id}.start' first."
+        )
+
+
+def get_required_exclusion_dependency(
+    excluded_task_id: TaskId,
+) -> Dependency:
+    """Get the dependency required for an exclusion.
+
+    Args:
+        excluded_task_id: The task whose assignee will be excluded
+
+    Returns:
+        The dependency that must exist on the source task
+    """
+    return Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=excluded_task_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )

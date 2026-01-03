@@ -1229,3 +1229,899 @@ def test_task_editor_update_button_states_task_not_found(
     # Both subtask buttons should be disabled
     assert not task_editor.convert_to_parent_button.isEnabled()
     assert not task_editor.add_sibling_button.isEnabled()
+
+
+# ==================== Allowed Workers Tests ====================
+
+
+def test_task_editor_allowed_workers_empty_state(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test allowed workers section shows empty state when all workers allowed."""
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Empty state label should be visible, list should be hidden
+    # Note: isHidden() checks explicit visibility state;
+    # isVisible() requires parent to be shown
+    assert not task_editor.allowed_workers_empty_label.isHidden()
+    assert task_editor.allowed_workers_list.isHidden()
+    assert task_editor.allowed_workers_button_container.isHidden()
+
+
+def test_task_editor_allowed_workers_with_restrictions(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test allowed workers section shows list when workers are restricted."""
+    # Add workers first
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker_id],
+    )
+    task_editor.load_task(task_id)
+
+    # List should be visible, empty state hidden
+    assert task_editor.allowed_workers_empty_label.isHidden()
+    assert not task_editor.allowed_workers_list.isHidden()
+    assert not task_editor.allowed_workers_button_container.isHidden()
+    assert task_editor.allowed_workers_list.count() == 1
+
+
+def test_task_editor_restrict_workers_clicked(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test clicking restrict workers link switches to restricted mode."""
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Initially empty state
+    assert not task_editor.allowed_workers_empty_label.isHidden()
+
+    # Click restrict workers link
+    task_editor._on_restrict_workers_clicked("#")
+
+    # Should switch to list mode
+    assert task_editor.allowed_workers_empty_label.isHidden()
+    assert not task_editor.allowed_workers_list.isHidden()
+    assert not task_editor.allowed_workers_button_container.isHidden()
+
+    # Pending changes should have empty list
+    assert "allowed_workers" in task_editor.pending_changes
+    assert task_editor.pending_changes["allowed_workers"] == []
+
+
+def test_task_editor_allowed_worker_selection_changes(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test allowed worker selection enables/disables remove button."""
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker_id],
+    )
+    task_editor.load_task(task_id)
+
+    # Initially no selection
+    task_editor.allowed_workers_list.clearSelection()
+    task_editor._on_allowed_worker_selection_changed()
+    assert not task_editor.remove_allowed_worker_button.isEnabled()
+
+    # Select the worker
+    task_editor.allowed_workers_list.setCurrentRow(0)
+    assert task_editor.remove_allowed_worker_button.isEnabled()
+
+
+def test_task_editor_remove_allowed_worker(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test removing a worker from allowed list."""
+    worker1_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    worker2_id = controller.add_worker(name="Bob", hours_per_workday=7.5)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker1_id, worker2_id],
+    )
+    task_editor.load_task(task_id)
+
+    assert task_editor.allowed_workers_list.count() == 2
+
+    # Select and remove first worker
+    task_editor.allowed_workers_list.setCurrentRow(0)
+    task_editor._on_remove_allowed_worker()
+
+    # Should have one worker left
+    assert "allowed_workers" in task_editor.pending_changes
+    assert len(task_editor.pending_changes["allowed_workers"]) == 1
+
+
+def test_task_editor_remove_allowed_worker_no_selection(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test removing allowed worker when nothing is selected."""
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker_id],
+    )
+    task_editor.load_task(task_id)
+
+    # Clear selection and try to remove
+    task_editor.allowed_workers_list.clearSelection()
+    task_editor._on_remove_allowed_worker()
+
+    # Nothing should change
+    assert "allowed_workers" not in task_editor.pending_changes
+
+
+def test_task_editor_allow_all_workers(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test clicking allow all workers button."""
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker_id],
+    )
+    task_editor.load_task(task_id)
+
+    # Click allow all workers
+    task_editor._on_allow_all_workers()
+
+    # Should set to None and show empty state
+    assert "allowed_workers" in task_editor.pending_changes
+    assert task_editor.pending_changes["allowed_workers"] is None
+    assert not task_editor.allowed_workers_empty_label.isHidden()
+
+
+def test_task_editor_load_allowed_workers_unknown_worker(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading allowed workers with an unknown worker ID."""
+    from fluxx.data.models import WorkerId
+
+    # Create task without allowed workers
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Directly call _load_allowed_workers with an unknown worker ID
+    # This simulates loading a task that was created when the worker existed
+    # but the worker has since been deleted
+    task_editor._load_allowed_workers([WorkerId("unknown-worker-id")])
+
+    # Should show unknown worker in list
+    assert task_editor.allowed_workers_list.count() == 1
+    item = task_editor.allowed_workers_list.item(0)
+    assert item is not None
+    assert "Unknown" in item.text()
+
+
+# ==================== Excluded Assignees Tests ====================
+
+
+def test_task_editor_excluded_assignees_empty(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test excluded assignees list is empty by default."""
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    assert task_editor.excluded_assignees_list.count() == 0
+
+
+def test_task_editor_load_excluded_assignees(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading excluded assignee tasks."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add required dependency first
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task2_id, dep)
+
+    # Update task2 to exclude task1's assignee
+    controller.update_task(task2_id, excluded_worker_tasks=[task1_id])
+
+    task_editor.load_task(task2_id)
+
+    assert task_editor.excluded_assignees_list.count() == 1
+    item = task_editor.excluded_assignees_list.item(0)
+    assert item is not None
+    assert item.text() == "Task 1"
+
+
+def test_task_editor_excluded_assignee_selection_changed(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test excluded assignee selection enables/disables remove button."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add required dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task2_id, dep)
+    controller.update_task(task2_id, excluded_worker_tasks=[task1_id])
+
+    task_editor.load_task(task2_id)
+
+    # Initially no selection
+    task_editor.excluded_assignees_list.clearSelection()
+    task_editor._on_excluded_assignee_selection_changed()
+    assert not task_editor.remove_excluded_task_button.isEnabled()
+
+    # Select the task
+    task_editor.excluded_assignees_list.setCurrentRow(0)
+    assert task_editor.remove_excluded_task_button.isEnabled()
+
+
+def test_task_editor_get_current_excluded_tasks_empty(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _get_current_excluded_tasks returns empty list when no task loaded."""
+    assert task_editor._get_current_excluded_tasks() == []
+
+
+def test_task_editor_get_current_excluded_tasks_from_pending(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _get_current_excluded_tasks returns pending changes if present."""
+    from fluxx.data.models import TaskId
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Set pending changes
+    fake_excluded = [TaskId("fake-id")]
+    task_editor.pending_changes["excluded_worker_tasks"] = fake_excluded
+
+    result = task_editor._get_current_excluded_tasks()
+    assert result == fake_excluded
+
+
+def test_task_editor_get_available_tasks_for_exclusion(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _get_available_tasks_for_exclusion returns other tasks."""
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task1_id)
+
+    available = task_editor._get_available_tasks_for_exclusion()
+
+    # Should include task2 but not task1 (current task)
+    task_ids = [t[0] for t in available]
+    assert task2_id in task_ids
+    assert task1_id not in task_ids
+
+
+def test_task_editor_get_available_tasks_for_exclusion_no_task(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _get_available_tasks_for_exclusion with no task loaded."""
+    assert task_editor._get_available_tasks_for_exclusion() == []
+
+
+def test_task_editor_remove_excluded_task(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test removing an excluded task."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add required dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task2_id, dep)
+    controller.update_task(task2_id, excluded_worker_tasks=[task1_id])
+
+    task_editor.load_task(task2_id)
+    assert task_editor.excluded_assignees_list.count() == 1
+
+    # Select and remove
+    task_editor.excluded_assignees_list.setCurrentRow(0)
+    task_editor._on_remove_excluded_task()
+
+    # Should be empty now
+    assert "excluded_worker_tasks" in task_editor.pending_changes
+    assert len(task_editor.pending_changes["excluded_worker_tasks"]) == 0
+
+
+def test_task_editor_remove_excluded_task_no_selection(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test removing excluded task when nothing is selected."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task2_id, dep)
+    controller.update_task(task2_id, excluded_worker_tasks=[task1_id])
+
+    task_editor.load_task(task2_id)
+
+    # Clear selection and try to remove
+    task_editor.excluded_assignees_list.clearSelection()
+    task_editor._on_remove_excluded_task()
+
+    # Nothing should change
+    assert "excluded_worker_tasks" not in task_editor.pending_changes
+
+
+def test_task_editor_add_dependency_to_pending(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _add_dependency_to_pending adds dependency to pending changes."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task2_id)
+
+    # Add dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    task_editor._add_dependency_to_pending(dep)
+
+    assert "dependencies" in task_editor.pending_changes
+    assert dep in task_editor.pending_changes["dependencies"]
+
+
+def test_task_editor_add_dependency_to_pending_no_task(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _add_dependency_to_pending with no task loaded."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint, TaskId
+
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=TaskId("some-id"),
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    task_editor._add_dependency_to_pending(dep)
+
+    # Should not add anything
+    assert "dependencies" not in task_editor.pending_changes
+
+
+def test_task_editor_add_dependency_to_pending_already_exists(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _add_dependency_to_pending doesn't duplicate existing dependencies."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add dependency first
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task2_id, dep)
+
+    task_editor.load_task(task2_id)
+
+    # Try to add same dependency again
+    task_editor._add_dependency_to_pending(dep)
+
+    # Should only have one dependency
+    if "dependencies" in task_editor.pending_changes:
+        count = sum(1 for d in task_editor.pending_changes["dependencies"] if d == dep)
+        assert count <= 1
+
+
+def test_task_editor_load_excluded_assignees_unknown_task(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading excluded assignees with unknown task ID."""
+    from fluxx.data.models import TaskId
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Directly call load with unknown task ID
+    task_editor.load_task(task_id)
+    task_editor._load_excluded_assignees([TaskId("unknown-task-id")])
+
+    # Should show unknown task
+    assert task_editor.excluded_assignees_list.count() == 1
+    item = task_editor.excluded_assignees_list.item(0)
+    assert item is not None
+    assert "Unknown" in item.text()
+
+
+def test_task_editor_apply_allowed_workers_change(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test applying allowed workers changes."""
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Set allowed workers
+    task_editor.pending_changes["allowed_workers"] = [worker_id]
+    task_editor._update_button_states()
+
+    # Apply changes
+    task_editor._on_apply()
+
+    # Verify task was updated
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+    assert task.allowed_workers is not None
+    assert worker_id in task.allowed_workers
+
+
+def test_task_editor_apply_excluded_tasks_change(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test applying excluded worker tasks changes."""
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add required dependency
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task1_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task2_id, dep)
+
+    task_editor.load_task(task2_id)
+
+    # Set excluded worker tasks
+    task_editor.pending_changes["excluded_worker_tasks"] = [task1_id]
+    task_editor._update_button_states()
+
+    # Apply changes
+    task_editor._on_apply()
+
+    # Verify task was updated
+    project = controller.get_project()
+    node_id = task2_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+    assert task1_id in task.excluded_worker_tasks
+
+
+# ==================== Dialog-mocking tests for coverage ====================
+
+
+def test_task_editor_add_allowed_worker_no_workers(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding allowed worker when no workers exist in project."""
+    from unittest.mock import patch
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Switch to restricted mode first
+    task_editor._on_restrict_workers_clicked("#")
+
+    # Mock QMessageBox to avoid modal dialog
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.information"
+    ) as mock_info:
+        task_editor._on_add_allowed_worker()
+        mock_info.assert_called_once()
+
+
+def test_task_editor_add_allowed_worker_all_added(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding allowed worker when all workers already in list."""
+    from unittest.mock import patch
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker_id],
+    )
+    task_editor.load_task(task_id)
+
+    # Mock QMessageBox
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.information"
+    ) as mock_info:
+        task_editor._on_add_allowed_worker()
+        mock_info.assert_called_once()
+
+
+def test_task_editor_add_allowed_worker_with_dialog(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding allowed worker via dialog selection."""
+    from unittest.mock import patch
+
+    worker_id = controller.add_worker(name="Bob", hours_per_workday=8.0)
+    controller.add_worker(name="Charlie", hours_per_workday=7.5)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        allowed_workers=[worker_id],  # Bob is already allowed
+    )
+    task_editor.load_task(task_id)
+
+    # Mock QInputDialog.getItem to return "Charlie"
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("Charlie", True)
+        task_editor._on_add_allowed_worker()
+
+        # Should have added Charlie
+        assert "allowed_workers" in task_editor.pending_changes
+        assert len(task_editor.pending_changes["allowed_workers"]) == 2
+
+
+def test_task_editor_add_allowed_worker_cancelled(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test cancelling the add allowed worker dialog."""
+    from unittest.mock import patch
+
+    controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+    task_editor._on_restrict_workers_clicked("#")
+
+    # Mock dialog returning cancelled
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("", False)
+        task_editor._on_add_allowed_worker()
+
+        # allowed_workers should still be empty
+        assert task_editor.pending_changes["allowed_workers"] == []
+
+
+def test_task_editor_add_excluded_task_no_tasks(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding excluded task when no other tasks exist."""
+    from unittest.mock import patch
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Mock QMessageBox
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.information"
+    ) as mock_info:
+        task_editor._on_add_excluded_task()
+        mock_info.assert_called_once()
+
+
+def test_task_editor_add_excluded_task_cancelled(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test cancelling the add excluded task dialog."""
+    from unittest.mock import patch
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task1_id)
+
+    # Mock dialog returning cancelled
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("", False)
+        task_editor._on_add_excluded_task()
+
+        # excluded_worker_tasks should not be in pending changes
+        assert "excluded_worker_tasks" not in task_editor.pending_changes
+
+
+def test_task_editor_add_excluded_task_with_existing_dep(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding excluded task when dependency already exists."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import ConstraintType, Dependency, Endpoint
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add required dependency first
+    dep = Dependency(
+        source_endpoint=Endpoint.START,
+        target_node_id=task2_id,
+        target_endpoint=Endpoint.START,
+        constraint_type=ConstraintType.GREATER_EQUAL,
+    )
+    controller.add_dependency(task1_id, dep)
+
+    task_editor.load_task(task1_id)
+
+    # Mock dialog to select Task 2
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("Task 2", True)
+        task_editor._on_add_excluded_task()
+
+        # Should have added Task 2 to exclusion list
+        assert "excluded_worker_tasks" in task_editor.pending_changes
+        assert task2_id in task_editor.pending_changes["excluded_worker_tasks"]
+
+
+def test_task_editor_add_excluded_task_add_dep_accepted(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding excluded task with auto-add dependency accepted."""
+    from unittest.mock import patch
+
+    from PySide6.QtWidgets import QMessageBox
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task2_id = controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task1_id)
+
+    # Mock both dialogs
+    with (
+        patch(
+            "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+        ) as mock_input,
+        patch(
+            "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
+        ) as mock_question,
+    ):
+        mock_input.return_value = ("Task 2", True)
+        mock_question.return_value = QMessageBox.StandardButton.Yes
+
+        task_editor._on_add_excluded_task()
+
+        # Should have added both the exclusion and the dependency
+        assert "excluded_worker_tasks" in task_editor.pending_changes
+        assert task2_id in task_editor.pending_changes["excluded_worker_tasks"]
+        assert "dependencies" in task_editor.pending_changes
+
+
+def test_task_editor_add_excluded_task_add_dep_rejected(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding excluded task with auto-add dependency rejected."""
+    from unittest.mock import patch
+
+    from PySide6.QtWidgets import QMessageBox
+
+    task1_id = controller.create_task(
+        title="Task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    controller.create_task(
+        title="Task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task1_id)
+
+    # Mock both dialogs - user rejects adding dependency
+    with (
+        patch(
+            "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+        ) as mock_input,
+        patch(
+            "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
+        ) as mock_question,
+    ):
+        mock_input.return_value = ("Task 2", True)
+        mock_question.return_value = QMessageBox.StandardButton.No
+
+        task_editor._on_add_excluded_task()
+
+        # Should NOT have added the exclusion
+        assert "excluded_worker_tasks" not in task_editor.pending_changes
+
+
+def test_task_editor_add_allowed_worker_with_worker_id(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test adding worker that has a worker_id field."""
+    from unittest.mock import patch
+
+    controller.add_worker(name="Alice", hours_per_workday=8.0, worker_id="alice_001")
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+    task_editor._on_restrict_workers_clicked("#")
+
+    # Mock dialog
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("Alice (alice_001)", True)
+        task_editor._on_add_allowed_worker()
+
+        # Should have added worker
+        assert "allowed_workers" in task_editor.pending_changes
+        assert len(task_editor.pending_changes["allowed_workers"]) == 1
+
+
+def test_task_editor_remove_allowed_worker_from_pending(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test removing worker from pending allowed workers list."""
+    worker1_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    worker2_id = controller.add_worker(name="Bob", hours_per_workday=7.5)
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Set pending changes with both workers
+    task_editor.pending_changes["allowed_workers"] = [worker1_id, worker2_id]
+    task_editor._load_allowed_workers([worker1_id, worker2_id])
+
+    # Select and remove first worker
+    task_editor.allowed_workers_list.setCurrentRow(0)
+    task_editor._on_remove_allowed_worker()
+
+    # Should have one worker left
+    assert len(task_editor.pending_changes["allowed_workers"]) == 1

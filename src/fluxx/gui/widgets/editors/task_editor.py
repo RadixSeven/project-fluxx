@@ -27,7 +27,12 @@ from fluxx.data.models import (
     ShiftedLognormal,
     TaskId,
     Triangular,
+    WorkerId,
     type_explode_id,
+)
+from fluxx.data.validation import (
+    get_required_exclusion_dependency,
+    has_required_exclusion_dependency,
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
@@ -148,6 +153,100 @@ class TaskEditor(QWidget):
         # Track editing state
         self._editing_dependency_index: int | None = None  # None = adding new
 
+        # Worker Constraints section
+        worker_constraints_label = QLabel("Worker Constraints:")
+        worker_constraints_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(worker_constraints_label)
+
+        # Allowed Workers subsection
+        allowed_workers_label = QLabel("Allowed Workers:")
+        layout.addWidget(allowed_workers_label)
+
+        # Container for allowed workers content (switches between message and list)
+        self.allowed_workers_container = QWidget()
+        allowed_workers_layout = QVBoxLayout()
+        allowed_workers_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Empty state message with link
+        self.allowed_workers_empty_label = QLabel(
+            'All workers allowed. <a href="#">Click to restrict to specific workers</a>'
+        )
+        self.allowed_workers_empty_label.linkActivated.connect(
+            self._on_restrict_workers_clicked
+        )
+        allowed_workers_layout.addWidget(self.allowed_workers_empty_label)
+
+        # List widget for allowed workers
+        self.allowed_workers_list = QListWidget()
+        self.allowed_workers_list.setMaximumHeight(80)
+        self.allowed_workers_list.itemSelectionChanged.connect(
+            self._on_allowed_worker_selection_changed
+        )
+        self.allowed_workers_list.setVisible(False)
+        allowed_workers_layout.addWidget(self.allowed_workers_list)
+
+        # Allowed workers buttons (initially hidden)
+        self.allowed_workers_button_container = QWidget()
+        allowed_workers_button_layout = QHBoxLayout()
+        allowed_workers_button_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.add_allowed_worker_button = QPushButton("Add Worker")
+        self.add_allowed_worker_button.clicked.connect(self._on_add_allowed_worker)
+        allowed_workers_button_layout.addWidget(self.add_allowed_worker_button)
+
+        self.remove_allowed_worker_button = QPushButton("Remove Worker")
+        self.remove_allowed_worker_button.clicked.connect(
+            self._on_remove_allowed_worker
+        )
+        self.remove_allowed_worker_button.setEnabled(False)
+        allowed_workers_button_layout.addWidget(self.remove_allowed_worker_button)
+
+        self.allow_all_workers_button = QPushButton("Allow All")
+        self.allow_all_workers_button.clicked.connect(self._on_allow_all_workers)
+        allowed_workers_button_layout.addWidget(self.allow_all_workers_button)
+
+        allowed_workers_button_layout.addStretch()
+        self.allowed_workers_button_container.setLayout(allowed_workers_button_layout)
+        self.allowed_workers_button_container.setVisible(False)
+        allowed_workers_layout.addWidget(self.allowed_workers_button_container)
+
+        self.allowed_workers_container.setLayout(allowed_workers_layout)
+        layout.addWidget(self.allowed_workers_container)
+
+        # Excluded Assignees subsection
+        excluded_assignees_label = QLabel("Excluded Assignees:")
+        layout.addWidget(excluded_assignees_label)
+
+        # Explanation label
+        excluded_explanation = QLabel(
+            "Tasks whose assigned workers cannot work on this task"
+        )
+        excluded_explanation.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(excluded_explanation)
+
+        # List widget for excluded assignee tasks
+        self.excluded_assignees_list = QListWidget()
+        self.excluded_assignees_list.setMaximumHeight(80)
+        self.excluded_assignees_list.itemSelectionChanged.connect(
+            self._on_excluded_assignee_selection_changed
+        )
+        layout.addWidget(self.excluded_assignees_list)
+
+        # Excluded assignees buttons
+        excluded_button_layout = QHBoxLayout()
+
+        self.add_excluded_task_button = QPushButton("Add Task")
+        self.add_excluded_task_button.clicked.connect(self._on_add_excluded_task)
+        excluded_button_layout.addWidget(self.add_excluded_task_button)
+
+        self.remove_excluded_task_button = QPushButton("Remove Task")
+        self.remove_excluded_task_button.clicked.connect(self._on_remove_excluded_task)
+        self.remove_excluded_task_button.setEnabled(False)
+        excluded_button_layout.addWidget(self.remove_excluded_task_button)
+
+        excluded_button_layout.addStretch()
+        layout.addLayout(excluded_button_layout)
+
         # Subtask operations section
         subtask_label = QLabel("Subtask Operations:")
         subtask_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
@@ -234,6 +333,12 @@ class TaskEditor(QWidget):
 
         # Dependencies
         self._load_dependencies(task.dependencies)
+
+        # Allowed workers
+        self._load_allowed_workers(task.allowed_workers)
+
+        # Excluded assignees
+        self._load_excluded_assignees(task.excluded_worker_tasks)
 
         # Update button states
         self._update_button_states()
@@ -850,3 +955,388 @@ class TaskEditor(QWidget):
         except Exception as e:
             # TODO: Show error dialog
             print(f"Error adding sibling: {e}")
+
+    # Allowed Workers methods
+
+    def _load_allowed_workers(self, allowed_workers: list[WorkerId] | None) -> None:
+        """Load allowed workers into the UI.
+
+        Args:
+            allowed_workers: List of allowed worker IDs, or None if all are allowed
+        """
+        self.allowed_workers_list.clear()
+
+        if allowed_workers is None or len(allowed_workers) == 0:
+            # Show empty state
+            self.allowed_workers_empty_label.setVisible(True)
+            self.allowed_workers_list.setVisible(False)
+            self.allowed_workers_button_container.setVisible(False)
+        else:
+            # Show populated list
+            self.allowed_workers_empty_label.setVisible(False)
+            self.allowed_workers_list.setVisible(True)
+            self.allowed_workers_button_container.setVisible(True)
+
+            # Get worker names from controller
+            workers = self.controller.get_workers()
+            worker_map = {w.id: w for w in workers}
+
+            for worker_id in allowed_workers:
+                if worker_id in worker_map:
+                    worker = worker_map[worker_id]
+                    display_name = worker.name
+                    if worker.worker_id:
+                        display_name += f" ({worker.worker_id})"
+                    self.allowed_workers_list.addItem(display_name)
+                else:
+                    # Worker not found - might have been deleted
+                    self.allowed_workers_list.addItem(f"Unknown ({worker_id})")
+
+    def _on_restrict_workers_clicked(self, link: str) -> None:
+        """Handle click on the 'restrict to specific workers' link.
+
+        Args:
+            link: Link URL (ignored, just used to trigger the click)
+        """
+        # Switch to restricted mode with empty list
+        # User will need to add workers
+        self.allowed_workers_empty_label.setVisible(False)
+        self.allowed_workers_list.setVisible(True)
+        self.allowed_workers_button_container.setVisible(True)
+
+        # Set pending change to empty list (will be normalized to None if left empty)
+        self.pending_changes["allowed_workers"] = []
+        self._update_button_states()
+
+    def _on_allowed_worker_selection_changed(self) -> None:
+        """Handle allowed worker list selection changes."""
+        has_selection = len(self.allowed_workers_list.selectedItems()) > 0
+        self.remove_allowed_worker_button.setEnabled(has_selection)
+
+    def _on_add_allowed_worker(self) -> None:
+        """Add a worker to the allowed workers list."""
+        # Get all workers
+        workers = self.controller.get_workers()
+        if not workers:
+            QMessageBox.information(
+                self,
+                "No Workers",
+                "There are no workers in the project. "
+                "Add workers first using the Edit Workers button.",
+            )
+            return
+
+        # Get current allowed workers from pending changes or task
+        current_allowed: list[WorkerId] = []
+        if "allowed_workers" in self.pending_changes:
+            current_allowed = list(self.pending_changes["allowed_workers"] or [])
+        elif self.current_task_id is not None:
+            project = self.controller.get_project()
+            node_id = self.current_task_id
+            if node_id in project.dag.node_map:
+                persistent_id = project.dag.node_map[node_id]
+                if persistent_id in project.persistent_tasks:
+                    persistent_task = project.persistent_tasks[persistent_id]
+                    current_version = project.dag.current_version_id
+                    if current_version in persistent_task.versions:
+                        task = persistent_task.versions[current_version]
+                        current_allowed = list(task.allowed_workers or [])
+
+        # Build list of workers not already in the list
+        available_workers = [w for w in workers if w.id not in current_allowed]
+        if not available_workers:
+            QMessageBox.information(
+                self,
+                "All Workers Added",
+                "All available workers are already in the allowed list.",
+            )
+            return
+
+        # Show dialog to select a worker
+        worker_names = []
+        for w in available_workers:
+            name = w.name
+            if w.worker_id:
+                name += f" ({w.worker_id})"
+            worker_names.append(name)
+
+        selected_name, ok = QInputDialog.getItem(
+            self,
+            "Add Allowed Worker",
+            "Select a worker to allow:",
+            worker_names,
+            0,
+            False,
+        )
+
+        if not ok:
+            return
+
+        # Find the selected worker
+        selected_index = worker_names.index(selected_name)
+        selected_worker = available_workers[selected_index]
+
+        # Add to the list
+        current_allowed.append(selected_worker.id)
+        self.pending_changes["allowed_workers"] = current_allowed
+        self._load_allowed_workers(current_allowed)
+        self._update_button_states()
+
+    def _on_remove_allowed_worker(self) -> None:
+        """Remove selected worker from the allowed workers list."""
+        selected_items = self.allowed_workers_list.selectedItems()
+        if not selected_items:
+            return
+
+        selected_index = self.allowed_workers_list.row(selected_items[0])
+
+        # Get current allowed workers
+        current_allowed: list[WorkerId] = []
+        if "allowed_workers" in self.pending_changes:
+            current_allowed = list(self.pending_changes["allowed_workers"] or [])
+        elif self.current_task_id is not None:
+            project = self.controller.get_project()
+            node_id = self.current_task_id
+            if node_id in project.dag.node_map:
+                persistent_id = project.dag.node_map[node_id]
+                if persistent_id in project.persistent_tasks:
+                    persistent_task = project.persistent_tasks[persistent_id]
+                    current_version = project.dag.current_version_id
+                    if current_version in persistent_task.versions:
+                        task = persistent_task.versions[current_version]
+                        current_allowed = list(task.allowed_workers or [])
+
+        if 0 <= selected_index < len(current_allowed):
+            current_allowed.pop(selected_index)
+            self.pending_changes["allowed_workers"] = current_allowed
+            self._load_allowed_workers(current_allowed)
+            self._update_button_states()
+
+    def _on_allow_all_workers(self) -> None:
+        """Reset to allowing all workers."""
+        self.pending_changes["allowed_workers"] = None
+        self._load_allowed_workers(None)
+        self._update_button_states()
+
+    # Excluded Assignees methods
+
+    def _load_excluded_assignees(self, excluded_tasks: list[TaskId]) -> None:
+        """Load excluded assignee tasks into the UI.
+
+        Args:
+            excluded_tasks: List of task IDs whose assignees are excluded
+        """
+        self.excluded_assignees_list.clear()
+
+        if not excluded_tasks:
+            return
+
+        project = self.controller.get_project()
+        current_version = project.dag.current_version_id
+
+        for task_id in excluded_tasks:
+            # Get task title
+            node_id: NodeId = task_id
+            if node_id in project.dag.node_map:
+                persistent_id = project.dag.node_map[node_id]
+                if persistent_id in project.persistent_tasks:
+                    persistent_task = project.persistent_tasks[persistent_id]
+                    if current_version in persistent_task.versions:
+                        task = persistent_task.versions[current_version]
+                        self.excluded_assignees_list.addItem(task.title)
+                        continue
+
+            # Task not found
+            self.excluded_assignees_list.addItem(f"Unknown ({task_id})")
+
+    def _on_excluded_assignee_selection_changed(self) -> None:
+        """Handle excluded assignee list selection changes."""
+        has_selection = len(self.excluded_assignees_list.selectedItems()) > 0
+        self.remove_excluded_task_button.setEnabled(has_selection)
+
+    def _get_current_excluded_tasks(self) -> list[TaskId]:
+        """Get the current list of excluded task IDs.
+
+        Returns:
+            List of task IDs from pending changes or current task
+        """
+        if "excluded_worker_tasks" in self.pending_changes:
+            return list(self.pending_changes["excluded_worker_tasks"])
+
+        if self.current_task_id is None:
+            return []
+
+        project = self.controller.get_project()
+        node_id = self.current_task_id
+        if node_id not in project.dag.node_map:
+            return []
+
+        persistent_id = project.dag.node_map[node_id]
+        if persistent_id not in project.persistent_tasks:
+            return []
+
+        persistent_task = project.persistent_tasks[persistent_id]
+        current_version = project.dag.current_version_id
+        if current_version not in persistent_task.versions:
+            return []
+
+        task = persistent_task.versions[current_version]
+        return list(task.excluded_worker_tasks)
+
+    def _get_available_tasks_for_exclusion(self) -> list[tuple[TaskId, str]]:
+        """Get list of tasks that can be added to excluded assignees.
+
+        Returns:
+            List of (task_id, title) tuples for tasks that can be excluded
+        """
+        if self.current_task_id is None:
+            return []
+
+        project = self.controller.get_project()
+        current_version = project.dag.current_version_id
+        current_excluded = self._get_current_excluded_tasks()
+
+        available_tasks: list[tuple[TaskId, str]] = []
+
+        for node_id, persistent_id in project.dag.node_map.items():
+            # Skip if it's the current task
+            if node_id == self.current_task_id:
+                continue
+
+            # Skip if not a task
+            if persistent_id not in project.persistent_tasks:
+                continue
+
+            # Skip if already in the excluded list
+            task_id = TaskId(str(node_id))
+            if task_id in current_excluded:
+                continue
+
+            # Get task title
+            persistent_task = project.persistent_tasks[persistent_id]
+            if current_version not in persistent_task.versions:
+                continue
+
+            task = persistent_task.versions[current_version]
+            available_tasks.append((task_id, task.title))
+
+        return available_tasks
+
+    def _on_add_excluded_task(self) -> None:
+        """Add a task to the excluded assignees list."""
+        available_tasks = self._get_available_tasks_for_exclusion()
+
+        if not available_tasks:
+            QMessageBox.information(
+                self,
+                "No Tasks Available",
+                "There are no other tasks that can be added to the exclusion list.",
+            )
+            return
+
+        # Show dialog to select a task
+        task_names = [title for _, title in available_tasks]
+
+        selected_name, ok = QInputDialog.getItem(
+            self,
+            "Add Excluded Task",
+            "Select a task to exclude its assignee:",
+            task_names,
+            0,
+            False,
+        )
+
+        if not ok:
+            return
+
+        # Find the selected task
+        selected_index = task_names.index(selected_name)
+        selected_task_id = available_tasks[selected_index][0]
+
+        # Check if the required dependency exists
+        if self.current_task_id is None:
+            return
+
+        project = self.controller.get_project()
+        has_dep = has_required_exclusion_dependency(
+            project, self.current_task_id, selected_task_id
+        )
+
+        if not has_dep:
+            # Ask user if they want to add the required dependency
+            msg = (
+                f"To exclude the assignee of '{selected_name}', "
+                f"a dependency is required:\n"
+                f"  this task.start >= {selected_name}.start\n\n"
+                f"This ensures the excluded task's assignee is known "
+                f"before this task starts.\n\n"
+                f"Would you like to add this dependency automatically?"
+            )
+            reply = QMessageBox.question(
+                self,
+                "Required Dependency Missing",
+                msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                # Add the required dependency to pending changes
+                required_dep = get_required_exclusion_dependency(selected_task_id)
+                self._add_dependency_to_pending(required_dep)
+            else:
+                return  # User chose not to add, cancel the operation
+
+        # Add to the list
+        current_excluded = self._get_current_excluded_tasks()
+        current_excluded.append(selected_task_id)
+        self.pending_changes["excluded_worker_tasks"] = current_excluded
+        self._load_excluded_assignees(current_excluded)
+        self._update_button_states()
+
+    def _add_dependency_to_pending(self, dependency: Dependency) -> None:
+        """Add a dependency to pending changes.
+
+        Args:
+            dependency: The dependency to add
+        """
+        # Get current dependencies
+        if "dependencies" in self.pending_changes:
+            current_deps = list(self.pending_changes["dependencies"])
+        else:
+            project = self.controller.get_project()
+            if self.current_task_id is None:
+                return
+            node_id = self.current_task_id
+            if node_id not in project.dag.node_map:
+                return
+            persistent_id = project.dag.node_map[node_id]
+            if persistent_id not in project.persistent_tasks:
+                return
+            persistent_task = project.persistent_tasks[persistent_id]
+            current_version = project.dag.current_version_id
+            if current_version not in persistent_task.versions:
+                return
+            task = persistent_task.versions[current_version]
+            current_deps = list(task.dependencies)
+
+        # Add the new dependency if not already present
+        if dependency not in current_deps:
+            current_deps.append(dependency)
+            self.pending_changes["dependencies"] = current_deps
+            self._load_dependencies(current_deps)
+
+    def _on_remove_excluded_task(self) -> None:
+        """Remove selected task from the excluded assignees list."""
+        selected_items = self.excluded_assignees_list.selectedItems()
+        if not selected_items:
+            return
+
+        selected_index = self.excluded_assignees_list.row(selected_items[0])
+        current_excluded = self._get_current_excluded_tasks()
+
+        if 0 <= selected_index < len(current_excluded):
+            current_excluded.pop(selected_index)
+            self.pending_changes["excluded_worker_tasks"] = current_excluded
+            self._load_excluded_assignees(current_excluded)
+            self._update_button_states()
