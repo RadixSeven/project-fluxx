@@ -1,6 +1,6 @@
 """Branch editor widget for editing branch properties."""
 
-from typing import Any
+from typing import TypedDict
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -30,6 +30,18 @@ from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
 
 
+class BranchPendingChanges(TypedDict, total=False):
+    """Type definition for pending branch changes.
+
+    All fields are optional since changes are accumulated incrementally.
+    """
+
+    title: str
+    description: str
+    possible_worlds: list[PossibleWorld]
+    dependencies: list[Dependency]
+
+
 class BranchEditor(QWidget):
     """Widget for editing branch properties.
 
@@ -57,7 +69,7 @@ class BranchEditor(QWidget):
         super().__init__()
         self.controller = controller
         self.current_branch_id: BranchId | None = None
-        self.pending_changes: dict[str, Any] = {}
+        self.pending_changes: BranchPendingChanges = {}
 
         self._setup_ui()
 
@@ -195,7 +207,7 @@ class BranchEditor(QWidget):
             branch_id: Branch ID to load
         """
         self.current_branch_id = branch_id
-        self.pending_changes.clear()
+        self.pending_changes = {}
 
         # Get branch from project
         project = self.controller.get_project()
@@ -688,7 +700,7 @@ class BranchEditor(QWidget):
             self.controller.update_branch(self.current_branch_id, **branch_changes)
 
         # Clear pending changes
-        self.pending_changes.clear()
+        self.pending_changes = {}
         self._update_button_states()
 
     def _on_revert(self) -> None:

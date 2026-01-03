@@ -7,9 +7,18 @@ import re
 from abc import ABC
 from datetime import datetime
 from enum import Enum
-from typing import Any, NamedTuple, NewType, cast
+from typing import Annotated, Any, Literal, NamedTuple, NewType, TypedDict, cast
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Discriminator,
+    Field,
+    Tag,
+    field_validator,
+    model_validator,
+)
+
+from fluxx.data.json_types import JsonObject
 
 # Type definitions for IDs to provide semantic meaning
 
@@ -287,6 +296,87 @@ class PossibleWorld(BaseModel):
         return v
 
 
+# Task Completion Models
+
+
+class NotStartedCompletion(BaseModel):
+    """Task has not been started."""
+
+    status: Literal["not_started"] = Field(
+        default="not_started",
+        description="Completion status discriminator",
+    )
+
+
+class StartedCompletion(BaseModel):
+    """Task is in progress."""
+
+    status: Literal["started"] = Field(
+        default="started",
+        description="Completion status discriminator",
+    )
+    assignee: WorkerId = Field(description="Worker assigned to this task")
+    start_time: datetime = Field(description="When work began (for Gantt charts)")
+    hours_logged: float = Field(
+        default=0.0, description="Work-hours spent so far on this task"
+    )
+
+    @field_validator("hours_logged")
+    @classmethod
+    def hours_logged_non_negative(cls, v: float) -> float:
+        """Validate that hours_logged is non-negative."""
+        if v < 0:
+            raise ValueError("hours_logged must be non-negative")
+        return v
+
+
+class DoneCompletion(BaseModel):
+    """Task is completed."""
+
+    status: Literal["done"] = Field(
+        default="done",
+        description="Completion status discriminator",
+    )
+    assignee: WorkerId = Field(description="Worker who completed this task")
+    start_time: datetime = Field(description="When work began")
+    hours_logged: float = Field(description="Total work-hours spent on this task")
+    end_time: datetime = Field(description="When work finished (for Gantt charts)")
+
+    @field_validator("hours_logged")
+    @classmethod
+    def hours_logged_positive(cls, v: float) -> float:
+        """Validate that hours_logged is positive for completed tasks."""
+        if v <= 0:
+            raise ValueError("hours_logged must be positive for completed tasks")
+        return v
+
+    @model_validator(mode="after")
+    def end_after_start(self) -> "DoneCompletion":
+        """Validate that end_time is after start_time."""
+        if self.end_time <= self.start_time:
+            raise ValueError("end_time must be after start_time")
+        return self
+
+
+def _get_completion_discriminator(
+    v: JsonObject | NotStartedCompletion | StartedCompletion | DoneCompletion,
+) -> str:
+    """Get discriminator value for TaskCompletion union."""
+    if isinstance(v, dict):
+        status = v.get("status", "not_started")
+        return str(status) if status is not None else "not_started"
+    return v.status
+
+
+# Union type for task completion - discriminated by 'status' field
+TaskCompletion = Annotated[
+    Annotated[NotStartedCompletion, Tag("not_started")]
+    | Annotated[StartedCompletion, Tag("started")]
+    | Annotated[DoneCompletion, Tag("done")],
+    Discriminator(_get_completion_discriminator),
+]
+
+
 # Node models
 
 
@@ -346,15 +436,9 @@ class Task(BaseModel):
         return v
 
     # Completion tracking
-    actual_start_time: str | None = Field(
-        default=None, description="When task actually started (ISO format)"
-    )
-    actual_assignee: WorkerId | None = Field(
-        default=None, description="Worker ID who was actually assigned"
-    )
-    actual_duration: float | None = Field(
-        default=None,
-        description="Actual duration taken in work-hours. If set, task is done",
+    completion: TaskCompletion = Field(
+        default_factory=NotStartedCompletion,
+        description="Task completion state",
     )
 
     def get_allowed_worker_ids(self, all_workers: list[WorkerId]) -> list[WorkerId]:
@@ -471,14 +555,30 @@ class SimulationStatus(str, Enum):
     FAILED = "failed"
 
 
+class TaskEventDetails(TypedDict, total=False):
+    """Type definition for event-specific details.
+
+    Different event types use different fields:
+    - start: worker_id, estimated_duration, estimated_completion
+    - complete: worker_id
+    - branch_resolved: chosen_world
+    """
+
+    worker_id: str | None
+    estimated_duration: float
+    estimated_completion: str
+    chosen_world: str
+
+
 class TaskEvent(BaseModel):
     """Event during simulation (task start/end or branch resolution)."""
 
     timestamp: datetime = Field(description="When the event occurred")
     node_id: NodeId = Field(description="Task or branch ID")
     event_type: str = Field(description="Type of event (start, end, resolve)")
-    details: dict[str, Any] = Field(
-        default_factory=dict, description="Event-specific details"
+    details: TaskEventDetails = Field(
+        default_factory=lambda: TaskEventDetails(),
+        description="Event-specific details",
     )
 
 
@@ -549,7 +649,7 @@ class ProjectMetadata(BaseModel):
 class Project(BaseModel):
     """Top-level project container."""
 
-    version: str = Field(default="1.0", description="File format version")
+    version: str = Field(default="1.1", description="File format version")
     metadata: ProjectMetadata = Field(description="Project metadata")
 
     # Core data

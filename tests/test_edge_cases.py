@@ -22,11 +22,13 @@ from fluxx.data.models import (
     DAGId,
     DAGVersionId,
     Dependency,
+    DoneCompletion,
     Endpoint,
     PossibleWorld,
     PossibleWorldId,
     Project,
     ProjectMetadata,
+    StartedCompletion,
     Triangular,
     Worker,
     WorkerId,
@@ -832,12 +834,12 @@ def test_update_task_excluded_worker_tasks(empty_project: Project) -> None:
     assert task.excluded_worker_tasks == [task2_id]
 
 
-def test_update_task_assigned_worker_and_actual_duration(
+def test_update_task_completion(
     empty_project: Project,
 ) -> None:
-    """Test updating assigned_worker and actual_duration fields.
+    """Test updating task completion field.
 
-    This covers more optional field update paths.
+    This covers completion state update paths.
     """
     # Add a task
     project, task_id = add_task(
@@ -847,20 +849,43 @@ def test_update_task_assigned_worker_and_actual_duration(
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
     )
 
-    # Update assigned_worker (which maps to actual_assignee field)
-    project = update_task(project, task_id, assigned_worker=WorkerId("w1"))
+    start_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
+
+    # Update to started completion
+    project = update_task(
+        project,
+        task_id,
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_time,
+            hours_logged=2.0,
+        ),
+    )
     persistent_id = project.dag.node_map[task_id]
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
-    assert task.actual_assignee == WorkerId("w1")
+    assert isinstance(task.completion, StartedCompletion)
+    assert task.completion.assignee == WorkerId("w1")
+    assert task.completion.hours_logged == 2.0
 
-    # Update actual_duration
-    project = update_task(project, task_id, actual_duration=5.0)
+    # Update to done completion
+    end_time = datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC)
+    project = update_task(
+        project,
+        task_id,
+        completion=DoneCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_time,
+            hours_logged=5.0,
+            end_time=end_time,
+        ),
+    )
     task = project.persistent_tasks[persistent_id].versions[
         project.dag.current_version_id
     ]
-    assert task.actual_duration == 5.0
+    assert isinstance(task.completion, DoneCompletion)
+    assert task.completion.hours_logged == 5.0
 
 
 def test_remove_dependency_with_multiple_branches(empty_project: Project) -> None:

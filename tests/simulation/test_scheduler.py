@@ -22,6 +22,7 @@ from fluxx.data.models import (
     PossibleWorldReference,
     Project,
     ProjectMetadata,
+    StartedCompletion,
     Task,
     TaskId,
     Triangular,
@@ -452,10 +453,21 @@ def test_is_worker_excluded_for_task_with_exclusion(
     """Test worker excluded due to assignment to excluded task."""
     state = SimulationState(simple_project, start_date, base_workers)
 
-    # Get task1 and assign worker w1 to it
+    # Get task1 and create a version with StartedCompletion
     task1 = state.get_task(TaskId("t1"))
-    # Modify the task to have actual_assignee
-    task1.actual_assignee = WorkerId("w1")
+    task1_started = task1.model_copy(
+        update={
+            "completion": StartedCompletion(
+                assignee=WorkerId("w1"),
+                start_time=start_date,
+                hours_logged=0.0,
+            )
+        }
+    )
+    # Update the persistent task version with the started task
+    persistent_id = simple_project.dag.node_map[TaskId("t1")]
+    version_id = simple_project.dag.current_version_id
+    simple_project.persistent_tasks[persistent_id].versions[version_id] = task1_started
 
     # Create a new task that excludes workers assigned to t1
     task_new = Task(
@@ -542,9 +554,21 @@ def test_get_eligible_workers_with_exclusion(
     """Test getting eligible workers with exclusions."""
     state = SimulationState(simple_project, start_date, base_workers)
 
-    # Assign w1 to task1
+    # Get task1 and create a version with StartedCompletion (assign w1)
     task1 = state.get_task(TaskId("t1"))
-    task1.actual_assignee = WorkerId("w1")
+    task1_started = task1.model_copy(
+        update={
+            "completion": StartedCompletion(
+                assignee=WorkerId("w1"),
+                start_time=start_date,
+                hours_logged=0.0,
+            )
+        }
+    )
+    # Update the persistent task version with the started task
+    persistent_id = simple_project.dag.node_map[TaskId("t1")]
+    version_id = simple_project.dag.current_version_id
+    simple_project.persistent_tasks[persistent_id].versions[version_id] = task1_started
 
     # Create task that excludes workers from t1
     task = Task(

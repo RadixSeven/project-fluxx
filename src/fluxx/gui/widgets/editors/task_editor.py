@@ -1,10 +1,12 @@
 """Task editor widget for editing task properties."""
 
-from typing import Any
+from datetime import UTC, datetime
+from typing import TypedDict
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QInputDialog,
@@ -21,10 +23,15 @@ from PySide6.QtWidgets import (
 from fluxx.data.models import (
     ConstraintType,
     Dependency,
+    DoneCompletion,
     DurationDistribution,
     Endpoint,
     NodeId,
+    NotStartedCompletion,
     ShiftedLognormal,
+    StartedCompletion,
+    Task,
+    TaskCompletion,
     TaskId,
     Triangular,
     WorkerId,
@@ -36,6 +43,21 @@ from fluxx.data.validation import (
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
+
+
+class PendingChanges(TypedDict, total=False):
+    """Type definition for pending task changes.
+
+    All fields are optional since changes are accumulated incrementally.
+    """
+
+    title: str
+    description: str
+    duration_distribution: DurationDistribution | None
+    dependencies: list[Dependency]
+    allowed_workers: list[WorkerId] | None
+    excluded_worker_tasks: list[TaskId]
+    completion: TaskCompletion
 
 
 class TaskEditor(QWidget):
@@ -67,7 +89,7 @@ class TaskEditor(QWidget):
         super().__init__()
         self.controller = controller
         self.current_task_id: TaskId | None = None
-        self.pending_changes: dict[str, Any] = {}
+        self.pending_changes: PendingChanges = {}
 
         self._setup_ui()
 
@@ -270,6 +292,60 @@ class TaskEditor(QWidget):
         subtask_button_layout.addStretch()
         layout.addLayout(subtask_button_layout)
 
+        # Completion Tracking section (only for leaf tasks)
+        self.completion_section = QWidget()
+        completion_layout = QVBoxLayout()
+        completion_layout.setContentsMargins(0, 0, 0, 0)
+
+        completion_label = QLabel("Completion Tracking:")
+        completion_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        completion_layout.addWidget(completion_label)
+
+        # Status display
+        self.completion_status_label = QLabel("Status: Not Started")
+        completion_layout.addWidget(self.completion_status_label)
+
+        # Hours logged display (for started/done tasks)
+        self.hours_logged_container = QWidget()
+        hours_logged_layout = QFormLayout()
+        hours_logged_layout.setContentsMargins(0, 0, 0, 0)
+        self.hours_logged_spinbox = QDoubleSpinBox()
+        self.hours_logged_spinbox.setRange(0.0, 10000.0)
+        self.hours_logged_spinbox.setDecimals(1)
+        self.hours_logged_spinbox.setSingleStep(0.5)
+        self.hours_logged_spinbox.setSuffix(" hours")
+        self.hours_logged_spinbox.valueChanged.connect(self._on_hours_logged_changed)
+        hours_logged_layout.addRow("Hours Logged:", self.hours_logged_spinbox)
+        self.hours_logged_container.setLayout(hours_logged_layout)
+        self.hours_logged_container.setVisible(False)
+        completion_layout.addWidget(self.hours_logged_container)
+
+        # State transition buttons
+        completion_button_layout = QHBoxLayout()
+
+        self.start_task_button = QPushButton("Start Task")
+        self.start_task_button.clicked.connect(self._on_start_task)
+        completion_button_layout.addWidget(self.start_task_button)
+
+        self.complete_task_button = QPushButton("Complete Task")
+        self.complete_task_button.clicked.connect(self._on_complete_task)
+        completion_button_layout.addWidget(self.complete_task_button)
+
+        self.become_not_started_button = QPushButton("Become Not Started")
+        self.become_not_started_button.clicked.connect(self._on_become_not_started)
+        completion_button_layout.addWidget(self.become_not_started_button)
+
+        self.reopen_task_button = QPushButton("Reopen Task")
+        self.reopen_task_button.clicked.connect(self._on_reopen_task)
+        completion_button_layout.addWidget(self.reopen_task_button)
+
+        completion_button_layout.addStretch()
+        completion_layout.addLayout(completion_button_layout)
+
+        self.completion_section.setLayout(completion_layout)
+        self.completion_section.setVisible(False)
+        layout.addWidget(self.completion_section)
+
         # Spacer
         layout.addStretch()
 
@@ -301,7 +377,7 @@ class TaskEditor(QWidget):
             task_id: Task ID to load
         """
         self.current_task_id = task_id
-        self.pending_changes.clear()
+        self.pending_changes = {}
 
         # Get task from project
         project = self.controller.get_project()
@@ -342,6 +418,9 @@ class TaskEditor(QWidget):
 
         # Excluded assignees
         self._load_excluded_assignees(task.excluded_worker_tasks)
+
+        # Completion state (only for leaf tasks)
+        self._load_completion(task)
 
         # Update button states
         self._update_button_states()
@@ -633,7 +712,7 @@ class TaskEditor(QWidget):
             self.controller.update_task(self.current_task_id, **task_changes)
 
         # Clear pending changes
-        self.pending_changes.clear()
+        self.pending_changes = {}
         self._update_button_states()
 
     def _on_revert(self) -> None:
@@ -1368,3 +1447,251 @@ class TaskEditor(QWidget):
             self.pending_changes["excluded_worker_tasks"] = current_excluded
             self._load_excluded_assignees(current_excluded)
             self._update_button_states()
+
+    # Completion tracking methods
+
+    def _load_completion(self, task: Task) -> None:
+        """Load and display completion status for a task.
+
+        Only shows completion UI for leaf tasks (no children).
+
+        Args:
+            task: The task to load completion from
+        """
+        from fluxx.data.models import Task
+
+        if not isinstance(task, Task):
+            self.completion_section.setVisible(False)
+            return
+
+        # Only show completion UI for leaf tasks
+        is_leaf = len(task.children) == 0
+        self.completion_section.setVisible(is_leaf)
+
+        if not is_leaf:
+            return
+
+        # Update status display and button visibility based on completion state
+        completion = task.completion
+        self._current_completion = completion
+
+        if isinstance(completion, NotStartedCompletion):
+            self.completion_status_label.setText("Status: Not Started")
+            self.hours_logged_container.setVisible(False)
+            self.start_task_button.setVisible(True)
+            self.complete_task_button.setVisible(False)
+            self.become_not_started_button.setVisible(False)
+            self.reopen_task_button.setVisible(False)
+        elif isinstance(completion, StartedCompletion):
+            worker_name = self._get_worker_name(completion.assignee)
+            self.completion_status_label.setText(
+                f"Status: In Progress (assigned to {worker_name})"
+            )
+            self.hours_logged_container.setVisible(True)
+            self.hours_logged_spinbox.blockSignals(True)
+            self.hours_logged_spinbox.setValue(completion.hours_logged)
+            self.hours_logged_spinbox.blockSignals(False)
+            self.start_task_button.setVisible(False)
+            self.complete_task_button.setVisible(True)
+            self.become_not_started_button.setVisible(True)
+            self.reopen_task_button.setVisible(False)
+        elif isinstance(completion, DoneCompletion):
+            worker_name = self._get_worker_name(completion.assignee)
+            self.completion_status_label.setText(
+                f"Status: Complete ({completion.hours_logged:.1f} hours, "
+                f"completed by {worker_name})"
+            )
+            self.hours_logged_container.setVisible(False)
+            self.start_task_button.setVisible(False)
+            self.complete_task_button.setVisible(False)
+            self.become_not_started_button.setVisible(False)
+            self.reopen_task_button.setVisible(True)
+
+    def _get_worker_name(self, worker_id: WorkerId) -> str:
+        """Get the display name for a worker.
+
+        Args:
+            worker_id: ID of the worker
+
+        Returns:
+            Worker name or ID if not found
+        """
+        project = self.controller.get_project()
+        for worker in project.workers:
+            if worker.id == worker_id:
+                return worker.name
+        return str(worker_id)
+
+    def _on_hours_logged_changed(self, value: float) -> None:
+        """Handle changes to hours logged spinbox.
+
+        Updates the task's completion with new hours_logged value.
+
+        Args:
+            value: New hours logged value
+        """
+        if self.current_task_id is None:
+            return
+
+        if not hasattr(self, "_current_completion"):
+            return
+
+        completion = self._current_completion
+        if not isinstance(completion, StartedCompletion):
+            return
+
+        # Create updated completion with new hours_logged
+        new_completion = StartedCompletion(
+            assignee=completion.assignee,
+            start_time=completion.start_time,
+            hours_logged=value,
+        )
+        self.pending_changes["completion"] = new_completion
+        self._current_completion = new_completion
+        self._update_button_states()
+
+    def _on_start_task(self) -> None:
+        """Handle Start Task button click.
+
+        Shows a dialog to select the worker, then starts the task.
+        """
+        if self.current_task_id is None:
+            return
+
+        # Get available workers
+        project = self.controller.get_project()
+        if not project.workers:
+            QMessageBox.warning(
+                self, "No Workers", "Please add workers before starting a task."
+            )
+            return
+
+        # Show worker selection dialog
+        worker_names = [w.name for w in project.workers]
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Start Task",
+            "Select worker to assign:",
+            worker_names,
+            0,
+            False,
+        )
+
+        if not ok:
+            return
+
+        # Find selected worker
+        selected_worker = None
+        for worker in project.workers:
+            if worker.name == selected:
+                selected_worker = worker
+                break
+
+        if selected_worker is None:
+            return
+
+        # Create StartedCompletion
+        new_completion = StartedCompletion(
+            assignee=selected_worker.id,
+            start_time=datetime.now(UTC),
+            hours_logged=0.0,
+        )
+
+        # Apply directly (not pending, takes effect immediately)
+        self.controller.update_task(self.current_task_id, completion=new_completion)
+
+        # Reload task to reflect changes
+        self.load_task(self.current_task_id)
+
+    def _on_complete_task(self) -> None:
+        """Handle Complete Task button click.
+
+        Converts the current StartedCompletion to DoneCompletion.
+        """
+        if self.current_task_id is None:
+            return
+
+        if not hasattr(self, "_current_completion"):
+            return
+
+        completion = self._current_completion
+        if not isinstance(completion, StartedCompletion):
+            return
+
+        # Apply any pending hours_logged changes first
+        if "completion" in self.pending_changes:
+            completion = self.pending_changes["completion"]
+            if not isinstance(completion, StartedCompletion):
+                return
+
+        # Create DoneCompletion from StartedCompletion
+        new_completion = DoneCompletion(
+            assignee=completion.assignee,
+            start_time=completion.start_time,
+            hours_logged=completion.hours_logged,
+            end_time=datetime.now(UTC),
+        )
+
+        # Apply directly
+        self.controller.update_task(self.current_task_id, completion=new_completion)
+
+        # Clear pending changes and reload
+        self.pending_changes.pop("completion", None)
+        self.load_task(self.current_task_id)
+
+    def _on_become_not_started(self) -> None:
+        """Handle Become Not Started button click.
+
+        Resets a StartedCompletion back to NotStartedCompletion.
+        """
+        if self.current_task_id is None:
+            return
+
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Become Not Started",
+            "This will remove the worker assignment and reset hours logged. Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Create NotStartedCompletion
+        new_completion = NotStartedCompletion()
+
+        # Apply directly
+        self.controller.update_task(self.current_task_id, completion=new_completion)
+
+        # Clear pending changes and reload
+        self.pending_changes.pop("completion", None)
+        self.load_task(self.current_task_id)
+
+    def _on_reopen_task(self) -> None:
+        """Handle Reopen Task button click.
+
+        Converts DoneCompletion back to StartedCompletion, preserving hours_logged.
+        """
+        if self.current_task_id is None:
+            return
+
+        if not hasattr(self, "_current_completion"):
+            return
+
+        completion = self._current_completion
+        if not isinstance(completion, DoneCompletion):
+            return
+
+        # Convert back to StartedCompletion, preserving hours
+        new_completion = StartedCompletion(
+            assignee=completion.assignee,
+            start_time=completion.start_time,
+            hours_logged=completion.hours_logged,
+        )
+
+        # Apply directly
+        self.controller.update_task(self.current_task_id, completion=new_completion)
+
+        # Reload
+        self.load_task(self.current_task_id)

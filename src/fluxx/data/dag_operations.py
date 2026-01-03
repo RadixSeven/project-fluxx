@@ -26,6 +26,7 @@ from fluxx.data.models import (
     Project,
     ShiftedLognormal,
     Task,
+    TaskCompletion,
     TaskId,
     Triangular,
     WorkerId,
@@ -450,8 +451,7 @@ def update_task(
     duration_distribution: DurationDistribution | None = None,
     allowed_workers: list[WorkerId] | None = None,
     excluded_worker_tasks: list[TaskId] | None = None,
-    assigned_worker: WorkerId | None = None,
-    actual_duration: float | None = None,
+    completion: TaskCompletion | None = None,
 ) -> Project:
     """Update an existing task's properties.
 
@@ -466,8 +466,7 @@ def update_task(
         duration_distribution: New duration distribution (if provided)
         allowed_workers: New allowed workers list (if provided)
         excluded_worker_tasks: New excluded worker tasks (if provided)
-        assigned_worker: New assigned worker (if provided)
-        actual_duration: New actual duration (if provided)
+        completion: New completion state (if provided)
 
     Returns:
         Updated project
@@ -500,10 +499,8 @@ def update_task(
         update_dict["allowed_workers"] = allowed_workers
     if excluded_worker_tasks is not None:
         update_dict["excluded_worker_tasks"] = excluded_worker_tasks
-    if assigned_worker is not None:
-        update_dict["actual_assignee"] = assigned_worker
-    if actual_duration is not None:
-        update_dict["actual_duration"] = actual_duration
+    if completion is not None:
+        update_dict["completion"] = completion
 
     # If nothing to update, return unchanged project
     if not update_dict:

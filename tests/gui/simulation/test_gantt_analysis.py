@@ -15,6 +15,7 @@ from fluxx.data.models import (
     ProjectMetadata,
     Sample,
     TaskEvent,
+    TaskEventDetails,
     TaskId,
     Worker,
     WorkerId,
@@ -70,7 +71,7 @@ def create_task_event(
     event_type: str,
     node_id: NodeId,
     timestamp: datetime,
-    details: dict[str, str] | None = None,
+    details: TaskEventDetails | None = None,
 ) -> TaskEvent:
     """Create a task event.
 
@@ -87,7 +88,7 @@ def create_task_event(
         event_type=event_type,
         node_id=node_id,
         timestamp=timestamp,
-        details=details or {},
+        details=details if details is not None else {},
     )
 
 

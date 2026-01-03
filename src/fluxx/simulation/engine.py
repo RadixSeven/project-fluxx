@@ -16,6 +16,7 @@ from fluxx.data.models import (
     Project,
     Sample,
     SampleId,
+    StartedCompletion,
     Task,
     TaskEvent,
     TaskId,
@@ -134,6 +135,10 @@ def start_task(
 ) -> None:
     """Start a task by assigning it to a worker and scheduling completion.
 
+    For tasks already in progress (StartedCompletion), uses the existing assignee
+    and samples remaining duration based on hours_logged. For new tasks, randomly
+    selects a worker and samples full duration.
+
     Args:
         task: The task to start
         state: Current simulation state
@@ -143,11 +148,21 @@ def start_task(
     Raises:
         ValueError: If no eligible workers or task has no distribution
     """
-    # Select worker
-    worker_id = select_worker_for_task(task, state, rng)
+    # Check if task is already in progress
+    if isinstance(task.completion, StartedCompletion):
+        # Use existing assignee
+        worker_id = task.completion.assignee
 
-    # Sample duration
-    duration_hours = sample_task_duration(task, rng)
+        # Sample remaining duration using hours already logged
+        duration_hours = sample_in_progress_task_remaining_duration(
+            task, task.completion.hours_logged, rng
+        )
+    else:
+        # Select worker randomly
+        worker_id = select_worker_for_task(task, state, rng)
+
+        # Sample full duration
+        duration_hours = sample_task_duration(task, rng)
 
     # Get worker's hours per day
     worker_state = state.worker_states[worker_id]
@@ -284,7 +299,7 @@ def resolve_branch(
         node_id=branch.id,
         event_type="branch_resolved",
         timestamp=state.current_time,
-        details={"chosen_world_id": str(chosen_world_id)},
+        details={"chosen_world": str(chosen_world_id)},
     )
     state.add_event(event)
 

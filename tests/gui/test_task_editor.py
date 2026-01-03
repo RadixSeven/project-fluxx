@@ -1344,7 +1344,8 @@ def test_task_editor_remove_allowed_worker(
 
     # Should have one worker left
     assert "allowed_workers" in task_editor.pending_changes
-    assert len(task_editor.pending_changes["allowed_workers"]) == 1
+    allowed = task_editor.pending_changes["allowed_workers"]
+    assert allowed is not None and len(allowed) == 1
 
 
 def test_task_editor_remove_allowed_worker_no_selection(
@@ -1883,7 +1884,8 @@ def test_task_editor_add_allowed_worker_with_dialog(
 
         # Should have added Charlie
         assert "allowed_workers" in task_editor.pending_changes
-        assert len(task_editor.pending_changes["allowed_workers"]) == 2
+        allowed = task_editor.pending_changes["allowed_workers"]
+        assert allowed is not None and len(allowed) == 2
 
 
 def test_task_editor_add_allowed_worker_cancelled(
@@ -2143,7 +2145,8 @@ def test_task_editor_add_allowed_worker_with_worker_id(
 
         # Should have added worker
         assert "allowed_workers" in task_editor.pending_changes
-        assert len(task_editor.pending_changes["allowed_workers"]) == 1
+        allowed = task_editor.pending_changes["allowed_workers"]
+        assert allowed is not None and len(allowed) == 1
 
 
 def test_task_editor_remove_allowed_worker_from_pending(
@@ -2168,4 +2171,588 @@ def test_task_editor_remove_allowed_worker_from_pending(
     task_editor._on_remove_allowed_worker()
 
     # Should have one worker left
-    assert len(task_editor.pending_changes["allowed_workers"]) == 1
+    allowed = task_editor.pending_changes["allowed_workers"]
+    assert allowed is not None and len(allowed) == 1
+
+
+# Completion tracking tests
+
+
+def test_task_editor_completion_section_hidden_for_parent_task(
+    qtbot: QtBot, task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test that completion section is hidden for parent tasks."""
+    # Create a parent task with a subtask
+    parent_id = controller.create_task(
+        title="Parent Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    controller.convert_to_parent(parent_id, child_title="Subtask 1")
+
+    # Show the editor so visibility checks work correctly
+    task_editor.show()
+    qtbot.waitExposed(task_editor)
+
+    # Load parent task
+    task_editor.load_task(parent_id)
+
+    # Completion section should not be visible for parent task
+    assert not task_editor.completion_section.isVisibleTo(task_editor)
+
+
+def test_task_editor_completion_section_visible_for_leaf_task(
+    qtbot: QtBot, task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test that completion section is visible for leaf tasks."""
+    task_id = controller.create_task(
+        title="Leaf Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Show the editor so visibility checks work correctly
+    task_editor.show()
+    qtbot.waitExposed(task_editor)
+
+    task_editor.load_task(task_id)
+
+    # Completion section should be visible for leaf task
+    assert task_editor.completion_section.isVisibleTo(task_editor)
+    # By default, should show "Start Task" button
+    assert task_editor.start_task_button.isVisibleTo(task_editor)
+    assert not task_editor.complete_task_button.isVisibleTo(task_editor)
+    assert not task_editor.become_not_started_button.isVisibleTo(task_editor)
+    assert not task_editor.reopen_task_button.isVisibleTo(task_editor)
+
+
+def test_task_editor_load_not_started_completion(
+    qtbot: QtBot, task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading a task with NotStartedCompletion."""
+    task_id = controller.create_task(
+        title="Not Started Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Show the editor so visibility checks work correctly
+    task_editor.show()
+    qtbot.waitExposed(task_editor)
+
+    task_editor.load_task(task_id)
+
+    # Should show "Not Started" status
+    assert "Not Started" in task_editor.completion_status_label.text()
+    # Hours logged container should be hidden
+    assert not task_editor.hours_logged_container.isVisibleTo(task_editor)
+
+
+def test_task_editor_load_started_completion(
+    qtbot: QtBot, task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading a task with StartedCompletion."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Started Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update task with StartedCompletion
+    started_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=datetime.now(UTC),
+        hours_logged=5.5,
+    )
+    controller.update_task(task_id, completion=started_completion)
+
+    # Show the editor so visibility checks work correctly
+    task_editor.show()
+    qtbot.waitExposed(task_editor)
+
+    task_editor.load_task(task_id)
+
+    # Should show "In Progress" status with worker name
+    assert "In Progress" in task_editor.completion_status_label.text()
+    assert "Alice" in task_editor.completion_status_label.text()
+    # Hours logged container should be visible with correct value
+    assert task_editor.hours_logged_container.isVisibleTo(task_editor)
+    assert task_editor.hours_logged_spinbox.value() == 5.5
+    # Should show appropriate buttons
+    assert not task_editor.start_task_button.isVisibleTo(task_editor)
+    assert task_editor.complete_task_button.isVisibleTo(task_editor)
+    assert task_editor.become_not_started_button.isVisibleTo(task_editor)
+    assert not task_editor.reopen_task_button.isVisibleTo(task_editor)
+
+
+def test_task_editor_load_done_completion(
+    qtbot: QtBot, task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading a task with DoneCompletion."""
+    from datetime import UTC, datetime, timedelta
+
+    from fluxx.data.models import DoneCompletion
+
+    worker_id = controller.add_worker(name="Bob", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Done Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update task with DoneCompletion (end_time must be after start_time)
+    start_time = datetime.now(UTC) - timedelta(days=2)
+    end_time = datetime.now(UTC)
+    done_completion = DoneCompletion(
+        assignee=worker_id,
+        start_time=start_time,
+        hours_logged=10.0,
+        end_time=end_time,
+    )
+    controller.update_task(task_id, completion=done_completion)
+
+    # Show the editor so visibility checks work correctly
+    task_editor.show()
+    qtbot.waitExposed(task_editor)
+
+    task_editor.load_task(task_id)
+
+    # Should show "Complete" status
+    assert "Complete" in task_editor.completion_status_label.text()
+    assert "Bob" in task_editor.completion_status_label.text()
+    assert "10.0 hours" in task_editor.completion_status_label.text()
+    # Hours logged container should be hidden (not editable for done tasks)
+    assert not task_editor.hours_logged_container.isVisibleTo(task_editor)
+    # Should show only reopen button
+    assert not task_editor.start_task_button.isVisibleTo(task_editor)
+    assert not task_editor.complete_task_button.isVisibleTo(task_editor)
+    assert not task_editor.become_not_started_button.isVisibleTo(task_editor)
+    assert task_editor.reopen_task_button.isVisibleTo(task_editor)
+
+
+def test_task_editor_start_task_with_worker_selection(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test starting a task with worker selection dialog."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Start",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task_id)
+
+    # Mock the dialog to return Alice
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("Alice", True)
+        task_editor._on_start_task()
+
+    # Verify task is now started
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, StartedCompletion)
+    assert task.completion.assignee == worker_id
+    assert task.completion.hours_logged == 0.0
+
+
+def test_task_editor_start_task_cancelled(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test cancelling the start task dialog."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import NotStartedCompletion
+
+    controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Start",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task_id)
+
+    # Mock the dialog to return cancel
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QInputDialog.getItem"
+    ) as mock_dialog:
+        mock_dialog.return_value = ("", False)
+        task_editor._on_start_task()
+
+    # Task should still be not started
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, NotStartedCompletion)
+
+
+def test_task_editor_start_task_no_workers(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test starting a task when no workers exist."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import NotStartedCompletion
+
+    task_id = controller.create_task(
+        title="Task to Start",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task_id)
+
+    # Mock the warning dialog
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.warning"
+    ) as mock_warning:
+        task_editor._on_start_task()
+        mock_warning.assert_called_once()
+
+    # Task should still be not started
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, NotStartedCompletion)
+
+
+def test_task_editor_complete_task(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test completing a started task."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import DoneCompletion, StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Complete",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Start the task
+    started_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=datetime.now(UTC),
+        hours_logged=8.0,
+    )
+    controller.update_task(task_id, completion=started_completion)
+
+    task_editor.load_task(task_id)
+    task_editor._on_complete_task()
+
+    # Verify task is now done
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, DoneCompletion)
+    assert task.completion.hours_logged == 8.0
+
+
+def test_task_editor_complete_task_with_pending_hours(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test completing a task after editing hours logged."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import DoneCompletion, StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Complete",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Start the task with 4 hours
+    started_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=datetime.now(UTC),
+        hours_logged=4.0,
+    )
+    controller.update_task(task_id, completion=started_completion)
+
+    task_editor.load_task(task_id)
+
+    # Change hours logged to 12 hours
+    task_editor.hours_logged_spinbox.setValue(12.0)
+
+    # Now complete the task
+    task_editor._on_complete_task()
+
+    # Verify task is done with 12 hours
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, DoneCompletion)
+    assert task.completion.hours_logged == 12.0
+
+
+def test_task_editor_become_not_started(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test reverting a started task to not started."""
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Revert",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Start the task
+    started_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=datetime.now(UTC),
+        hours_logged=3.0,
+    )
+    controller.update_task(task_id, completion=started_completion)
+
+    task_editor.load_task(task_id)
+
+    # Mock confirmation dialog to confirm
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
+    ) as mock_question:
+        mock_question.return_value = QMessageBox.StandardButton.Yes
+        task_editor._on_become_not_started()
+
+    # Verify task is now not started
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, NotStartedCompletion)
+
+
+def test_task_editor_become_not_started_cancelled(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test cancelling become not started confirmation."""
+    from datetime import UTC, datetime
+    from unittest.mock import patch
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from fluxx.data.models import StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Revert",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Start the task
+    started_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=datetime.now(UTC),
+        hours_logged=3.0,
+    )
+    controller.update_task(task_id, completion=started_completion)
+
+    task_editor.load_task(task_id)
+
+    # Mock confirmation dialog to cancel
+    with patch(
+        "fluxx.gui.widgets.editors.task_editor.QMessageBox.question"
+    ) as mock_question:
+        mock_question.return_value = QMessageBox.StandardButton.No
+        task_editor._on_become_not_started()
+
+    # Task should still be started
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, StartedCompletion)
+
+
+def test_task_editor_reopen_task(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test reopening a completed task."""
+    from datetime import UTC, datetime, timedelta
+
+    from fluxx.data.models import DoneCompletion, StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Task to Reopen",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Complete the task (end_time must be after start_time)
+    start_time = datetime.now(UTC) - timedelta(days=2)
+    end_time = datetime.now(UTC)
+    done_completion = DoneCompletion(
+        assignee=worker_id,
+        start_time=start_time,
+        hours_logged=10.0,
+        end_time=end_time,
+    )
+    controller.update_task(task_id, completion=done_completion)
+
+    task_editor.load_task(task_id)
+    task_editor._on_reopen_task()
+
+    # Verify task is now started with preserved hours
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, StartedCompletion)
+    assert task.completion.hours_logged == 10.0  # Preserved from done completion
+    assert task.completion.assignee == worker_id
+
+
+def test_task_editor_hours_logged_change(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test changing hours logged creates pending change."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import StartedCompletion
+
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    task_id = controller.create_task(
+        title="Started Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Start the task
+    started_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=datetime.now(UTC),
+        hours_logged=2.0,
+    )
+    controller.update_task(task_id, completion=started_completion)
+
+    task_editor.load_task(task_id)
+
+    # Change hours logged
+    task_editor.hours_logged_spinbox.setValue(5.0)
+
+    # Should have pending completion change
+    assert "completion" in task_editor.pending_changes
+    assert isinstance(task_editor.pending_changes["completion"], StartedCompletion)
+    assert task_editor.pending_changes["completion"].hours_logged == 5.0
+
+
+def test_task_editor_get_worker_name_found(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test getting worker name when worker exists."""
+    worker_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    # Create a task to make controller accessible
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    name = task_editor._get_worker_name(worker_id)
+    assert name == "Alice"
+
+
+def test_task_editor_get_worker_name_not_found(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test getting worker name when worker doesn't exist."""
+    from fluxx.data.models import WorkerId
+
+    # Create a task to make controller accessible
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    unknown_id = WorkerId("unknown_worker")
+    name = task_editor._get_worker_name(unknown_id)
+    assert name == "unknown_worker"
+
+
+def test_task_editor_completion_methods_no_task_loaded(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test completion methods do nothing when no task is loaded."""
+
+    # No task loaded - methods should return early without crashing
+    task_editor._on_start_task()
+    task_editor._on_complete_task()
+    task_editor._on_become_not_started()
+    task_editor._on_reopen_task()
+    task_editor._on_hours_logged_changed(5.0)
+
+    # All should complete without error
+
+
+def test_task_editor_completion_methods_wrong_state(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test completion methods handle wrong completion states."""
+    from fluxx.data.models import NotStartedCompletion
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Try complete_task on not started task - should do nothing
+    task_editor._on_complete_task()
+
+    # Try reopen_task on not started task - should do nothing
+    task_editor._on_reopen_task()
+
+    # Try hours_logged_changed on not started task - should do nothing
+    task_editor._on_hours_logged_changed(5.0)
+
+    # Task should still be not started
+    project = controller.get_project()
+    node_id = task_id
+    persistent_id = project.dag.node_map[node_id]
+    task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+
+    assert isinstance(task.completion, NotStartedCompletion)

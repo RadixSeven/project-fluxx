@@ -14,9 +14,11 @@ from fluxx.data.models import (
     DAGId,
     DAGVersionId,
     Dependency,
+    DoneCompletion,
     Endpoint,
     EventId,
     EventType,
+    NotStartedCompletion,
     PersistentBranch,
     PersistentObjectId,
     PersistentTask,
@@ -30,6 +32,7 @@ from fluxx.data.models import (
     Simulation,
     SimulationId,
     SimulationStatus,
+    StartedCompletion,
     Task,
     TaskEvent,
     TaskId,
@@ -200,19 +203,89 @@ def test_task_with_dependencies() -> None:
     assert task.dependencies[0].target_node_id == TaskId("t2")
 
 
-def test_task_completion_tracking() -> None:
-    """Test task completion tracking."""
+def test_task_completion_not_started() -> None:
+    """Test task with not started completion."""
     task = Task(
         id=TaskId("t1"),
         title="Task 1",
         description="First task",
-        actual_start_time="2024-01-15T10:00:00Z",
-        actual_assignee=WorkerId("w1"),
-        actual_duration=8.0,
     )
-    assert task.actual_start_time is not None
-    assert task.actual_assignee == WorkerId("w1")
-    assert task.actual_duration == 8.0
+    assert isinstance(task.completion, NotStartedCompletion)
+    assert task.completion.status == "not_started"
+
+
+def test_task_completion_started() -> None:
+    """Test task with started completion."""
+    start_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="First task",
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_time,
+            hours_logged=4.0,
+        ),
+    )
+    assert isinstance(task.completion, StartedCompletion)
+    assert task.completion.status == "started"
+    assert task.completion.assignee == WorkerId("w1")
+    assert task.completion.start_time == start_time
+    assert task.completion.hours_logged == 4.0
+
+
+def test_task_completion_done() -> None:
+    """Test task with done completion."""
+    start_time = datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC)
+    end_time = datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC)
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="First task",
+        completion=DoneCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_time,
+            hours_logged=8.0,
+            end_time=end_time,
+        ),
+    )
+    assert isinstance(task.completion, DoneCompletion)
+    assert task.completion.status == "done"
+    assert task.completion.assignee == WorkerId("w1")
+    assert task.completion.hours_logged == 8.0
+    assert task.completion.end_time == end_time
+
+
+def test_started_completion_hours_logged_validation() -> None:
+    """Test that hours_logged must be non-negative for started tasks."""
+    with pytest.raises(ValueError, match="hours_logged must be non-negative"):
+        StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+            hours_logged=-1.0,
+        )
+
+
+def test_done_completion_hours_logged_validation() -> None:
+    """Test that hours_logged must be positive for done tasks."""
+    with pytest.raises(ValueError, match="hours_logged must be positive"):
+        DoneCompletion(
+            assignee=WorkerId("w1"),
+            start_time=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+            hours_logged=0.0,
+            end_time=datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC),
+        )
+
+
+def test_done_completion_end_after_start_validation() -> None:
+    """Test that end_time must be after start_time."""
+    with pytest.raises(ValueError, match="end_time must be after start_time"):
+        DoneCompletion(
+            assignee=WorkerId("w1"),
+            start_time=datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC),
+            hours_logged=8.0,
+            end_time=datetime(2024, 1, 15, 10, 0, 0, tzinfo=UTC),
+        )
 
 
 # Branch Tests
@@ -338,10 +411,10 @@ def test_task_event_creation() -> None:
         timestamp=now,
         node_id=TaskId("t1"),
         event_type="start",
-        details={"worker": "w1"},
+        details={"worker_id": "w1"},
     )
     assert event.node_id == TaskId("t1")
-    assert event.details["worker"] == "w1"
+    assert event.details["worker_id"] == "w1"
 
 
 def test_sample_creation() -> None:
@@ -443,7 +516,7 @@ def test_project_creation() -> None:
         metadata=metadata,
         dag=dag,
     )
-    assert project.version == "1.0"
+    assert project.version == "1.1"
     assert project.metadata.name == "Test Project"
     assert len(project.workers) == 0
     assert len(project.simulations) == 0

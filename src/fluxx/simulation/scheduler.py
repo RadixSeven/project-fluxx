@@ -12,8 +12,10 @@ import numpy as np
 from fluxx.data.models import (
     BranchId,
     Dependency,
+    DoneCompletion,
     Endpoint,
     NodeId,
+    StartedCompletion,
     Task,
     TaskId,
     WorkerId,
@@ -375,7 +377,12 @@ def is_worker_excluded_for_task(
         # Get the task's actual assignee (if it has been assigned)
         try:
             excluded_task = state.get_task(excluded_task_id)
-            if excluded_task.actual_assignee == worker_id:
+            # Check if task has a started or done completion with an assignee
+            completion = excluded_task.completion
+            if (
+                isinstance(completion, (StartedCompletion, DoneCompletion))
+                and completion.assignee == worker_id
+            ):
                 # This worker was assigned to an excluded task
                 return True
         except KeyError:

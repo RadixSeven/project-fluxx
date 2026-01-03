@@ -156,6 +156,27 @@ def test_load_incompatible_version(tmp_path: Path) -> None:
         load_project(file_path)
 
 
+def test_load_migration_failure(tmp_path: Path) -> None:
+    """Test loading a file that fails migration."""
+    from fluxx.data.migration import MigrationError
+
+    file_path = tmp_path / "migration_fail.fluxx"
+
+    # Write valid JSON with version 1.0
+    with file_path.open("w") as f:
+        json.dump({"version": "1.0", "workers": [], "persistent_tasks": {}}, f)
+
+    # Mock migrate_project_data to raise MigrationError
+    with (
+        patch(
+            "fluxx.data.persistence.migrate_project_data",
+            side_effect=MigrationError("Test migration error"),
+        ),
+        pytest.raises(VersionError, match="Failed to migrate project"),
+    ):
+        load_project(file_path)
+
+
 def test_load_invalid_project_data(tmp_path: Path) -> None:
     """Test loading a file with invalid project structure."""
     file_path = tmp_path / "invalid_project.fluxx"

@@ -306,6 +306,66 @@ def test_start_task(
     assert state.events[0].event_type == "start"
 
 
+def test_start_task_in_progress(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test starting an in-progress task uses existing assignee."""
+    from fluxx.data.models import StartedCompletion
+
+    # Create task with StartedCompletion
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="First task",
+        duration_distribution=Triangular(min=8.0, mode=16.0, max=24.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w2"),  # Specific worker
+            start_time=start_date - timedelta(days=1),
+            hours_logged=4.0,  # Already worked 4 hours
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+    project = Project(
+        metadata=ProjectMetadata(
+            name="Test", created=start_date, last_modified=start_date
+        ),
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+    task_from_state = state.get_task(TaskId("t1"))
+    rng = np.random.default_rng(seed=42)
+
+    start_task(task_from_state, state, calendar, rng)
+
+    # Task should be in progress
+    assert state.is_task_in_progress(TaskId("t1"))
+
+    # Should use the assignee from StartedCompletion (w2), not random
+    worker_state = state.worker_states[WorkerId("w2")]
+    assert worker_state.current_task == TaskId("t1")
+
+    # Should have recorded a start event
+    assert len(state.events) == 1
+    assert state.events[0].event_type == "start"
+    assert state.events[0].details["worker_id"] == "w2"
+
+    # Duration should be remaining (sampled >= hours_logged)
+    # Since we logged 4 hours of min 8, remaining should be at least 4 hours
+
+
 def test_complete_task(
     simple_project: Project, base_workers: list[Worker], start_date: datetime
 ) -> None:

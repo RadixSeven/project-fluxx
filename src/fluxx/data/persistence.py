@@ -6,6 +6,12 @@ Handles saving and loading Project Fluxx projects to/from JSON files.
 import json
 from pathlib import Path
 
+from fluxx.data.migration import (
+    CURRENT_VERSION,
+    SUPPORTED_VERSIONS,
+    MigrationError,
+    migrate_project_data,
+)
 from fluxx.data.models import Project
 
 
@@ -43,6 +49,9 @@ def save_project(project: Project, path: Path) -> None:
 
         # Serialize project to JSON using Pydantic
         json_data = project.model_dump(mode="json")
+
+        # Ensure we save with the current version
+        json_data["version"] = CURRENT_VERSION
 
         # Write to file with pretty formatting
         with path.open("w", encoding="utf-8") as f:
@@ -91,13 +100,18 @@ def load_project(path: Path) -> Project:
     if not version:
         raise FileFormatError(f"File {path} missing version field")
 
-    # For now, we only support version 1.0
-    # In the future, this would include migration logic
-    if version != "1.0":
+    # Check if version is supported for migration
+    if version not in SUPPORTED_VERSIONS:
         raise VersionError(
             f"File version {version} is not compatible with this version of Fluxx "
-            f"(supports 1.0)"
+            f"(supports versions: {', '.join(SUPPORTED_VERSIONS)})"
         )
+
+    # Apply migrations if needed
+    try:
+        json_data = migrate_project_data(json_data)
+    except MigrationError as e:
+        raise VersionError(f"Failed to migrate project: {e}") from e
 
     # Deserialize using Pydantic
     try:
