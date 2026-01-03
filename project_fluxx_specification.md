@@ -81,7 +81,53 @@ Task {
   allowed_workers: optional list of worker ids (if absent, all allowed)
   excluded_worker_tasks: list of task ids whose assignees cannot be assigned to this task
 
-  # Completion tracking
+  # Completion tracking (see Section 3.1.1)
+  completion: TaskCompletion
+}
+```
+
+#### 3.1.1 Task Completion Schema
+
+Task completion is modeled as a discriminated union of three states:
+
+```
+TaskCompletion = NotStartedCompletion | StartedCompletion | DoneCompletion
+
+NotStartedCompletion {
+  status: "not_started"  # discriminator
+}
+
+StartedCompletion {
+  status: "started"  # discriminator
+  assignee: worker id
+  start_time: datetime  # when work began (for Gantt charts)
+  hours_logged: float  # work-hours spent so far
+}
+
+DoneCompletion {
+  status: "done"  # discriminator
+  assignee: worker id
+  start_time: datetime  # when work began
+  hours_logged: float  # total work-hours spent
+  end_time: datetime  # when work finished (for Gantt charts)
+}
+```
+
+**Design Rationale**:
+- `hours_logged` tracks actual work-hours spent, independent of calendar time elapsed since `start_time`
+- In real projects, work is done in pieces over multiple days, so elapsed calendar time does not equal work time
+- `start_time` and `end_time` are for visualization (Gantt charts of historical/actual work), not for simulation logic
+- The simulation uses `hours_logged` directly for rejection sampling (reject sampled durations < hours_logged)
+- `DoneCompletion` fields are mutable: tasks can be reopened, hours corrected, etc.
+
+#### 3.1.2 Legacy Task Completion Schema (Version 1.0)
+
+The following schema was used in file format version 1.0 and must be migrated:
+
+```
+# Version 1.0 completion fields (DEPRECATED - migrate to TaskCompletion)
+Task {
+  ...
   # Task is done if actual_duration is present
   # actual_assignee and actual_start_time must be set together (task in progress or done)
   # actual_duration can only be set if actual_start_time is set
@@ -90,6 +136,8 @@ Task {
   actual_duration: optional float (work-hours)
 }
 ```
+
+See Section 4.4.1 for migration logic.
 
 ### 3.2 Branch Node Schema
 
@@ -391,7 +439,7 @@ Projects are saved as JSON files with a `.fluxx` extension.
 
 ### 4.4 Version Compatibility
 
-**Version String**: Saved in file as `"version": "1.0"`
+**Version String**: Saved in file as `"version": "1.0"` (or current version)
 
 **Forward Compatibility**:
 - If file version > application version: warn user, may fail to load
@@ -406,6 +454,26 @@ Projects are saved as JSON files with a `.fluxx` extension.
 - Use Pydantic to validate structure on load
 - Clear error messages for corrupted/invalid files
 - Never lose data - always preserve original file
+
+#### 4.4.1 Migration: Version 1.0 to 1.1
+
+**Task Completion Migration**:
+
+Version 1.0 used three optional fields for completion tracking. Version 1.1 uses a discriminated union (`TaskCompletion`).
+
+Migration rules:
+1. **No completion fields set** → `NotStartedCompletion`
+2. **actual_start_time + actual_assignee set, no actual_duration** → `StartedCompletion`
+   - `assignee` = actual_assignee
+   - `start_time` = actual_start_time
+   - `hours_logged` = (migration_datetime - actual_start_time) / assignee.hours_per_workday
+3. **All three fields set** → `DoneCompletion`
+   - `assignee` = actual_assignee
+   - `start_time` = actual_start_time
+   - `hours_logged` = actual_duration
+   - `end_time` = calculated from start_time + duration using calendar logic
+
+**Note**: The `hours_logged` calculation for in-progress tasks (case 2) is an estimate based on elapsed calendar time. Users should verify and correct this value after migration if they have more accurate data.
 
 ### 4.5 File Menu Structure
 
@@ -577,10 +645,21 @@ Located above the DAG view, contains:
 - **Add Sibling** button: Creates a new sibling task (child of same parent)
 
 **Completion Tracking**:
-- **Start Task** section: Start time and assignee inputs (marks task as in progress)
-- **Complete Task** section: Duration input (only enabled if task is started)
-  - Setting duration marks task as done
-- **Note**: Tasks with actual_duration set are done; tasks with actual_start_time but no actual_duration are in progress
+- **Not Started** (default state): Shows "Start Task" button
+- **Start Task** section (when starting):
+  - Assignee dropdown (from project workers)
+  - Start time datetime picker
+  - Hours logged input (default 0 for new starts)
+  - Creates `StartedCompletion`
+- **In Progress** state: Shows current assignee, start time, hours logged (editable)
+  - "Complete Task" button to finish
+  - "Become not started" button → clears to `NotStartedCompletion`
+- **Complete Task** section (when completing):
+  - Hours logged input (carries over from started state, editable)
+  - End time datetime picker
+  - Creates `DoneCompletion`
+- **Done** state: Shows all completion info (editable)
+  - "Reopen Task" button → converts back to `StartedCompletion` (removes end_time)
 
 #### 5.3.3 Branch Node Editor
 
@@ -809,12 +888,13 @@ Tasks can depend on one or more branch possible worlds:
   - Cannot be assignee of excluded tasks
 
 **Tasks in Progress**:
-- If a task has actual_start_time and actual_assignee but no actual_duration, it's in progress
+- A task with `StartedCompletion` is in progress
 - During simulation, the task must:
-  - Be assigned to the actual_assignee (not a random worker)
-  - Use rejection sampling for duration: sample from distribution and reject durations < elapsed time
-  - Elapsed time = work hours between actual_start_time and simulation start
+  - Be assigned to the `completion.assignee` (not a random worker)
+  - Use rejection sampling for duration: sample from distribution and reject durations < `hours_logged`
+  - `hours_logged` is the actual work-hours spent so far, tracked independently of calendar time
   - This ensures the simulated duration is consistent with the task already being in progress
+- **Note**: Unlike calendar-based elapsed time, `hours_logged` directly represents work done. This avoids issues where tasks worked on sporadically over many calendar days would appear to be near the extreme end of their duration distribution.
 
 **Branch Resolution**:
 - Branches resolve as soon as dependencies satisfied
