@@ -11,7 +11,6 @@ Prerequisite work for Jira integration: UI for marking tasks as started/complete
 - [ ] Add "Complete Task" section to task editor
   - [ ] Duration input field (work-hours)
   - [ ] Only enabled when task is started (has actual_start_time)
-  - [ ] Setting duration marks task as done
 - [ ] Wire up to controller `update_task()` with actual_start_time, actual_assignee, actual_duration
 
 ## Branch Editor: Resolution Section
