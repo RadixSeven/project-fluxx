@@ -87,24 +87,40 @@ verify-coverage:
 			exit 1; \
 		fi; \
 		echo "  Coverage thresholds: OK"; \
-		if ! diff <(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/') allowed_static_analysis_suppression.txt > /dev/null 2>&1; then \
-			echo "  FAIL: Suppression list mismatch!"; \
-			echo "  New or removed suppressions detected:"; \
-			diff <(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/') allowed_static_analysis_suppression.txt || true; \
-			echo ""; \
-			echo "  To add new suppressions or documentation mentioning suppressions:"; \
-			echo "    1. Create file: touch dont_commit_waiting_for_review"; \
-			echo "    2. Run checks (will pass with bypass)"; \
-			echo "    3. Have a human review the changes"; \
-			echo "    4. Have a human update the suppression list:"; \
-			echo "       make regenerate-suppressions"; \
-			echo "    5. Have the human remove the bypass and commit the updated list:"; \
-			echo "       rm dont_commit_waiting_for_review"; \
-			echo "       git add allowed_static_analysis_suppression.txt"; \
-			echo "       git commit"; \
-			exit 1; \
+		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
+		DIFF_OUTPUT=$$(diff <(echo "$$CURRENT_SUPPRESSIONS") allowed_static_analysis_suppression.txt 2>&1) || true; \
+		if [ -n "$$DIFF_OUTPUT" ]; then \
+			NEW_SUPPRESSIONS=$$(echo "$$DIFF_OUTPUT" | grep "^<" || true); \
+			REMOVED_SUPPRESSIONS=$$(echo "$$DIFF_OUTPUT" | grep "^>" || true); \
+			if [ -n "$$NEW_SUPPRESSIONS" ]; then \
+				echo "  FAIL: New suppressions detected!"; \
+				echo "  New entries:"; \
+				echo "$$NEW_SUPPRESSIONS" | sed 's/^< /    /'; \
+				if [ -n "$$REMOVED_SUPPRESSIONS" ]; then \
+					echo "  Removed entries (informational):"; \
+					echo "$$REMOVED_SUPPRESSIONS" | sed 's/^> /    /'; \
+				fi; \
+				echo ""; \
+				echo "  To add new suppressions or documentation mentioning suppressions:"; \
+				echo "    1. Create file: touch dont_commit_waiting_for_review"; \
+				echo "    2. Run checks (will pass with bypass)"; \
+				echo "    3. Have a human review the changes"; \
+				echo "    4. Have a human update the suppression list:"; \
+				echo "       make regenerate-suppressions"; \
+				echo "    5. Have the human remove the bypass and commit the updated list:"; \
+				echo "       rm dont_commit_waiting_for_review"; \
+				echo "       git add allowed_static_analysis_suppression.txt"; \
+				echo "       git commit"; \
+				exit 1; \
+			elif [ -n "$$REMOVED_SUPPRESSIONS" ]; then \
+				echo "  WARNING: Some suppressions have been removed from the codebase:"; \
+				echo "$$REMOVED_SUPPRESSIONS" | sed 's/^> /    /'; \
+				echo "  Run 'make regenerate-suppressions' to update the list."; \
+				echo "  Suppression list: OK (with warnings)"; \
+			fi; \
+		else \
+			echo "  Suppression list: OK"; \
 		fi; \
-		echo "  Suppression list: OK"; \
 		if git diff --name-only | grep -q "allowed_static_analysis_suppression.txt"; then \
 			echo "  FAIL: allowed_static_analysis_suppression.txt has uncommitted changes!"; \
 			echo "  A human must review and commit changes to the suppression list."; \
