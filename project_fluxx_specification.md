@@ -997,6 +997,19 @@ When a run fails:
    - Minimize: sum of all start times + sum of all durations (possibly with scaling factor)
      - This objective avoids computing the critical path while still producing reasonable timelines
 
+**Visual Organization**:
+
+Task variants are grouped and sorted by their possible world sequence (the combination of branch outcomes that led to each variant):
+
+1. **Grouping**: Variants are grouped by world sequence
+2. **Sorting**: Groups are sorted by the start time of the first branch in each sequence
+   - The base world (no branch outcomes) appears first
+   - Within each world sequence, variants are sorted by task start time
+3. **Dividers**: Horizontal lines separate groups of different world sequences
+   - Makes it easy to see which tasks belong to each possible timeline
+
+This organization helps readers understand which tasks execute together in each possible future.
+
 **Properties**:
 - Conservative: all dates at or after Pth percentile from samples
 - Respects dependencies
