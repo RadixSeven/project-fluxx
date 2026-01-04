@@ -75,7 +75,7 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 strict_equality = true
 plugins = ["pydantic.mypy"]
-mypy_path = "src"
+mypy_path = "src:stubs"
 namespace_packages = true
 explicit_package_bases = true
 

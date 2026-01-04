@@ -264,9 +264,7 @@ def test_dag_view_click_node_in_select_target_mode(
     view_pos = dag_view.mapFromScene(scene_pos.x() + 50, scene_pos.y() + 40)
 
     # Simulate click
-    qtbot.mouseClick(  # type: ignore[no-untyped-call]
-        dag_view.viewport(), Qt.MouseButton.LeftButton, pos=view_pos
-    )
+    qtbot.mouseClick(dag_view.viewport(), Qt.MouseButton.LeftButton, pos=view_pos)
 
     # Should emit signal with the node ID
     assert len(signal_received) == 1
@@ -291,11 +289,7 @@ def test_dag_view_click_empty_space_clears_selection(
     assert dag_view.node_items[task_id].isSelected()
 
     # Click on empty space (far from node)
-    qtbot.mouseClick(  # type: ignore[no-untyped-call]
-        dag_view.viewport(),
-        Qt.MouseButton.LeftButton,
-        pos=QPoint(10, 10),
-    )
+    qtbot.mouseClick(dag_view.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
 
     # Selection should be cleared
     assert controller.get_selected_node_id() is None
@@ -411,9 +405,7 @@ def test_dag_view_click_on_possible_world_in_select_mode(
         view_pos = dag_view.mapFromScene(scene_pos.x() + 50, scene_pos.y() + 30)
 
         # Simulate click
-        qtbot.mouseClick(  # type: ignore[no-untyped-call]
-            dag_view.viewport(), Qt.MouseButton.LeftButton, pos=view_pos
-        )
+        qtbot.mouseClick(dag_view.viewport(), Qt.MouseButton.LeftButton, pos=view_pos)
 
         # Should emit signal with the PossibleWorldReference
         if len(signal_received) == 1:
@@ -449,9 +441,7 @@ def test_dag_view_click_on_possible_world_normal_mode(
         view_pos = dag_view.mapFromScene(scene_pos.x() + 50, scene_pos.y() + 30)
 
         # Simulate click
-        qtbot.mouseClick(  # type: ignore[no-untyped-call]
-            dag_view.viewport(), Qt.MouseButton.LeftButton, pos=view_pos
-        )
+        qtbot.mouseClick(dag_view.viewport(), Qt.MouseButton.LeftButton, pos=view_pos)
 
         # Should select the parent branch
         assert controller.get_selected_node_id() == branch_id
@@ -467,11 +457,7 @@ def test_dag_view_click_empty_space_in_select_mode(
     dag_view.enter_select_target_mode()
 
     # Click on empty space (far from any node)
-    qtbot.mouseClick(  # type: ignore[no-untyped-call]
-        dag_view.viewport(),
-        Qt.MouseButton.LeftButton,
-        pos=QPoint(10, 10),
-    )
+    qtbot.mouseClick(dag_view.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
 
     # Should still be in select target mode
     assert dag_view._select_target_mode is True

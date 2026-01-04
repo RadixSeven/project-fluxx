@@ -5,10 +5,7 @@ from datetime import datetime, timedelta
 
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
-from matplotlib.backends.backend_qtagg import (  # type: ignore[attr-defined]
-    FigureCanvasQTAgg,
-    NavigationToolbar2QT,
-)
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
@@ -49,11 +46,11 @@ class ProbabilisticTimelineWidget(QWidget):
         """Create child widgets."""
         # Matplotlib figure
         self.figure = Figure(figsize=(12, 8))
-        self.canvas = FigureCanvasQTAgg(self.figure)  # type: ignore[no-untyped-call]
+        self.canvas = FigureCanvasQTAgg(self.figure)
         self.ax = self.figure.add_subplot(111)
 
         # Navigation toolbar for zoom/pan
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)  # type: ignore[no-untyped-call]
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
 
     def _create_layout(self) -> None:
         """Create widget layout."""
@@ -75,7 +72,7 @@ class ProbabilisticTimelineWidget(QWidget):
                 va="center",
                 transform=self.ax.transAxes,
             )
-            self.canvas.draw()  # type: ignore[no-untyped-call]
+            self.canvas.draw()
             return
 
         # Sort tasks by their earliest start time for vertical layout
@@ -113,7 +110,7 @@ class ProbabilisticTimelineWidget(QWidget):
 
         # Tight layout and draw
         self.figure.tight_layout()
-        self.canvas.draw()  # type: ignore[no-untyped-call]
+        self.canvas.draw()
 
     def _draw_task_box(self, task_id: TaskId, stats: object, y_position: float) -> None:
         """Draw a task box with outer and inner markers.
@@ -132,10 +129,10 @@ class ProbabilisticTimelineWidget(QWidget):
         time_stats = stats_typed.time_statistics
 
         # Convert datetimes to matplotlib format
-        min_start = mdates.date2num(time_stats.min_start_time)  # type: ignore[no-untyped-call]
-        max_end = mdates.date2num(time_stats.max_end_time)  # type: ignore[no-untyped-call]
-        percentile_start = mdates.date2num(time_stats.percentile_start_time)  # type: ignore[no-untyped-call]
-        percentile_end = mdates.date2num(time_stats.percentile_end_time)  # type: ignore[no-untyped-call]
+        min_start = mdates.date2num(time_stats.min_start_time)
+        max_end = mdates.date2num(time_stats.max_end_time)
+        percentile_start = mdates.date2num(time_stats.percentile_start_time)
+        percentile_end = mdates.date2num(time_stats.percentile_end_time)
 
         box_height = 0.6
 
@@ -220,23 +217,15 @@ class ProbabilisticTimelineWidget(QWidget):
             # Determine arrow endpoints based on dependency endpoints
             # Source endpoint (where arrow starts from source task)
             if dep.source_endpoint == Endpoint.START:
-                source_x = mdates.date2num(  # type: ignore[no-untyped-call]
-                    source_stats.time_statistics.min_start_time
-                )
+                source_x = mdates.date2num(source_stats.time_statistics.min_start_time)
             else:  # Endpoint.END
-                source_x = mdates.date2num(  # type: ignore[no-untyped-call]
-                    source_stats.time_statistics.max_end_time
-                )
+                source_x = mdates.date2num(source_stats.time_statistics.max_end_time)
 
             # Target endpoint (where arrow points to on target task)
             if dep.target_endpoint == Endpoint.START:
-                target_x = mdates.date2num(  # type: ignore[no-untyped-call]
-                    target_stats.time_statistics.min_start_time
-                )
+                target_x = mdates.date2num(target_stats.time_statistics.min_start_time)
             else:  # Endpoint.END
-                target_x = mdates.date2num(  # type: ignore[no-untyped-call]
-                    target_stats.time_statistics.max_end_time
-                )
+                target_x = mdates.date2num(target_stats.time_statistics.max_end_time)
 
             # Draw arrow
             # Use different arrow styles for different constraint types
@@ -264,7 +253,7 @@ class ProbabilisticTimelineWidget(QWidget):
     def _format_time_axis(self) -> None:
         """Format horizontal time axis with multi-row date labels."""
         # Set x-axis to use date formatting
-        self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%d\n%b\n%Y"))  # type: ignore[no-untyped-call]
+        self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%d\n%b\n%Y"))
 
         # Determine appropriate time scale
         time_range = self.timeline_data.latest_time - self.timeline_data.earliest_time
@@ -272,13 +261,13 @@ class ProbabilisticTimelineWidget(QWidget):
 
         if days <= 7:
             # Daily ticks for short timelines
-            self.ax.xaxis.set_major_locator(mdates.DayLocator())  # type: ignore[no-untyped-call]
+            self.ax.xaxis.set_major_locator(mdates.DayLocator())
         elif days <= 60:
             # Weekly ticks for medium timelines
-            self.ax.xaxis.set_major_locator(mdates.WeekdayLocator())  # type: ignore[no-untyped-call]
+            self.ax.xaxis.set_major_locator(mdates.WeekdayLocator())
         else:
             # Monthly ticks for long timelines
-            self.ax.xaxis.set_major_locator(mdates.MonthLocator())  # type: ignore[no-untyped-call]
+            self.ax.xaxis.set_major_locator(mdates.MonthLocator())
 
         # Rotate labels for readability
         self.figure.autofmt_xdate()
@@ -288,7 +277,7 @@ class ProbabilisticTimelineWidget(QWidget):
         start_date = self.timeline_data.earliest_time - padding
         end_date = self.timeline_data.latest_time + padding
 
-        self.ax.set_xlim(mdates.date2num(start_date), mdates.date2num(end_date))  # type: ignore[no-untyped-call]
+        self.ax.set_xlim(mdates.date2num(start_date), mdates.date2num(end_date))
 
         self.ax.set_xlabel("Time")
 

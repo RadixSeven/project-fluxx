@@ -50,7 +50,7 @@ class ProbabilisticTimelineWidget(QWidget):
 
         # Matplotlib figure for histogram
         self.figure = Figure(figsize=(8, 6))
-        self.canvas = FigureCanvasQTAgg(self.figure)  # type: ignore[no-untyped-call]
+        self.canvas = FigureCanvasQTAgg(self.figure)
         self.ax = self.figure.add_subplot(111)
 
     def _create_layout(self) -> None:
@@ -109,7 +109,7 @@ class ProbabilisticTimelineWidget(QWidget):
                 va="center",
                 transform=self.ax.transAxes,
             )
-            self.canvas.draw()  # type: ignore[no-untyped-call]
+            self.canvas.draw()
             return
 
         # Prepare histogram data
@@ -145,4 +145,4 @@ class ProbabilisticTimelineWidget(QWidget):
         self.ax.grid(True, alpha=0.3)
 
         self.figure.tight_layout()
-        self.canvas.draw()  # type: ignore[no-untyped-call]
+        self.canvas.draw()

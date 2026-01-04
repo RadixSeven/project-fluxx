@@ -8,15 +8,112 @@ from datetime import datetime
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.backends.backend_qtagg import (  # type: ignore[attr-defined]
-    NavigationToolbar2QT as NavigationToolbar,
-)
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from fluxx.gui.simulation.analysis import DependencyInfo
-from fluxx.gui.simulation.gantt_analysis import TaskVariantKey
-from fluxx.gui.simulation.gantt_optimizer import GanttSchedule
+from fluxx.gui.simulation.gantt_analysis import TaskVariantKey, WorldSequence
+from fluxx.gui.simulation.gantt_optimizer import GanttSchedule, GanttVariantSchedule
+
+
+def _compute_world_sequence_sort_key(
+    world_seq: WorldSequence,
+    earliest_start_by_world_seq: dict[WorldSequence, datetime],
+) -> tuple[int, datetime, WorldSequence]:
+    """Compute sort key for a world sequence.
+
+    Sorting order:
+    1. Empty world sequence (base possible world) comes first
+    2. Other world sequences sorted by earliest task start time
+    3. Tie-breaker: lexicographic order of world sequence tuple
+
+    Args:
+        world_seq: The world sequence to compute key for
+        earliest_start_by_world_seq: Map of world sequence to earliest task start
+
+    Returns:
+        Tuple for sorting: (priority, earliest_start, world_seq)
+        - priority: 0 for empty (base world), 1 for others
+        - earliest_start: earliest task start time in this world sequence
+        - world_seq: for stable tie-breaking
+    """
+    from datetime import UTC
+
+    if not world_seq:
+        # Empty world sequence (base possible world) comes first
+        min_dt = datetime.min.replace(tzinfo=UTC)
+        return (0, earliest_start_by_world_seq.get(world_seq, min_dt), world_seq)
+    else:
+        # Other world sequences sorted by earliest task start time
+        max_dt = datetime.max.replace(tzinfo=UTC)
+        return (1, earliest_start_by_world_seq.get(world_seq, max_dt), world_seq)
+
+
+def _group_and_sort_variants(
+    variant_schedules: dict[TaskVariantKey, GanttVariantSchedule],
+) -> tuple[
+    list[tuple[TaskVariantKey, GanttVariantSchedule]],
+    list[int],
+]:
+    """Group and sort task variants by world sequence, then by start time.
+
+    Returns:
+        Tuple of:
+        - List of (variant_key, schedule) sorted by world sequence, then start time
+        - List of y-positions where dividers should be drawn (between world groups)
+    """
+    if not variant_schedules:
+        return [], []
+
+    # Compute earliest start time for each world sequence
+    earliest_start_by_world_seq: dict[WorldSequence, datetime] = {}
+    for variant_key, schedule in variant_schedules.items():
+        world_seq = variant_key.world_sequence
+        if world_seq not in earliest_start_by_world_seq:
+            earliest_start_by_world_seq[world_seq] = schedule.start_time
+        else:
+            earliest_start_by_world_seq[world_seq] = min(
+                earliest_start_by_world_seq[world_seq], schedule.start_time
+            )
+
+    # Get sorted list of unique world sequences
+    unique_world_seqs = sorted(
+        earliest_start_by_world_seq.keys(),
+        key=lambda ws: _compute_world_sequence_sort_key(
+            ws, earliest_start_by_world_seq
+        ),
+    )
+
+    # Group variants by world sequence
+    variants_by_world_seq: dict[
+        WorldSequence, list[tuple[TaskVariantKey, GanttVariantSchedule]]
+    ] = {ws: [] for ws in unique_world_seqs}
+    for variant_key, schedule in variant_schedules.items():
+        variants_by_world_seq[variant_key.world_sequence].append(
+            (variant_key, schedule)
+        )
+
+    # Sort each group by start time
+    for world_seq in variants_by_world_seq:
+        variants_by_world_seq[world_seq].sort(key=lambda item: item[1].start_time)
+
+    # Flatten into final sorted list and track divider positions
+    sorted_variants: list[tuple[TaskVariantKey, GanttVariantSchedule]] = []
+    divider_positions: list[int] = []
+    current_position = 0
+
+    for i, world_seq in enumerate(unique_world_seqs):
+        group = variants_by_world_seq[world_seq]
+        sorted_variants.extend(group)
+
+        # Add divider position after this group (except for the last group)
+        if i < len(unique_world_seqs) - 1:
+            current_position += len(group)
+            # Divider goes between positions (current_position - 0.5)
+            divider_positions.append(current_position)
+
+    return sorted_variants, divider_positions
 
 
 class GanttChartWidget(QWidget):
@@ -46,9 +143,9 @@ class GanttChartWidget(QWidget):
     def _create_widgets(self) -> None:
         """Create matplotlib figure and canvas."""
         self.figure = Figure(figsize=(12, 8))
-        self.canvas = FigureCanvasQTAgg(self.figure)  # type: ignore[no-untyped-call]
+        self.canvas = FigureCanvasQTAgg(self.figure)
         self.ax = self.figure.add_subplot(111)
-        self.toolbar = NavigationToolbar(self.canvas, self)  # type: ignore[no-untyped-call]
+        self.toolbar = NavigationToolbar(self.canvas, self)
 
         # Error label (hidden by default)
         self.error_label = QLabel()
@@ -81,15 +178,14 @@ class GanttChartWidget(QWidget):
             self._show_error("No tasks to display in Gantt chart.")
             return
 
-        # Sort task variants by start time for vertical positioning
-        sorted_variants = sorted(
-            self.gantt_schedule.variant_schedules.items(),
-            key=lambda item: item[1].start_time,
+        # Sort task variants by world sequence (base world first), then by start time
+        sorted_variants, divider_positions = _group_and_sort_variants(
+            self.gantt_schedule.variant_schedules
         )
 
         # Create y-position mapping (task names on y-axis)
-        y_positions = {}
-        task_labels = []
+        y_positions: dict[TaskVariantKey, int] = {}
+        task_labels: list[str] = []
         for i, (variant_key, schedule) in enumerate(sorted_variants):
             y_positions[variant_key] = i
             # Include world sequence info in label if not empty
@@ -117,6 +213,9 @@ class GanttChartWidget(QWidget):
         # Format time axis (x-axis) with proper limits
         self._format_time_axis(earliest_time, latest_time)
 
+        # Draw horizontal divider lines between world sequence groups
+        self._draw_world_dividers(divider_positions, earliest_time, latest_time)
+
         # Format task axis (y-axis)
         self.ax.set_yticks(range(len(task_labels)))
         self.ax.set_yticklabels(task_labels)
@@ -134,7 +233,7 @@ class GanttChartWidget(QWidget):
         self.figure.tight_layout()
 
         # Refresh canvas
-        self.canvas.draw()  # type: ignore[no-untyped-call]
+        self.canvas.draw()
 
     def _draw_task_bar(
         self, start_time: datetime, end_time: datetime, y_position: float
@@ -147,8 +246,8 @@ class GanttChartWidget(QWidget):
             y_position: Vertical position for this task
         """
         # Convert to matplotlib dates
-        start_num = mdates.date2num(start_time)  # type: ignore[no-untyped-call]
-        end_num = mdates.date2num(end_time)  # type: ignore[no-untyped-call]
+        start_num = mdates.date2num(start_time)
+        end_num = mdates.date2num(end_time)
 
         # Single solid bar (no inner/outer like probabilistic timeline)
         bar_height = 0.6
@@ -162,6 +261,47 @@ class GanttChartWidget(QWidget):
             alpha=0.8,
         )
         self.ax.add_patch(rect)
+
+    def _draw_world_dividers(
+        self,
+        divider_positions: list[int],
+        earliest_time: datetime,
+        latest_time: datetime,
+    ) -> None:
+        """Draw horizontal divider lines between possible world groups.
+
+        Args:
+            divider_positions: List of y-positions where dividers should be drawn
+            earliest_time: Earliest task start time (for line start x)
+            latest_time: Latest task end time (for line end x)
+        """
+        if not divider_positions:
+            return
+
+        from datetime import timedelta
+
+        # Extend lines slightly beyond the chart bounds for visibility
+        duration = latest_time - earliest_time
+        days = duration.total_seconds() / 86400
+        padding = timedelta(days=max(1, days * 0.05))
+
+        start_x = mdates.date2num(earliest_time - padding)
+        end_x = mdates.date2num(latest_time + padding)
+
+        # Draw divider lines with distinct color (orange-red for visibility)
+        for y_pos in divider_positions:
+            # Position line between rows (at y_pos - 0.5)
+            y = y_pos - 0.5
+            self.ax.hlines(
+                y=y,
+                xmin=start_x,
+                xmax=end_x,
+                colors="#E67E22",  # Orange color - distinct from grid and bars
+                linewidth=2,
+                linestyle="-",
+                alpha=0.8,
+                zorder=1,  # Draw below task bars
+            )
 
     def _draw_dependencies(self, y_positions: dict[TaskVariantKey, int]) -> None:
         """Draw dependency arrows between tasks.
@@ -219,8 +359,8 @@ class GanttChartWidget(QWidget):
 
             # Draw arrow from target end to source start
             # (target must finish before source can start)
-            target_end_num = mdates.date2num(target_schedule.end_time)  # type: ignore[no-untyped-call]
-            source_start_num = mdates.date2num(source_schedule.start_time)  # type: ignore[no-untyped-call]
+            target_end_num = mdates.date2num(target_schedule.end_time)
+            source_start_num = mdates.date2num(source_schedule.start_time)
 
             self.ax.annotate(
                 "",
@@ -244,14 +384,14 @@ class GanttChartWidget(QWidget):
         from datetime import timedelta
 
         # Use date formatter
-        date_formatter = mdates.DateFormatter("%Y-%m-%d")  # type: ignore[no-untyped-call]
+        date_formatter = mdates.DateFormatter("%Y-%m-%d")
         self.ax.xaxis.set_major_formatter(date_formatter)
 
         # Auto-format dates
         self.figure.autofmt_xdate()
 
         # Set locator for better tick spacing
-        self.ax.xaxis.set_major_locator(mdates.AutoDateLocator())  # type: ignore[no-untyped-call]
+        self.ax.xaxis.set_major_locator(mdates.AutoDateLocator())
 
         # Set axis limits with some padding
         duration = latest_time - earliest_time
@@ -261,8 +401,8 @@ class GanttChartWidget(QWidget):
         end_date = latest_time + padding
 
         self.ax.set_xlim(
-            mdates.date2num(start_date),  # type: ignore[no-untyped-call]
-            mdates.date2num(end_date),  # type: ignore[no-untyped-call]
+            mdates.date2num(start_date),
+            mdates.date2num(end_date),
         )
 
     def _show_error(self, message: str) -> None:

@@ -6,7 +6,7 @@ Solves optimization problem to find conservative Gantt chart schedule per spec 8
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from pyomo.environ import (  # type: ignore[import-untyped]
+from pyomo.environ import (
     ConcreteModel,
     Constraint,
     NonNegativeReals,
@@ -148,18 +148,18 @@ def optimize_gantt_schedule(
         # Percentile constraints
         def start_constraint_rule(
             model: ConcreteModel, variant: TaskVariantKey
-        ) -> bool:
+        ) -> object:
             stats = statistics.task_statistics[variant]
             min_start_hours = (
                 stats.percentile_start_time - statistics.project_start_date
             ).total_seconds() / 3600
-            return model.start[variant] >= min_start_hours  # type: ignore[no-any-return]
+            return model.start[variant] >= min_start_hours
 
         def duration_constraint_rule(
             model: ConcreteModel, variant: TaskVariantKey
-        ) -> bool:
+        ) -> object:
             stats = statistics.task_statistics[variant]
-            return model.duration[variant] >= stats.percentile_duration_hours  # type: ignore[no-any-return]
+            return model.duration[variant] >= stats.percentile_duration_hours
 
         model.start_constraints = Constraint(variants, rule=start_constraint_rule)
         model.duration_constraints = Constraint(variants, rule=duration_constraint_rule)
@@ -289,8 +289,8 @@ def optimize_gantt_schedule(
                         )
 
         # Objective: minimize sum of starts and durations (both in calendar hours)
-        def objective_rule(model: ConcreteModel) -> float:
-            return sum(model.start[v] for v in variants) + sum(  # type: ignore[no-any-return]
+        def objective_rule(model: ConcreteModel) -> object:
+            return sum(model.start[v] for v in variants) + sum(
                 model.duration[v] for v in variants
             )
 
@@ -301,7 +301,7 @@ def optimize_gantt_schedule(
         results = solver.solve(model)
 
         # Check solver status
-        from pyomo.opt import (  # type: ignore[import-untyped]
+        from pyomo.opt import (
             SolverStatus,
             TerminationCondition,
         )
