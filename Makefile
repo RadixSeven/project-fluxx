@@ -1,4 +1,4 @@
-.PHONY: all_checks test coverage verify-coverage lint format type-check clean install help regenerate-suppressions
+.PHONY: all_checks test coverage verify-coverage lint format type-check clean install help regenerate-policy-exceptions
 
 # Use bash for process substitution support
 SHELL := /bin/bash
@@ -36,12 +36,12 @@ help:
 	@echo "  make all_checks              - Run all tests and static analysis, verify coverage"
 	@echo "  make test                    - Run pytest with coverage"
 	@echo "  make coverage                - Show coverage report (files not at 100%)"
-	@echo "  make verify-coverage         - Verify coverage thresholds and suppression list"
+	@echo "  make verify-coverage         - Verify coverage thresholds and policy exception list"
 	@echo "  make lint                    - Run ruff linter"
 	@echo "  make format                  - Format code with ruff"
 	@echo "  make type-check              - Run mypy type checker"
 	@echo "  make install                 - Install package in development mode"
-	@echo "  make regenerate-suppressions - Regenerate allowed suppression list (human review required)"
+	@echo "  make regenerate-policy-exceptions - Regenerate allowed policy exception list (human review required)"
 	@echo "  make clean                   - Remove generated files"
 	@echo ""
 
@@ -77,61 +77,61 @@ coverage:
 	@echo ""
 
 verify-coverage:
-	@echo "==> Verifying coverage thresholds and suppression list..."
+	@echo "==> Verifying coverage thresholds and policy exception list..."
 	@if [ -f dont_commit_waiting_for_review ]; then \
 		echo "  [BYPASS] dont_commit_waiting_for_review exists - skipping verification"; \
-		echo "  WARNING: Remove this file and update allowed_static_analysis_suppression.txt before committing"; \
+		echo "  WARNING: Remove this file and update approved_exceptions_to_static_analysis_policy.txt before committing"; \
 	else \
 		if ! $(PYTHON) -c "$$COVERAGE_CHECK_SCRIPT"; then \
 			echo "Coverage thresholds not met!"; \
 			exit 1; \
 		fi; \
 		echo "  Coverage thresholds: OK"; \
-		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
-		DIFF_OUTPUT=$$(diff <(echo "$$CURRENT_SUPPRESSIONS") allowed_static_analysis_suppression.txt 2>&1) || true; \
+		CURRENT_POLICY_EXCEPTIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
+		DIFF_OUTPUT=$$(diff <(echo "$$CURRENT_POLICY_EXCEPTIONS") approved_exceptions_to_static_analysis_policy.txt 2>&1) || true; \
 		if [ -n "$$DIFF_OUTPUT" ]; then \
-			NEW_SUPPRESSIONS=$$(echo "$$DIFF_OUTPUT" | grep "^<" || true); \
-			REMOVED_SUPPRESSIONS=$$(echo "$$DIFF_OUTPUT" | grep "^>" || true); \
-			if [ -n "$$NEW_SUPPRESSIONS" ]; then \
-				echo "  FAIL: New suppressions detected!"; \
+			NEW_POLICY_EXCEPTIONS=$$(echo "$$DIFF_OUTPUT" | grep "^<" || true); \
+			REMOVED_POLICY_EXCEPTIONS=$$(echo "$$DIFF_OUTPUT" | grep "^>" || true); \
+			if [ -n "$$NEW_POLICY_EXCEPTIONS" ]; then \
+				echo "  FAIL: New policy exceptions detected!"; \
 				echo "  New entries:"; \
-				echo "$$NEW_SUPPRESSIONS" | sed 's/^< /    /'; \
-				if [ -n "$$REMOVED_SUPPRESSIONS" ]; then \
+				echo "$$NEW_POLICY_EXCEPTIONS" | sed 's/^< /    /'; \
+				if [ -n "$$REMOVED_POLICY_EXCEPTIONS" ]; then \
 					echo "  Removed entries (informational):"; \
-					echo "$$REMOVED_SUPPRESSIONS" | sed 's/^> /    /'; \
+					echo "$$REMOVED_POLICY_EXCEPTIONS" | sed 's/^> /    /'; \
 				fi; \
 				echo ""; \
-				echo "  To add new suppressions or documentation mentioning suppressions:"; \
+				echo "  To add new policy exceptions or documentation mentioning policy exceptions:"; \
 				echo "    1. Create file: touch dont_commit_waiting_for_review"; \
 				echo "    2. Run checks (will pass with bypass)"; \
 				echo "    3. Have a human review the changes"; \
-				echo "    4. Have a human update the suppression list:"; \
-				echo "       make regenerate-suppressions"; \
+				echo "    4. Have a human update the policy exception list:"; \
+				echo "       make regenerate-policy-exceptions"; \
 				echo "    5. Have the human remove the bypass and commit the updated list:"; \
 				echo "       rm dont_commit_waiting_for_review"; \
-				echo "       git add allowed_static_analysis_suppression.txt"; \
+				echo "       git add approved_exceptions_to_static_analysis_policy.txt"; \
 				echo "       git commit"; \
 				exit 1; \
-			elif [ -n "$$REMOVED_SUPPRESSIONS" ]; then \
-				echo -e "  \033[5;38;5;208mWARNING: Some suppressions have been removed from the codebase:\033[0m"; \
-				echo "$$REMOVED_SUPPRESSIONS" | sed 's/^> /    /'; \
-				echo -e "  \033[5;38;5;208mRun 'make regenerate-suppressions' to update the list.\033[0m"; \
-				echo "  Suppression list: OK (with warnings)"; \
+			elif [ -n "$$REMOVED_POLICY_EXCEPTIONS" ]; then \
+				echo -e "  \033[5;38;5;208mWARNING: Some policy exceptions have been removed from the codebase:\033[0m"; \
+				echo "$$REMOVED_POLICY_EXCEPTIONS" | sed 's/^> /    /'; \
+				echo -e "  \033[5;38;5;208mRun 'make regenerate-policy-exceptions' to update the list.\033[0m"; \
+				echo "  Policy Exception list: OK (with warnings)"; \
 			fi; \
 		else \
-			echo "  Suppression list: OK"; \
+			echo "  Policy Exception list: OK"; \
 		fi; \
-		if git diff --name-only | grep -q "allowed_static_analysis_suppression.txt"; then \
-			echo "  FAIL: allowed_static_analysis_suppression.txt has uncommitted changes!"; \
-			echo "  A human must review and commit changes to the suppression list."; \
+		if git diff --name-only | grep -q "approved_exceptions_to_static_analysis_policy.txt"; then \
+			echo "  FAIL: approved_exceptions_to_static_analysis_policy.txt has uncommitted changes!"; \
+			echo "  A human must review and commit changes to the policy exception list."; \
 			exit 1; \
 		fi; \
-		if git diff --cached --name-only | grep -q "allowed_static_analysis_suppression.txt"; then \
-			echo "  FAIL: allowed_static_analysis_suppression.txt is staged but not committed!"; \
-			echo "  A human must review and commit changes to the suppression list."; \
+		if git diff --cached --name-only | grep -q "approved_exceptions_to_static_analysis_policy.txt"; then \
+			echo "  FAIL: approved_exceptions_to_static_analysis_policy.txt is staged but not committed!"; \
+			echo "  A human must review and commit changes to the policy exception list."; \
 			exit 1; \
 		fi; \
-		echo "  Suppression list not modified: OK"; \
+		echo "  Policy Exception list not modified: OK"; \
 		echo "  All coverage checks passed!"; \
 	fi
 
@@ -155,16 +155,16 @@ all_checks: format lint type-check test coverage verify-coverage
 	@echo "========================================="
 	@echo ""
 
-regenerate-suppressions:
-	@echo "==> Regenerating allowed_static_analysis_suppression.txt..."
+regenerate-policy-exceptions:
+	@echo "==> Regenerating approved_exceptions_to_static_analysis_policy.txt..."
 	@find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) \
 		-type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" \
 		-exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
 		| sed 's|^\./||' \
 		| sort -t: -k1,1 -k2,2n \
 		| sed 's/^\([^:]*\):[0-9]*:/\1:/' \
-		> allowed_static_analysis_suppression.txt
-	@echo "  Done. Review and commit allowed_static_analysis_suppression.txt"
+		> approved_exceptions_to_static_analysis_policy.txt
+	@echo "  Done. Review and commit approved_exceptions_to_static_analysis_policy.txt"
 
 clean:
 	@echo "==> Cleaning generated files..."

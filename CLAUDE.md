@@ -110,7 +110,7 @@ The codebase is organized into three main packages:
 
 We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
 `cast`, and `Any` must be justified and undergo human review. This is enforced by listing
-all reviewed uses in `allowed_static_analysis_suppression.txt`. `make all_checks` checks
+all reviewed uses in `approved_exceptions_to_static_analysis_policy.txt`. `make all_checks` checks
 it to ensure no new exceptions are added without human review.
 
 This is an aid, helping us avoid introducing new violations. It depends on our
@@ -130,15 +130,15 @@ these terms in documentation or a comment, follow the steps below:
    ```bash
    make all_checks
    ```
-3. Have a human review the change and update the suppression list:
+3. Have a human review the change and update the policy exception list:
    ```bash
-   make regenerate-suppressions
+   make regenerate-policy-exceptions
    ```
 4. Have a human remove the bypass file:
    ```bash
    rm dont_commit_waiting_for_review
    ```
-5. Have a human commit the updated suppression list
+5. Have a human commit the updated policy exception list
 6. Continue with your code or documentation changes.
 
 **Note**: Pre-commit hooks will block commits if `dont_commit_waiting_for_review` exists, ensuring the bypass is only temporary.
