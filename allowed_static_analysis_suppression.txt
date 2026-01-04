@@ -1,4 +1,3 @@
-bogus_file: A suppression that will count as removed
 .claude/hooks/stop_check.py:    return json.load(sys.stdin)  # type: ignore[no-any-return]
 CLAUDE.md:The codebase tracks all `type: ignore` and `pragma: no cover` comments in `allowed_static_analysis_suppression.txt`. This file is checked during `make all_checks` to ensure no new suppressions are added without human review.
 CLAUDE.md:**To add a new suppression (type: ignore or pragma: no cover) or mention those terms in other files:**
