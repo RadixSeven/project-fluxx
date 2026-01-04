@@ -110,17 +110,16 @@ The codebase is organized into three main packages:
 
 We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
 `cast`, and `Any` must be justified and undergo human review. This is enforced by listing
-all reviewed uses in `approved_exceptions_to_static_analysis_policy.txt`. `make all_checks` checks
-it to ensure no new exceptions are added without human review.
+all reviewed uses in `approved_exceptions_to_static_analysis_policy.txt`. 
+`make all_checks` checks it to ensure no new exceptions are added without human review.
 
 This is an aid, helping us avoid introducing new violations. It depends on our
-professionalism, recognizing that the type system is a limitation that improves our
-software when we stay within its boundaries. This policy enforcement is not airtight,
-an attacker could bypass it.
+professionalism, recognizing that working within the type system's constraints
+improves our software. This policy enforcement is not airtight, an attacker
+could bypass it.
 
 **If you need a new exception to the policy**
-If you have written code that cannot be expressed with type safety (that is, it requires the use of `Any`, `type: ignore`, `cast`, or `pragma: no cover`) or you need to mention
-these terms in documentation or a comment, follow the steps below:
+If you have written code that cannot be expressed with type safety (that is, it requires the use of `Any`, `type: ignore`, `cast`, or `pragma: no cover`) or you need to mention these terms in documentation or a comment, follow the steps below:
 
 1. Create the bypass file:
    ```bash
@@ -130,16 +129,19 @@ these terms in documentation or a comment, follow the steps below:
    ```bash
    make all_checks
    ```
-3. Have a human review the change and update the policy exception list:
+3. Have a human review the change and update the policy exception list.  The human may type:
    ```bash
    make regenerate-policy-exceptions
    ```
-4. Have a human remove the bypass file:
+4. Have a human remove the bypass file. The human may type:
    ```bash
    rm dont_commit_waiting_for_review
    ```
-5. Have a human commit the updated policy exception list
-6. Continue with your code or documentation changes.
+5. Have a human commit the updated policy exception list. They may type:
+   ```bash
+   git add approved_exceptions_to_static_analysis_policy.txt
+   git commit
+   ```
 
 **Note**: Pre-commit hooks will block commits if `dont_commit_waiting_for_review` exists, ensuring the bypass is only temporary.
 
@@ -218,4 +220,4 @@ fluxx
 
 5. **Simulation Reproducibility**: Never modify stored simulation results. If the simulation algorithm changes, historical simulations must remain unchanged (they store complete results, not just seeds).
 
-6. **Never use `Any` or `cast`**: The type system in this codebase is designed to be complete. If you think you need `Any` or `cast`, you're likely misunderstanding the types. See [type_safety.md](type_safety.md).
+6. **Strenuously avoid using `Any` or `cast`**: The type system in this codebase is designed to be complete. If you think you need `Any` or `cast`, you're likely misunderstanding the types. See [type_safety.md](type_safety.md) and the above section on Static Analysis (and policy exceptions) for more details.

@@ -1,6 +1,6 @@
 .claude/hooks/stop_check.py:    return json.load(sys.stdin)  # type: ignore[no-any-return]
 CLAUDE.md:We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
-CLAUDE.md:If you have written code that cannot be expressed with type safety (that is, it requires the use of `Any`, `type: ignore`, `cast`, or `pragma: no cover`) or you need to mention
+CLAUDE.md:If you have written code that cannot be expressed with type safety (that is, it requires the use of `Any`, `type: ignore`, `cast`, or `pragma: no cover`) or you need to mention these terms in documentation or a comment, follow the steps below:
 Makefile:		CURRENT_POLICY_EXCEPTIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
 Makefile:		-exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
 pyproject.toml:    "pragma: no cover",
