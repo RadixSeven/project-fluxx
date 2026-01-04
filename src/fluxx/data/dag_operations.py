@@ -23,6 +23,7 @@ from fluxx.data.models import (
     PersistentObjectId,
     PersistentTask,
     PossibleWorld,
+    PossibleWorldId,
     Project,
     ShiftedLognormal,
     Task,
@@ -557,12 +558,16 @@ def update_task(
     )
 
 
+_UNSET: object = object()
+
+
 def update_branch(
     project: Project,
     branch_id: BranchId,
     title: str | None = None,
     description: str | None = None,
     possible_worlds: list[PossibleWorld] | None = None,
+    chosen_world_id: PossibleWorldId | None | object = _UNSET,
 ) -> Project:
     """Update an existing branch's properties.
 
@@ -575,6 +580,8 @@ def update_branch(
         title: New title (if provided)
         description: New description (if provided)
         possible_worlds: New possible worlds (if provided)
+        chosen_world_id: ID of chosen world to mark branch resolved,
+            or None to clear resolution (if provided)
 
     Returns:
         Updated project
@@ -603,6 +610,22 @@ def update_branch(
         update_dict["description"] = description
     if possible_worlds is not None:
         update_dict["possible_worlds"] = possible_worlds
+    if chosen_world_id is not _UNSET:
+        # Validate chosen_world_id if it's being set (not cleared)
+        if chosen_world_id is not None:
+            # Use updated possible_worlds if provided, otherwise current
+            worlds = (
+                possible_worlds
+                if possible_worlds is not None
+                else current_branch.possible_worlds
+            )
+            valid_world_ids = {w.id for w in worlds}
+            if chosen_world_id not in valid_world_ids:
+                raise DAGOperationError(
+                    f"Invalid chosen_world_id: {chosen_world_id} is not a valid "
+                    f"possible world for branch {branch_id}"
+                )
+        update_dict["chosen_world_id"] = chosen_world_id
 
     # If nothing to update, return unchanged project
     if not update_dict:

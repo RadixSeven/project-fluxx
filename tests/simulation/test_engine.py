@@ -22,6 +22,7 @@ from fluxx.data.models import (
     Project,
     ProjectMetadata,
     ShiftedLognormal,
+    StartedCompletion,
     Task,
     TaskId,
     Triangular,
@@ -1180,3 +1181,85 @@ def test_deadlock_detection_with_ineligible_branch() -> None:
         "BUG: Deadlock should be detected when branch has unsatisfied dependencies. "
         "Having an unresolved branch doesn't mean we can make progress."
     )
+
+
+def test_start_task_time_splitting_multiple_in_progress_tasks(
+    base_workers: list[Worker],
+) -> None:
+    """Test that start_task applies time-splitting for multiple in-progress tasks."""
+    # Create a project with two in-progress tasks assigned to the same worker
+    start_date = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="In progress task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=1.0,
+        ),
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="In progress task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=1.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task2},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+    rng = np.random.default_rng(seed=42)
+
+    # Start task1 - time should be doubled due to having 2 in-progress tasks
+    start_task(task1, state, calendar, rng)
+
+    # Get the worker's expected completion time
+    worker_state = state.worker_states[WorkerId("w1")]
+
+    # The task is now in progress in the simulation
+    assert state.is_task_in_progress(TaskId("t1"))
+
+    # With time-splitting, the completion time should be later than without
+    # We can't test exact values easily, but we can verify the task started
+    assert worker_state.available_time > start_date

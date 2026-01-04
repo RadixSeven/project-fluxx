@@ -1213,3 +1213,192 @@ def test_branch_editor_finish_dependency_with_complete_dependency_no_branch(
 
     # No pending changes should be created
     assert "dependencies" not in branch_editor.pending_changes
+
+
+def test_branch_editor_resolution_combo_initialization(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that resolution combo is initialized correctly when loading a branch."""
+    from fluxx.data.id_generation import generate_possible_world_id
+
+    pw1_id = generate_possible_world_id()
+    pw2_id = generate_possible_world_id()
+
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A", weight=1.0),
+            PossibleWorld(id=pw2_id, title="Option B", weight=2.0),
+        ],
+    )
+    branch_editor.load_branch(branch_id)
+
+    # Resolution combo should have 3 items: "Not resolved" + 2 worlds
+    assert branch_editor.resolution_combo.count() == 3
+    assert branch_editor.resolution_combo.itemText(0) == "Not resolved"
+    assert branch_editor.resolution_combo.itemText(1) == "Option A"
+    assert branch_editor.resolution_combo.itemText(2) == "Option B"
+
+    # Should be set to "Not resolved" initially
+    assert branch_editor.resolution_combo.currentIndex() == 0
+
+
+def test_branch_editor_resolution_change_creates_pending_change(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that changing resolution creates a pending change."""
+    from fluxx.data.id_generation import generate_possible_world_id
+
+    pw1_id = generate_possible_world_id()
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A", weight=1.0),
+        ],
+    )
+    branch_editor.load_branch(branch_id)
+
+    # Change resolution to Option A
+    branch_editor.resolution_combo.setCurrentIndex(1)
+
+    # Should have pending change
+    assert "chosen_world_id" in branch_editor.pending_changes
+    assert branch_editor.pending_changes["chosen_world_id"] == pw1_id
+    assert branch_editor.is_dirty()
+
+
+def test_branch_editor_resolution_clear_creates_pending_change(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that clearing resolution (setting to None) creates a pending change."""
+    from fluxx.data.id_generation import generate_possible_world_id
+
+    pw1_id = generate_possible_world_id()
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A", weight=1.0),
+        ],
+    )
+
+    # Resolve the branch first
+    controller.update_branch(branch_id, chosen_world_id=pw1_id)
+
+    branch_editor.load_branch(branch_id)
+
+    # Resolution should be set to Option A
+    assert branch_editor.resolution_combo.currentIndex() == 1
+
+    # Clear resolution
+    branch_editor.resolution_combo.setCurrentIndex(0)
+
+    # Should have pending change with None
+    assert "chosen_world_id" in branch_editor.pending_changes
+    assert branch_editor.pending_changes["chosen_world_id"] is None
+
+
+def test_branch_editor_resolution_apply(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test applying resolution changes."""
+    from fluxx.data.id_generation import generate_possible_world_id
+    from fluxx.data.models import NodeId
+
+    pw1_id = generate_possible_world_id()
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A", weight=1.0),
+        ],
+    )
+    branch_editor.load_branch(branch_id)
+
+    # Change resolution
+    branch_editor.resolution_combo.setCurrentIndex(1)
+
+    # Apply changes
+    branch_editor._on_apply()
+
+    # Verify change was applied
+    project = controller.get_project()
+    node_id: NodeId = branch_id
+    persistent_id = project.dag.node_map[node_id]
+    branch = project.persistent_branches[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+    assert branch.chosen_world_id == pw1_id
+
+    # Pending changes should be cleared
+    assert not branch_editor.is_dirty()
+
+
+def test_branch_editor_resolution_loads_resolved_branch(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test loading a branch that is already resolved."""
+    from fluxx.data.id_generation import generate_possible_world_id
+
+    pw1_id = generate_possible_world_id()
+    pw2_id = generate_possible_world_id()
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A", weight=1.0),
+            PossibleWorld(id=pw2_id, title="Option B", weight=2.0),
+        ],
+    )
+
+    # Resolve to Option B
+    controller.update_branch(branch_id, chosen_world_id=pw2_id)
+
+    branch_editor.load_branch(branch_id)
+
+    # Resolution combo should be set to Option B (index 2)
+    assert branch_editor.resolution_combo.currentIndex() == 2
+
+
+def test_branch_editor_resolution_combo_updates_with_world_changes(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that resolution combo updates when possible worlds are modified."""
+    from fluxx.data.id_generation import generate_possible_world_id
+
+    pw1_id = generate_possible_world_id()
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A", weight=1.0),
+        ],
+    )
+    branch_editor.load_branch(branch_id)
+
+    # Add a new world via the table
+    branch_editor._on_add_world()
+
+    # Resolution combo should now have 4 items: "Not resolved" + 2 worlds
+    assert branch_editor.resolution_combo.count() == 3
+    assert branch_editor.resolution_combo.itemText(2) == "New World"
+
+
+def test_branch_editor_resolution_invalid_index(
+    branch_editor: BranchEditor, controller: ProjectController
+) -> None:
+    """Test that invalid resolution index is handled gracefully."""
+    from fluxx.data.id_generation import generate_possible_world_id
+
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(
+                id=generate_possible_world_id(), title="Option A", weight=1.0
+            ),
+        ],
+    )
+    branch_editor.load_branch(branch_id)
+
+    # Call handler with invalid index
+    branch_editor._on_resolution_changed(-1)
+    branch_editor._on_resolution_changed(999)
+
+    # Should not crash and no pending change
+    assert "chosen_world_id" not in branch_editor.pending_changes

@@ -34,6 +34,7 @@ from fluxx.simulation.scheduler import (
     StartTaskAction,
     detect_deadlock,
     get_eligible_workers,
+    get_worker_in_progress_task_count,
     select_next_action,
 )
 from fluxx.simulation.state import SimulationState
@@ -139,6 +140,10 @@ def start_task(
     and samples remaining duration based on hours_logged. For new tasks, randomly
     selects a worker and samples full duration.
 
+    When a worker has multiple in-progress tasks, time is split equally between
+    them. The remaining duration is multiplied by the number of in-progress tasks
+    the worker has assigned.
+
     Args:
         task: The task to start
         state: Current simulation state
@@ -157,6 +162,13 @@ def start_task(
         duration_hours = sample_in_progress_task_remaining_duration(
             task, task.completion.hours_logged, rng
         )
+
+        # Apply time-splitting if worker has multiple in-progress tasks
+        # Count how many in-progress tasks this worker has from project data
+        in_progress_count = get_worker_in_progress_task_count(worker_id, state)
+        if in_progress_count > 1:
+            # Worker splits time equally between tasks, so each takes longer
+            duration_hours = duration_hours * in_progress_count
     else:
         # Select worker randomly
         worker_id = select_worker_for_task(task, state, rng)

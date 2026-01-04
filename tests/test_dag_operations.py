@@ -821,6 +821,86 @@ def test_update_branch_nonexistent(empty_project: Project) -> None:
         )
 
 
+def test_update_branch_chosen_world_id(empty_project: Project) -> None:
+    """Test setting chosen_world_id to resolve a branch."""
+    # Add a branch with multiple possible worlds
+    pw1_id = PossibleWorldId("pw1")
+    pw2_id = PossibleWorldId("pw2")
+    project, branch_id = add_branch(
+        empty_project,
+        title="Decision Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A"),
+            PossibleWorld(id=pw2_id, title="Option B"),
+        ],
+    )
+
+    # Initially not resolved
+    persistent_id = project.dag.node_map[branch_id]
+    branch = project.persistent_branches[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+    assert branch.chosen_world_id is None
+
+    # Resolve the branch
+    updated_project = update_branch(project, branch_id, chosen_world_id=pw1_id)
+
+    # Get the updated branch
+    branch = updated_project.persistent_branches[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+    assert branch.chosen_world_id == pw1_id
+
+    # Event should be recorded
+    last_event = updated_project.history_events[-1]
+    assert last_event.event_type == EventType.NODE_MODIFIED
+
+
+def test_update_branch_clear_chosen_world_id(empty_project: Project) -> None:
+    """Test clearing chosen_world_id to unresolve a branch."""
+    pw1_id = PossibleWorldId("pw1")
+    project, branch_id = add_branch(
+        empty_project,
+        title="Decision Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="Option A"),
+        ],
+    )
+
+    # Resolve the branch
+    project = update_branch(project, branch_id, chosen_world_id=pw1_id)
+
+    # Clear the resolution
+    updated_project = update_branch(project, branch_id, chosen_world_id=None)
+
+    # Get the updated branch
+    persistent_id = updated_project.dag.node_map[branch_id]
+    branch = updated_project.persistent_branches[persistent_id].versions[
+        updated_project.dag.current_version_id
+    ]
+    assert branch.chosen_world_id is None
+
+
+def test_update_branch_invalid_chosen_world_id(empty_project: Project) -> None:
+    """Test that setting invalid chosen_world_id raises error."""
+    project, branch_id = add_branch(
+        empty_project,
+        title="Decision Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="Option A"),
+        ],
+    )
+
+    # Try to set invalid world id
+    with pytest.raises(DAGOperationError, match="Invalid chosen_world_id"):
+        update_branch(
+            project, branch_id, chosen_world_id=PossibleWorldId("nonexistent")
+        )
+
+
 def test_remove_dependency_from_task(empty_project: Project) -> None:
     """Test removing a dependency from a task."""
     # Add two tasks

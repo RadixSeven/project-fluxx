@@ -39,6 +39,8 @@ from fluxx.simulation.scheduler import (
     get_eligible_tasks,
     get_eligible_workers,
     get_unresolved_branches,
+    get_worker_in_progress_task_count,
+    has_existing_in_progress_tasks,
     is_branch_node,
     is_dependency_on_branch,
     is_dependency_on_task_end,
@@ -1826,3 +1828,305 @@ def test_has_any_satisfiable_possible_world_dep_with_non_pw_dep(
         # Should return False because no satisfiable deps found (continues past None)
         result = _has_any_satisfiable_possible_world_dep([dep], state)
         assert result is False
+
+
+# Tests for in-progress task handling
+
+
+def test_get_worker_in_progress_task_count_no_tasks(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test counting in-progress tasks when worker has none."""
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    count = get_worker_in_progress_task_count(WorkerId("w1"), state)
+    assert count == 0
+
+
+def test_get_worker_in_progress_task_count_one_task(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test counting in-progress tasks when worker has one."""
+    # Create a project with an in-progress task
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="In progress task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    count = get_worker_in_progress_task_count(WorkerId("w1"), state)
+    assert count == 1
+
+    # Worker 2 should have no in-progress tasks
+    count_w2 = get_worker_in_progress_task_count(WorkerId("w2"), state)
+    assert count_w2 == 0
+
+
+def test_get_worker_in_progress_task_count_multiple_tasks(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test counting in-progress tasks when worker has multiple."""
+    # Create tasks with same assignee
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="In progress task 1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=2.0,
+        ),
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="In progress task 2",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=3.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task2},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    count = get_worker_in_progress_task_count(WorkerId("w1"), state)
+    assert count == 2
+
+
+def test_get_worker_in_progress_task_count_excludes_simulation_in_progress(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that tasks being processed in simulation are not counted."""
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="In progress task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Before marking as in-progress in simulation
+    assert get_worker_in_progress_task_count(WorkerId("w1"), state) == 1
+
+    # Mark task as in-progress in simulation
+    state.in_progress_tasks.add(TaskId("t1"))
+
+    # Should now return 0 (task is being processed)
+    assert get_worker_in_progress_task_count(WorkerId("w1"), state) == 0
+
+
+def test_has_existing_in_progress_tasks(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test has_existing_in_progress_tasks helper function."""
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="In progress task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Worker 1 has in-progress task
+    assert has_existing_in_progress_tasks(WorkerId("w1"), state) is True
+
+    # Worker 2 has no in-progress tasks
+    assert has_existing_in_progress_tasks(WorkerId("w2"), state) is False
+
+
+def test_get_eligible_workers_excludes_worker_with_in_progress_tasks(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that get_eligible_workers excludes workers with in-progress tasks."""
+    # Create a task that doesn't belong to any worker (new task)
+    new_task = Task(
+        id=TaskId("t2"),
+        title="New Task",
+        description="New task to assign",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Create an in-progress task assigned to w1
+    in_progress_task = Task(
+        id=TaskId("t1"),
+        title="In Progress Task",
+        description="Already started",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: in_progress_task},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: new_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Get eligible workers for the new task
+    eligible = get_eligible_workers(new_task, state)
+
+    # Only w2 should be eligible (w1 has in-progress task)
+    assert WorkerId("w1") not in eligible
+    assert WorkerId("w2") in eligible

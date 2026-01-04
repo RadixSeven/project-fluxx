@@ -60,11 +60,11 @@ def test_node_list_widget_loads_tasks(qtbot: QtBot) -> None:
     # Should show both tasks
     assert widget.node_list.count() == 2
 
-    # Check items
+    # Check items - now include status
     items = [widget.node_list.item(i) for i in range(widget.node_list.count())]
     texts = [item.text() for item in items if item is not None]
-    assert "[Task] Task One" in texts
-    assert "[Task] Task Two" in texts
+    assert "[Task] Task One [Not Started]" in texts
+    assert "[Task] Task Two [Not Started]" in texts
 
     # Check data stored in items
     item_ids = [
@@ -110,10 +110,10 @@ def test_node_list_widget_loads_branches(qtbot: QtBot) -> None:
     #  "World B (from Branch One)"
     branch_item = widget.node_list.item(0)
     assert branch_item is not None
-    assert branch_item.text() == "[Branch] Branch One"
+    assert branch_item.text() == "[Branch] Branch One [Unresolved]"
     assert branch_item.data(Qt.ItemDataRole.UserRole) == branch_id
 
-    # Check possible world items
+    # Check possible world items - no status since branch is unresolved
     pw_a_item = widget.node_list.item(1)
     assert pw_a_item is not None
     assert pw_a_item.text() == "[PossibleWorld] World A (from Branch One)"
@@ -166,12 +166,12 @@ def test_node_list_widget_loads_mixed_nodes(qtbot: QtBot) -> None:
     # Should show task + branch + possible world = 3 items
     assert widget.node_list.count() == 3
 
-    # Check items are sorted by title
+    # Check items are sorted by title (now with status)
     # Alphabetically: "Branch Beta", "Task Alpha", "World A (from Branch Beta)"
     items = [widget.node_list.item(i) for i in range(widget.node_list.count())]
     texts = [item.text() for item in items if item is not None]
-    assert texts[0] == "[Branch] Branch Beta"
-    assert texts[1] == "[Task] Task Alpha"
+    assert texts[0] == "[Branch] Branch Beta [Unresolved]"
+    assert texts[1] == "[Task] Task Alpha [Not Started]"
     assert texts[2] == "[PossibleWorld] World A (from Branch Beta)"
 
 
@@ -488,3 +488,218 @@ def test_node_list_widget_clears_search(qtbot: QtBot) -> None:
 
     # Should show all tasks again
     assert widget.node_list.count() == 2
+
+
+def test_node_list_widget_displays_completed_task_status(qtbot: QtBot) -> None:
+    """Test that completed tasks show correct status and color."""
+    from datetime import UTC, datetime, timedelta
+
+    from PySide6.QtGui import QColor
+
+    from fluxx.data.models import DoneCompletion, WorkerId
+
+    controller = ProjectController()
+    controller.new_project("Test Project")
+
+    # Create a task
+    task_id = controller.create_task(
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=5.0, max=10.0),
+    )
+
+    start_time = datetime.now(UTC)
+    # Mark it as completed
+    controller.update_task(
+        task_id,
+        completion=DoneCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_time,
+            hours_logged=8.0,
+            end_time=start_time + timedelta(hours=8),
+        ),
+    )
+
+    widget = NodeListWidget(controller)
+    qtbot.addWidget(widget)
+
+    # Check status text
+    item = widget.node_list.item(0)
+    assert item is not None
+    assert "[Completed]" in item.text()
+
+    # Check color (should be darkGreen for completed)
+    assert item.foreground().color() == QColor(Qt.GlobalColor.darkGreen)
+
+
+def test_node_list_widget_displays_in_progress_task_status(qtbot: QtBot) -> None:
+    """Test that in-progress tasks show correct status and color."""
+    from datetime import UTC, datetime
+
+    from PySide6.QtGui import QColor
+
+    from fluxx.data.models import StartedCompletion, WorkerId
+
+    controller = ProjectController()
+    controller.new_project("Test Project")
+
+    # Create a task
+    task_id = controller.create_task(
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=5.0, max=10.0),
+    )
+
+    # Mark it as in progress
+    controller.update_task(
+        task_id,
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=datetime.now(UTC),
+            hours_logged=4.0,
+        ),
+    )
+
+    widget = NodeListWidget(controller)
+    qtbot.addWidget(widget)
+
+    # Check status text
+    item = widget.node_list.item(0)
+    assert item is not None
+    assert "[In Progress]" in item.text()
+
+    # Check color (should be darkYellow for in progress)
+    assert item.foreground().color() == QColor(Qt.GlobalColor.darkYellow)
+
+
+def test_node_list_widget_displays_resolved_branch_status(qtbot: QtBot) -> None:
+    """Test that resolved branches show correct status and color."""
+    from PySide6.QtGui import QColor
+
+    controller = ProjectController()
+    controller.new_project("Test Project")
+
+    # Create a branch with possible worlds
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(
+                id=PossibleWorldId("pw_001"),
+                title="Option A",
+                description="First option",
+                weight=1.0,
+            ),
+            PossibleWorld(
+                id=PossibleWorldId("pw_002"),
+                title="Option B",
+                description="Second option",
+                weight=1.0,
+            ),
+        ],
+    )
+
+    # Resolve the branch to Option A
+    controller.update_branch(branch_id, chosen_world_id=PossibleWorldId("pw_001"))
+
+    widget = NodeListWidget(controller)
+    qtbot.addWidget(widget)
+
+    # Find branch item
+    for i in range(widget.node_list.count()):
+        item = widget.node_list.item(i)
+        assert item is not None
+        if item.text().startswith("[Branch]"):
+            # Check status text
+            assert "[Resolved: Option A]" in item.text()
+            # Check color (should be darkGreen for resolved)
+            assert item.foreground().color() == QColor(Qt.GlobalColor.darkGreen)
+            break
+    else:
+        raise AssertionError("Branch item not found")
+
+
+def test_node_list_widget_displays_chosen_possible_world_status(qtbot: QtBot) -> None:
+    """Test that chosen possible worlds show correct status and color."""
+    from PySide6.QtGui import QColor
+
+    controller = ProjectController()
+    controller.new_project("Test Project")
+
+    # Create a branch with possible worlds
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(
+                id=PossibleWorldId("pw_001"),
+                title="Option A",
+                description="First option",
+                weight=1.0,
+            ),
+            PossibleWorld(
+                id=PossibleWorldId("pw_002"),
+                title="Option B",
+                description="Second option",
+                weight=1.0,
+            ),
+        ],
+    )
+
+    # Resolve the branch to Option A
+    controller.update_branch(branch_id, chosen_world_id=PossibleWorldId("pw_001"))
+
+    widget = NodeListWidget(controller)
+    qtbot.addWidget(widget)
+
+    # Find the possible world items
+    chosen_found = False
+    not_chosen_found = False
+
+    for i in range(widget.node_list.count()):
+        item = widget.node_list.item(i)
+        assert item is not None
+        if "[PossibleWorld]" in item.text():
+            if "Option A" in item.text():
+                assert "[Chosen]" in item.text()
+                assert item.foreground().color() == QColor(Qt.GlobalColor.darkGreen)
+                chosen_found = True
+            elif "Option B" in item.text():
+                assert "[Not Chosen]" in item.text()
+                assert item.foreground().color() == QColor(Qt.GlobalColor.gray)
+                not_chosen_found = True
+
+    assert chosen_found, "Chosen possible world not found"
+    assert not_chosen_found, "Not chosen possible world not found"
+
+
+def test_node_list_widget_possible_world_click(qtbot: QtBot) -> None:
+    """Test clicking on a possible world selects the parent branch."""
+    controller = ProjectController()
+    controller.new_project("Test Project")
+
+    # Create a branch with a possible world
+    branch_id = controller.create_branch(
+        title="Branch",
+        possible_worlds=[
+            PossibleWorld(
+                id=PossibleWorldId("pw_001"),
+                title="Option A",
+                description="First option",
+                weight=1.0,
+            ),
+        ],
+    )
+
+    widget = NodeListWidget(controller)
+    qtbot.addWidget(widget)
+
+    # Find and click the possible world item
+    for i in range(widget.node_list.count()):
+        item = widget.node_list.item(i)
+        assert item is not None
+        if "[PossibleWorld]" in item.text():
+            # Click the item
+            widget._on_item_clicked(item)
+            break
+
+    # Branch should now be selected
+    assert controller.get_selected_node_id() == branch_id

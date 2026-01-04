@@ -43,7 +43,7 @@ Replace `actual_start_time`, `actual_assignee`, `actual_duration` fields with di
   - Rejection sampling: reject samples where `duration < hours_logged`
 - [x] Update `SimulationEngine` to read from new completion model
 - [x] Tests for simulation with in-progress tasks using new model
-- [ ] Handle worker assigned to multiple in-progress tasks:
+- [x] Handle worker assigned to multiple in-progress tasks:
   - Worker splits time equally between all their assigned in-progress tasks
   - Worker cannot be assigned to any new tasks until their current in-progress tasks complete
   - (Future: priority-based allocation, explicit time splits)
@@ -67,33 +67,33 @@ Replace `actual_start_time`, `actual_assignee`, `actual_duration` fields with di
 
 ## 5. Branch Editor: Resolution Section
 
-- [ ] Add "Resolve Branch" section:
+- [x] Add "Resolve Branch" section:
   - Dropdown listing all possible worlds
-- [ ] Wire up to controller (`update_branch()` with `chosen_world_id`)
-- [ ] GUI tests for branch editor resolution section
+- [x] Wire up to controller (`update_branch()` with `chosen_world_id`)
+- [x] GUI tests for branch editor resolution section
 
 ## 6. DAG View: Completion Status Indicators
 
-- [ ] Task nodes show visual indicator for status:
+- [x] Task nodes show visual indicator for status:
   - NotStartedCompletion: default styling
   - StartedCompletion: distinct color/border (e.g., yellow border)
   - DoneCompletion: distinct color/icon (e.g., green with checkmark)
-- [ ] Branch nodes show resolved state:
+- [x] Branch nodes show resolved state:
   - Unresolved: default styling
   - Resolved: show which world was chosen, gray out others
-- [ ] GUI tests for DAG view status indicators
+- [x] GUI tests for DAG view status indicators
 
 ## 7. List View: Completion Status Display
 
-- [ ] Add status indicator to list items:
+- [x] Add status indicator to list items:
   - Task items show [Not Started], [In Progress], or [Completed]
   - Branch items show [Unresolved] or [Resolved: <world>]
 - [ ] Consider adding filter/sort by status
-- [ ] GUI tests for list view status display
+- [x] GUI tests for list view status display
 
 ## 8. Controller Updates
 
 - [x] Update `update_task()` for new completion model
-- [ ] Add `update_branch()` support for `chosen_world_id`
+- [x] Add `update_branch()` support for `chosen_world_id`
 - [x] Ensure undo/redo works for completion state changes
 - [x] Tests for controller completion operations

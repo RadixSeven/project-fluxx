@@ -481,3 +481,231 @@ def test_possible_world_item_colors() -> None:
     assert node._base_color.red() == 200
     assert node._base_color.green() == 255
     assert node._base_color.blue() == 200
+
+
+def test_task_node_item_completion_status_not_started(qtbot: QtBot) -> None:
+    """Test TaskNodeItem rendering for not started task."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    from fluxx.data.models import NotStartedCompletion
+
+    task = Task(
+        id=TaskId("task_1"),
+        title="Test Task",
+        description="Description",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=NotStartedCompletion(),
+    )
+
+    scene = QGraphicsScene()
+    node = TaskNodeItem(task.id, task)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 150, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify default blue color is used
+    assert node._base_color.red() == 200
+    assert node._base_color.green() == 220
+    assert node._base_color.blue() == 255
+
+
+def test_task_node_item_completion_status_started(qtbot: QtBot) -> None:
+    """Test TaskNodeItem rendering for started task has yellow border color."""
+    from datetime import UTC, datetime
+
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    from fluxx.data.models import StartedCompletion, WorkerId
+
+    task = Task(
+        id=TaskId("task_1"),
+        title="Test Task",
+        description="Description",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("worker_1"),
+            start_time=datetime.now(UTC),
+            hours_logged=1.0,
+        ),
+    )
+
+    scene = QGraphicsScene()
+    node = TaskNodeItem(task.id, task)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 150, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify started border color exists (yellow/gold)
+    assert node._started_border_color.red() == 255
+    assert node._started_border_color.green() == 200
+    assert node._started_border_color.blue() == 0
+
+
+def test_task_node_item_completion_status_done(qtbot: QtBot) -> None:
+    """Test TaskNodeItem rendering for done task has green background."""
+    from datetime import UTC, datetime, timedelta
+
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    from fluxx.data.models import DoneCompletion, WorkerId
+
+    start_time = datetime.now(UTC)
+    task = Task(
+        id=TaskId("task_1"),
+        title="Test Task",
+        description="Description",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=DoneCompletion(
+            assignee=WorkerId("worker_1"),
+            start_time=start_time,
+            hours_logged=2.0,
+            end_time=start_time + timedelta(hours=2),
+        ),
+    )
+
+    scene = QGraphicsScene()
+    node = TaskNodeItem(task.id, task)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 150, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify done color exists (light green)
+    assert node._done_color.red() == 180
+    assert node._done_color.green() == 240
+    assert node._done_color.blue() == 180
+
+
+def test_branch_node_item_resolved_state(qtbot: QtBot) -> None:
+    """Test BranchNodeItem rendering when branch is resolved."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw_1"), title="World 1"),
+        ],
+        chosen_world_id=PossibleWorldId("pw_1"),
+    )
+
+    scene = QGraphicsScene()
+    node = BranchNodeItem(branch.id, branch)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(100, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify resolved colors exist (light green)
+    assert node._resolved_color.red() == 150
+    assert node._resolved_color.green() == 220
+    assert node._resolved_color.blue() == 150
+
+
+def test_possible_world_item_chosen_state(qtbot: QtBot) -> None:
+    """Test PossibleWorldItem rendering when this world is chosen."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    pw_id = PossibleWorldId("pw_1")
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+        possible_worlds=[
+            PossibleWorld(id=pw_id, title="World 1"),
+        ],
+        chosen_world_id=pw_id,  # This world is chosen
+    )
+    possible_world = branch.possible_worlds[0]
+
+    scene = QGraphicsScene()
+    node = PossibleWorldItem(branch.id, branch, possible_world)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify chosen colors exist (bright green)
+    assert node._chosen_color.red() == 100
+    assert node._chosen_color.green() == 220
+    assert node._chosen_color.blue() == 100
+
+
+def test_possible_world_item_unchosen_state(qtbot: QtBot) -> None:
+    """Test PossibleWorldItem rendering when another world is chosen."""
+    from PySide6.QtGui import QImage, QPainter
+    from PySide6.QtWidgets import QGraphicsScene
+
+    pw1_id = PossibleWorldId("pw_1")
+    pw2_id = PossibleWorldId("pw_2")
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+        possible_worlds=[
+            PossibleWorld(id=pw1_id, title="World 1"),
+            PossibleWorld(id=pw2_id, title="World 2"),
+        ],
+        chosen_world_id=pw2_id,  # World 2 is chosen, not World 1
+    )
+    possible_world = branch.possible_worlds[0]  # World 1 (unchosen)
+
+    scene = QGraphicsScene()
+    node = PossibleWorldItem(branch.id, branch, possible_world)
+    scene.addItem(node)
+
+    # Render scene to image (exercises paint code path)
+    image = QImage(300, 100, QImage.Format.Format_ARGB32)
+    painter = QPainter(image)
+    scene.render(painter)
+    painter.end()
+
+    # Verify unchosen colors exist (gray)
+    assert node._unchosen_color.red() == 220
+    assert node._unchosen_color.green() == 220
+    assert node._unchosen_color.blue() == 220
+
+
+def test_possible_world_item_paint_none_painter() -> None:
+    """Test PossibleWorldItem paint with None painter does nothing."""
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem
+
+    branch = Branch(
+        id=BranchId("branch_1"),
+        title="Test Branch",
+        description="Description",
+    )
+    possible_world = PossibleWorld(
+        id=PossibleWorldId("pw_1"),
+        title="World 1",
+        description="First world",
+    )
+
+    node = PossibleWorldItem(branch.id, branch, possible_world)
+
+    # Should not raise exception when painter is None
+    option = QStyleOptionGraphicsItem()
+    node.paint(None, option, None)

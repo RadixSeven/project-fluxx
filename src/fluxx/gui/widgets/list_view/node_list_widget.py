@@ -10,7 +10,13 @@ from PySide6.QtWidgets import (
 )
 from rapidfuzz import fuzz
 
-from fluxx.data.models import NodeId, PossibleWorldId, Project
+from fluxx.data.models import (
+    DoneCompletion,
+    NodeId,
+    PossibleWorldId,
+    Project,
+    StartedCompletion,
+)
 from fluxx.gui.controller import ProjectController
 
 
@@ -35,11 +41,12 @@ class NodeListWidget(QWidget):
 
         # Store all selectable items for filtering
         # Each entry is either:
-        # - (node_id, title, "Task")
-        # - (node_id, title, "Branch")
-        # - ((branch_node_id, possible_world_id), title, "PossibleWorld")
+        # - (node_id, title, "Task", status)
+        # - (node_id, title, "Branch", status)
+        # - ((branch_node_id, possible_world_id), title, "PossibleWorld", status)
+        # Status is a display string like "Not Started", "In Progress", etc.
         self.all_nodes: list[
-            tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str]
+            tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, str]
         ] = []
 
         self._setup_ui()
@@ -112,22 +119,53 @@ class NodeListWidget(QWidget):
                 persistent_task = project.persistent_tasks[persistent_id]
                 if current_version in persistent_task.versions:
                     task = persistent_task.versions[current_version]
-                    self.all_nodes.append((node_id, task.title, "Task"))
+                    # Determine task status
+                    completion = task.completion
+                    if isinstance(completion, DoneCompletion):
+                        status = "Completed"
+                    elif isinstance(completion, StartedCompletion):
+                        status = "In Progress"
+                    else:
+                        status = "Not Started"
+                    self.all_nodes.append((node_id, task.title, "Task", status))
 
             elif persistent_id in project.persistent_branches:
                 persistent_branch = project.persistent_branches[persistent_id]
                 if current_version in persistent_branch.versions:
                     branch = persistent_branch.versions[current_version]
+                    # Determine branch status
+                    if branch.chosen_world_id is not None:
+                        # Find chosen world title
+                        chosen_title = "Unknown"
+                        for pw in branch.possible_worlds:
+                            if pw.id == branch.chosen_world_id:
+                                chosen_title = pw.title
+                                break
+                        status = f"Resolved: {chosen_title}"
+                    else:
+                        status = "Unresolved"
                     # Add branch occurrence point
-                    self.all_nodes.append((node_id, branch.title, "Branch"))
+                    self.all_nodes.append((node_id, branch.title, "Branch", status))
 
                     # Add each possible world as a separate item
                     for pw in branch.possible_worlds:
                         pw_id = PossibleWorldId(pw.id)
                         # Format title to show it's a possible world of this branch
                         pw_display_title = f"{pw.title} (from {branch.title})"
+                        # Possible world status: chosen or not
+                        if branch.chosen_world_id == pw.id:
+                            pw_status = "Chosen"
+                        elif branch.chosen_world_id is not None:
+                            pw_status = "Not Chosen"
+                        else:
+                            pw_status = ""  # Not resolved yet
                         self.all_nodes.append(
-                            ((node_id, pw_id), pw_display_title, "PossibleWorld")
+                            (
+                                (node_id, pw_id),
+                                pw_display_title,
+                                "PossibleWorld",
+                                pw_status,
+                            )
                         )
 
         # Sort by title
@@ -145,13 +183,13 @@ class NodeListWidget(QWidget):
 
         if not search_text:
             # Show all nodes
-            for node_id, title, node_type in self.all_nodes:
-                self._add_list_item(node_id, title, node_type)
+            for node_id, title, node_type, status in self.all_nodes:
+                self._add_list_item(node_id, title, node_type, status)
         else:
             # Filter with fuzzy matching
             matches = self._fuzzy_filter(search_text)
-            for node_id, title, node_type, _score in matches:
-                self._add_list_item(node_id, title, node_type)
+            for node_id, title, node_type, status, _score in matches:
+                self._add_list_item(node_id, title, node_type, status)
 
         # Restore selection
         selected_node_id = self.controller.get_selected_node_id()
@@ -160,29 +198,29 @@ class NodeListWidget(QWidget):
 
     def _fuzzy_filter(
         self, search_text: str
-    ) -> list[tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, float]]:
+    ) -> list[tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, str, float]]:
         """Filter nodes using fuzzy matching.
 
         Args:
             search_text: Search query
 
         Returns:
-            List of (node_id, title, type, score) tuples sorted by score
+            List of (node_id, title, type, status, score) tuples sorted by score
         """
         matches: list[
-            tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, float]
+            tuple[NodeId | tuple[NodeId, PossibleWorldId], str, str, str, float]
         ] = []
 
-        for node_id, title, node_type in self.all_nodes:
+        for node_id, title, node_type, status in self.all_nodes:
             # Calculate fuzzy match score
             score = fuzz.partial_ratio(search_text.lower(), title.lower())
 
             # Include matches above threshold
             if score > 60:  # Threshold for fuzzy matching
-                matches.append((node_id, title, node_type, score))
+                matches.append((node_id, title, node_type, status, score))
 
         # Sort by score (highest first)
-        matches.sort(key=lambda x: x[3], reverse=True)
+        matches.sort(key=lambda x: x[4], reverse=True)
 
         return matches
 
@@ -191,6 +229,7 @@ class NodeListWidget(QWidget):
         node_id: NodeId | tuple[NodeId, PossibleWorldId],
         title: str,
         node_type: str,
+        status: str,
     ) -> None:
         """Add an item to the list.
 
@@ -198,20 +237,39 @@ class NodeListWidget(QWidget):
             node_id: Node ID or (branch_node_id, possible_world_id) tuple
             title: Display title
             node_type: Node type (Task, Branch, or PossibleWorld)
+            status: Status display string (e.g., "Not Started", "In Progress")
         """
-        # Format display text
-        display_text = f"[{node_type}] {title}"
+        # Format display text with status
+        if status:
+            display_text = f"[{node_type}] {title} [{status}]"
+        else:
+            display_text = f"[{node_type}] {title}"
 
         item = QListWidgetItem(display_text)
         item.setData(Qt.ItemDataRole.UserRole, node_id)
 
         # Add type-specific styling
         if node_type == "Task":
-            item.setForeground(Qt.GlobalColor.blue)
+            # Color based on completion status
+            if status == "Completed":
+                item.setForeground(Qt.GlobalColor.darkGreen)
+            elif status == "In Progress":
+                item.setForeground(Qt.GlobalColor.darkYellow)
+            else:
+                item.setForeground(Qt.GlobalColor.blue)
         elif node_type == "Branch":
-            item.setForeground(Qt.GlobalColor.darkYellow)
+            # Color based on resolution status
+            if status.startswith("Resolved"):
+                item.setForeground(Qt.GlobalColor.darkGreen)
+            else:
+                item.setForeground(Qt.GlobalColor.darkYellow)
         else:  # PossibleWorld
-            item.setForeground(Qt.GlobalColor.darkGreen)
+            if status == "Chosen":
+                item.setForeground(Qt.GlobalColor.darkGreen)
+            elif status == "Not Chosen":
+                item.setForeground(Qt.GlobalColor.gray)
+            else:
+                item.setForeground(Qt.GlobalColor.darkGreen)
 
         self.node_list.addItem(item)
 

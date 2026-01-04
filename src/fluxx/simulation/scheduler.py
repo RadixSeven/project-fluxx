@@ -392,6 +392,64 @@ def is_worker_excluded_for_task(
     return False
 
 
+def get_worker_in_progress_task_count(
+    worker_id: WorkerId, state: SimulationState
+) -> int:
+    """Count how many in-progress tasks a worker has from project data.
+
+    This is used for time-splitting calculations when a worker has multiple
+    in-progress tasks.
+
+    Args:
+        worker_id: The worker ID to check
+        state: Current simulation state
+
+    Returns:
+        Number of in-progress tasks assigned to this worker
+    """
+    count = 0
+    for _node_id, persistent_id in state.project.dag.node_map.items():
+        if persistent_id not in state.project.persistent_tasks:
+            continue
+
+        persistent_task = state.project.persistent_tasks[persistent_id]
+        current_version_id = state.project.dag.current_version_id
+
+        if current_version_id not in persistent_task.versions:
+            continue
+
+        task = persistent_task.versions[current_version_id]
+        completion = task.completion
+
+        # Check if this task is assigned to the worker, in progress (from project),
+        # and not already being processed in simulation
+        if (
+            isinstance(completion, StartedCompletion)
+            and completion.assignee == worker_id
+            and not state.is_task_in_progress(task.id)
+            and not state.is_task_completed(task.id)
+        ):
+            count += 1
+
+    return count
+
+
+def has_existing_in_progress_tasks(worker_id: WorkerId, state: SimulationState) -> bool:
+    """Check if a worker has existing in-progress tasks from project data.
+
+    A worker with existing in-progress tasks (StartedCompletion) cannot be
+    assigned to new tasks until those tasks complete.
+
+    Args:
+        worker_id: The worker ID to check
+        state: Current simulation state
+
+    Returns:
+        True if worker has existing in-progress tasks, False otherwise
+    """
+    return get_worker_in_progress_task_count(worker_id, state) > 0
+
+
 def get_eligible_workers(task: Task, state: SimulationState) -> list[WorkerId]:
     """Get list of workers eligible to work on a task.
 
@@ -399,6 +457,7 @@ def get_eligible_workers(task: Task, state: SimulationState) -> list[WorkerId]:
     1. They are not currently assigned to a task (available)
     2. They pass the allowed_workers whitelist (if it exists)
     3. They are not excluded due to excluded_worker_tasks constraints
+    4. They don't have existing in-progress tasks from project data
 
     Args:
         task: The task to find workers for
@@ -418,6 +477,10 @@ def get_eligible_workers(task: Task, state: SimulationState) -> list[WorkerId]:
 
         # Check exclusions
         if is_worker_excluded_for_task(task, worker_id, state):
+            continue
+
+        # Check for existing in-progress tasks from project data
+        if has_existing_in_progress_tasks(worker_id, state):
             continue
 
         eligible.append(worker_id)

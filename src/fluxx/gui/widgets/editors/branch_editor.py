@@ -4,6 +4,7 @@ from typing import TypedDict
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
@@ -24,6 +25,7 @@ from fluxx.data.models import (
     Dependency,
     NodeId,
     PossibleWorld,
+    PossibleWorldId,
     type_explode_id,
 )
 from fluxx.gui.controller import ProjectController
@@ -40,6 +42,7 @@ class BranchPendingChanges(TypedDict, total=False):
     description: str
     possible_worlds: list[PossibleWorld]
     dependencies: list[Dependency]
+    chosen_world_id: PossibleWorldId | None
 
 
 class BranchEditor(QWidget):
@@ -176,6 +179,20 @@ class BranchEditor(QWidget):
         # Track editing state
         self._editing_dependency_index: int | None = None  # None = adding new
 
+        # Resolution section
+        resolution_label = QLabel("Resolution:")
+        resolution_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        layout.addWidget(resolution_label)
+
+        resolution_layout = QFormLayout()
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.currentIndexChanged.connect(self._on_resolution_changed)
+        resolution_layout.addRow("Chosen World:", self.resolution_combo)
+        layout.addLayout(resolution_layout)
+
+        # Store world IDs for mapping combo index to world ID
+        self._resolution_world_ids: list[PossibleWorldId | None] = []
+
         # Spacer
         layout.addStretch()
 
@@ -242,6 +259,9 @@ class BranchEditor(QWidget):
 
         # Dependencies
         self._load_dependencies(branch.dependencies)
+
+        # Resolution
+        self._load_resolution(branch.possible_worlds, branch.chosen_world_id)
 
         # Update button states
         self._update_button_states()
@@ -363,6 +383,55 @@ class BranchEditor(QWidget):
             item_text = f"{source_ep} {constraint} {target_title}.{target_ep}"
             self.dependencies_list.addItem(item_text)
 
+    def _load_resolution(
+        self,
+        worlds: list[PossibleWorld],
+        chosen_world_id: PossibleWorldId | None,
+    ) -> None:
+        """Load resolution state into the combo box.
+
+        Args:
+            worlds: List of possible worlds
+            chosen_world_id: Currently chosen world ID, or None if not resolved
+        """
+        self.resolution_combo.blockSignals(True)
+        self.resolution_combo.clear()
+        self._resolution_world_ids = []
+
+        # Add "Not resolved" option first
+        self.resolution_combo.addItem("Not resolved")
+        self._resolution_world_ids.append(None)
+
+        # Add each possible world
+        for world in worlds:
+            self.resolution_combo.addItem(world.title)
+            self._resolution_world_ids.append(world.id)
+
+        # Set current selection
+        if chosen_world_id is None:
+            self.resolution_combo.setCurrentIndex(0)
+        else:
+            # Find the index of the chosen world
+            for i, world_id in enumerate(self._resolution_world_ids):
+                if world_id == chosen_world_id:
+                    self.resolution_combo.setCurrentIndex(i)
+                    break
+
+        self.resolution_combo.blockSignals(False)
+
+    def _on_resolution_changed(self, index: int) -> None:
+        """Handle resolution combo box changes.
+
+        Args:
+            index: New combo box index
+        """
+        if index < 0 or index >= len(self._resolution_world_ids):
+            return
+
+        chosen_world_id = self._resolution_world_ids[index]
+        self.pending_changes["chosen_world_id"] = chosen_world_id
+        self._update_button_states()
+
     def _on_title_changed(self, text: str) -> None:
         """Handle title field changes.
 
@@ -393,7 +462,42 @@ class BranchEditor(QWidget):
         if worlds is not None:
             self.pending_changes["possible_worlds"] = worlds
             self._update_probabilities()
+            self._update_resolution_combo(worlds)
             self._update_button_states()
+
+    def _update_resolution_combo(self, worlds: list[PossibleWorld]) -> None:
+        """Update resolution combo to match current worlds.
+
+        Preserves the current selection if the chosen world still exists.
+
+        Args:
+            worlds: Current list of possible worlds
+        """
+        # Get current chosen world ID from pending changes or combo
+        current_chosen = self.pending_changes.get("chosen_world_id")
+        if current_chosen is None and self.resolution_combo.currentIndex() > 0:
+            idx = self.resolution_combo.currentIndex()
+            if idx < len(self._resolution_world_ids):
+                current_chosen = self._resolution_world_ids[idx]
+
+        self.resolution_combo.blockSignals(True)
+        self.resolution_combo.clear()
+        self._resolution_world_ids = []
+
+        # Add "Not resolved" option first
+        self.resolution_combo.addItem("Not resolved")
+        self._resolution_world_ids.append(None)
+
+        # Add each possible world
+        selected_index = 0
+        for i, world in enumerate(worlds):
+            self.resolution_combo.addItem(world.title)
+            self._resolution_world_ids.append(world.id)
+            if world.id == current_chosen:
+                selected_index = i + 1  # +1 for "Not resolved"
+
+        self.resolution_combo.setCurrentIndex(selected_index)
+        self.resolution_combo.blockSignals(False)
 
     def _get_worlds_from_table(self) -> list[PossibleWorld] | None:
         """Extract possible worlds from the table.
