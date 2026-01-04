@@ -55,7 +55,7 @@ def test_gantt_widget_initialization_with_optimal_schedule(qtbot: QtBot) -> None
         world_sequences={()},
     )
 
-    widget = GanttChartWidget(schedule, [])
+    widget = GanttChartWidget(schedule, [], {})
     qtbot.addWidget(widget)
 
     # Widget should be visible and have content
@@ -75,7 +75,7 @@ def test_gantt_widget_with_error_status(qtbot: QtBot) -> None:
         error_message="Test error message",
     )
 
-    widget = GanttChartWidget(schedule, [])
+    widget = GanttChartWidget(schedule, [], {})
     qtbot.addWidget(widget)
 
     # Error message should be set
@@ -93,7 +93,7 @@ def test_gantt_widget_with_empty_schedule(qtbot: QtBot) -> None:
         world_sequences={()},
     )
 
-    widget = GanttChartWidget(schedule, [])
+    widget = GanttChartWidget(schedule, [], {})
     qtbot.addWidget(widget)
 
     # Error message should be set
@@ -141,7 +141,7 @@ def test_gantt_widget_with_multiple_tasks(qtbot: QtBot) -> None:
         )
     ]
 
-    widget = GanttChartWidget(schedule, dependencies)
+    widget = GanttChartWidget(schedule, dependencies, {})
     qtbot.addWidget(widget)
 
     # Widget should be created without errors
@@ -181,7 +181,7 @@ def test_gantt_widget_with_world_sequences(qtbot: QtBot) -> None:
         world_sequences={world_a, world_b},
     )
 
-    widget = GanttChartWidget(schedule, [])
+    widget = GanttChartWidget(schedule, [], {})
     qtbot.addWidget(widget)
 
     # Widget should be created without errors
@@ -410,7 +410,7 @@ def test_gantt_widget_with_world_sequence_grouping(qtbot: QtBot) -> None:
         world_sequences={empty_seq, world_a},
     )
 
-    widget = GanttChartWidget(schedule, [])
+    widget = GanttChartWidget(schedule, [], {})
     qtbot.addWidget(widget)
 
     # Widget should be created without errors
@@ -421,3 +421,70 @@ def test_gantt_widget_with_world_sequence_grouping(qtbot: QtBot) -> None:
     # The chart should have 2 patches (task bars)
     patches = list(widget.ax.patches)
     assert len(patches) == 2
+
+
+def test_gantt_widget_uses_world_titles_in_labels(qtbot: QtBot) -> None:
+    """Test that Gantt widget uses human-readable world titles in y-axis labels."""
+    project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+
+    world_a: WorldSequence = (PossibleWorldId("pw_123_abc"),)
+    task1_a = TaskVariantKey(TaskId("task1"), world_a)
+
+    schedule = GanttSchedule(
+        variant_schedules={
+            task1_a: GanttVariantSchedule(
+                variant_key=task1_a,
+                task_title="Task 1",
+                start_time=project_start,
+                duration_hours=2.0,
+                end_time=project_start + timedelta(hours=2),
+            ),
+        },
+        optimization_status="optimal",
+        project_start_date=project_start,
+        world_sequences={world_a},
+    )
+
+    # Provide world titles mapping
+    world_titles = {PossibleWorldId("pw_123_abc"): "Option A"}
+
+    widget = GanttChartWidget(schedule, [], world_titles)
+    qtbot.addWidget(widget)
+
+    # Check that y-axis label uses human-readable title, not internal ID
+    y_labels = [label.get_text() for label in widget.ax.get_yticklabels()]
+    assert len(y_labels) == 1
+    assert "Option A" in y_labels[0]
+    assert "pw_123_abc" not in y_labels[0]
+
+
+def test_gantt_widget_falls_back_to_id_without_world_titles(qtbot: QtBot) -> None:
+    """Test that Gantt widget falls back to ID when world_titles not provided."""
+    project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+
+    world_a: WorldSequence = (PossibleWorldId("pw_123_abc"),)
+    task1_a = TaskVariantKey(TaskId("task1"), world_a)
+
+    schedule = GanttSchedule(
+        variant_schedules={
+            task1_a: GanttVariantSchedule(
+                variant_key=task1_a,
+                task_title="Task 1",
+                start_time=project_start,
+                duration_hours=2.0,
+                end_time=project_start + timedelta(hours=2),
+            ),
+        },
+        optimization_status="optimal",
+        project_start_date=project_start,
+        world_sequences={world_a},
+    )
+
+    # No world_titles provided
+    widget = GanttChartWidget(schedule, [], {})
+    qtbot.addWidget(widget)
+
+    # Check that y-axis label uses internal ID as fallback
+    y_labels = [label.get_text() for label in widget.ax.get_yticklabels()]
+    assert len(y_labels) == 1
+    assert "pw_123_abc" in y_labels[0]

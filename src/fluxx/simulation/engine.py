@@ -295,13 +295,19 @@ def resolve_branch(
 ) -> None:
     """Resolve a branch by choosing a possible world.
 
+    If the branch already has a chosen_world_id set (pre-resolved), use that.
+    Otherwise, randomly choose based on weights.
+
     Args:
         branch: The branch to resolve
         state: Current simulation state
         rng: Random number generator
     """
-    # Choose a world
-    chosen_world_id = choose_possible_world(branch, rng)
+    # Use pre-chosen world if set, otherwise randomly choose
+    if branch.chosen_world_id is not None:
+        chosen_world_id = branch.chosen_world_id
+    else:
+        chosen_world_id = choose_possible_world(branch, rng)
 
     # Update state
     state.resolve_branch(branch.id, chosen_world_id)

@@ -540,6 +540,35 @@ def test_resolve_branch(
     assert state.events[0].event_type == "branch_resolved"
 
 
+def test_resolve_branch_respects_prechosen_world(
+    simple_project: Project, base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that resolve_branch uses chosen_world_id when set."""
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Add a branch with pre-chosen world (simulating a resolved branch)
+    branch = Branch(
+        id=BranchId("b1"),
+        title="Branch 1",
+        description="Test branch",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("pw1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("pw2"), title="World 2", weight=99.0),
+        ],
+        chosen_world_id=PossibleWorldId("pw1"),  # Pre-chosen despite lower weight
+    )
+    rng = np.random.default_rng(seed=42)
+
+    resolve_branch(branch, state, rng)
+
+    # Should use the pre-chosen world, not randomly select
+    assert state.resolved_branches[BranchId("b1")] == PossibleWorldId("pw1")
+
+    # Should have recorded event with correct chosen_world
+    assert len(state.events) == 1
+    assert state.events[0].details["chosen_world"] == "pw1"
+
+
 def test_get_branch(
     simple_project: Project, base_workers: list[Worker], start_date: datetime
 ) -> None:

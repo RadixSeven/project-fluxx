@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from fluxx.data.models import Project, Sample
+from fluxx.data.models import PossibleWorldId, Project, Sample
 from fluxx.gui.simulation.analysis import extract_timeline_data
 from fluxx.gui.simulation.gantt_analysis import extract_gantt_statistics
 from fluxx.gui.simulation.gantt_optimizer import optimize_gantt_schedule
@@ -69,8 +69,17 @@ class SimulationResultsDialog(QDialog):
             self.samples, self.project, percentile=0.97
         )
         gantt_schedule = optimize_gantt_schedule(gantt_statistics, self.project)
+
+        # Build mapping from PossibleWorldId to human-readable title
+        world_titles: dict[PossibleWorldId, str] = {}
+        for persistent_branch in self.project.persistent_branches.values():
+            branch = persistent_branch.versions.get(self.project.dag.current_version_id)
+            if branch is not None:
+                for pw in branch.possible_worlds:
+                    world_titles[pw.id] = pw.title
+
         self.gantt_widget = GanttChartWidget(
-            gantt_schedule, gantt_statistics.dependencies
+            gantt_schedule, gantt_statistics.dependencies, world_titles
         )
         self.tabs.addTab(self.gantt_widget, "Conservative Gantt Chart")
 

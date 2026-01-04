@@ -12,6 +12,7 @@ from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as Navigation
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from fluxx.data.models import PossibleWorldId
 from fluxx.gui.simulation.analysis import DependencyInfo
 from fluxx.gui.simulation.gantt_analysis import TaskVariantKey, WorldSequence
 from fluxx.gui.simulation.gantt_optimizer import GanttSchedule, GanttVariantSchedule
@@ -123,6 +124,7 @@ class GanttChartWidget(QWidget):
         self,
         gantt_schedule: GanttSchedule,
         dependencies: list[DependencyInfo],
+        world_titles: dict[PossibleWorldId, str],
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the Gantt chart widget.
@@ -130,11 +132,13 @@ class GanttChartWidget(QWidget):
         Args:
             gantt_schedule: Optimized Gantt schedule to visualize
             dependencies: List of dependency info from project
+            world_titles: Mapping from PossibleWorldId to human-readable title
             parent: Parent widget
         """
         super().__init__(parent)
         self.gantt_schedule = gantt_schedule
         self.dependencies = dependencies
+        self.world_titles = world_titles
 
         self._create_widgets()
         self._create_layout()
@@ -190,7 +194,11 @@ class GanttChartWidget(QWidget):
             y_positions[variant_key] = i
             # Include world sequence info in label if not empty
             if variant_key.world_sequence:
-                world_str = ", ".join(str(w) for w in variant_key.world_sequence)
+                # Use human-readable titles if available, fall back to IDs
+                world_titles_list = [
+                    self.world_titles.get(w, str(w)) for w in variant_key.world_sequence
+                ]
+                world_str = ", ".join(world_titles_list)
                 label = f"{schedule.task_title} ({world_str})"
             else:
                 label = schedule.task_title

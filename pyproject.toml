@@ -29,6 +29,7 @@ dev = [
 
 [project.scripts]
 fluxx = "fluxx.__main__:main"
+fluxx-remove-history = "fluxx.remove_history:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

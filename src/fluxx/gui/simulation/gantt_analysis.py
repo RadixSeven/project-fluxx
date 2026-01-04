@@ -69,7 +69,7 @@ def extract_world_sequence_from_sample(sample: Sample) -> WorldSequence:
     """
     # Find all branch resolution events
     resolution_events = [
-        event for event in sample.events if event.event_type == "resolve"
+        event for event in sample.events if event.event_type == "branch_resolved"
     ]
 
     # Sort by timestamp to get resolution order

@@ -16,6 +16,7 @@ from fluxx.data.models import (
     Sample,
     TaskEvent,
     TaskEventDetails,
+    TaskEventType,
     TaskId,
     Worker,
     WorkerId,
@@ -68,7 +69,7 @@ def create_sample_with_events(events: list[TaskEvent], sample_id: int = 0) -> Sa
 
 
 def create_task_event(
-    event_type: str,
+    event_type: TaskEventType,
     node_id: NodeId,
     timestamp: datetime,
     details: TaskEventDetails | None = None,
@@ -76,7 +77,7 @@ def create_task_event(
     """Create a task event.
 
     Args:
-        event_type: Event type (start, complete, resolve)
+        event_type: Event type (start, complete, branch_resolved)
         node_id: Node ID
         timestamp: Event timestamp
         details: Optional event details
@@ -104,7 +105,7 @@ def test_extract_world_sequence_from_sample_single_branch() -> None:
     now = datetime.now(UTC)
     events = [
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch1"),
             now,
             {"chosen_world": "world_a"},
@@ -120,19 +121,19 @@ def test_extract_world_sequence_from_sample_multiple_branches() -> None:
     now = datetime.now(UTC)
     events = [
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch1"),
             now,
             {"chosen_world": "world_a"},
         ),
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch2"),
             now + timedelta(hours=1),
             {"chosen_world": "world_b"},
         ),
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch3"),
             now + timedelta(hours=2),
             {"chosen_world": "world_c"},
@@ -153,19 +154,19 @@ def test_extract_world_sequence_preserves_order() -> None:
     # Create events in non-chronological order
     events = [
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch2"),
             now + timedelta(hours=2),
             {"chosen_world": "world_b"},
         ),
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch1"),
             now,
             {"chosen_world": "world_a"},
         ),
         create_task_event(
-            "resolve",
+            "branch_resolved",
             BranchId("branch3"),
             now + timedelta(hours=1),
             {"chosen_world": "world_c"},
@@ -364,7 +365,7 @@ def test_extract_gantt_statistics_with_branches(simple_project: Project) -> None
     # Sample 1: world_a chosen
     events1 = [
         create_task_event(
-            "resolve", BranchId("branch1"), base, {"chosen_world": "world_a"}
+            "branch_resolved", BranchId("branch1"), base, {"chosen_world": "world_a"}
         ),
         create_task_event("start", TaskId("task1"), base + timedelta(hours=1)),
         create_task_event("complete", TaskId("task1"), base + timedelta(hours=3)),
@@ -373,7 +374,7 @@ def test_extract_gantt_statistics_with_branches(simple_project: Project) -> None
     # Sample 2: world_b chosen (different world sequence)
     events2 = [
         create_task_event(
-            "resolve", BranchId("branch1"), base, {"chosen_world": "world_b"}
+            "branch_resolved", BranchId("branch1"), base, {"chosen_world": "world_b"}
         ),
         create_task_event("start", TaskId("task1"), base + timedelta(hours=1)),
         create_task_event("complete", TaskId("task1"), base + timedelta(hours=4)),

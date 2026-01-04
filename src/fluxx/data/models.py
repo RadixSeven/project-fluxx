@@ -570,12 +570,16 @@ class TaskEventDetails(TypedDict, total=False):
     chosen_world: str
 
 
+# Valid event types for simulation events
+TaskEventType = Literal["start", "complete", "branch_resolved"]
+
+
 class TaskEvent(BaseModel):
     """Event during simulation (task start/end or branch resolution)."""
 
     timestamp: datetime = Field(description="When the event occurred")
     node_id: NodeId = Field(description="Task or branch ID")
-    event_type: str = Field(description="Type of event (start, end, resolve)")
+    event_type: TaskEventType = Field(description="Type of event")
     details: TaskEventDetails = Field(
         default_factory=lambda: TaskEventDetails(),
         description="Event-specific details",
