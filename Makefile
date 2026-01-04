@@ -87,7 +87,7 @@ verify-coverage:
 			exit 1; \
 		fi; \
 		echo "  Coverage thresholds: OK"; \
-		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
+		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
 		DIFF_OUTPUT=$$(diff <(echo "$$CURRENT_SUPPRESSIONS") allowed_static_analysis_suppression.txt 2>&1) || true; \
 		if [ -n "$$DIFF_OUTPUT" ]; then \
 			NEW_SUPPRESSIONS=$$(echo "$$DIFF_OUTPUT" | grep "^<" || true); \
@@ -158,8 +158,8 @@ all_checks: format lint type-check test coverage verify-coverage
 regenerate-suppressions:
 	@echo "==> Regenerating allowed_static_analysis_suppression.txt..."
 	@find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) \
-		-type f ! -path "./.git/*" ! -path "./venv/*" \
-		-exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null \
+		-type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" \
+		-exec grep -Hn "type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
 		| sed 's|^\./||' \
 		| sort -t: -k1,1 -k2,2n \
 		| sed 's/^\([^:]*\):[0-9]*:/\1:/' \

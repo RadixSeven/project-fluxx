@@ -1,10 +1,17 @@
 .claude/hooks/stop_check.py:    return json.load(sys.stdin)  # type: ignore[no-any-return]
 CLAUDE.md:The codebase tracks all `type: ignore` and `pragma: no cover` comments in `allowed_static_analysis_suppression.txt`. This file is checked during `make all_checks` to ensure no new suppressions are added without human review.
 CLAUDE.md:**To add a new suppression (type: ignore or pragma: no cover) or mention those terms in other files:**
-Makefile:		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" -exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
-Makefile:		-exec grep -Hn "type: ignore\|pragma: no cover" {} + 2>/dev/null \
+Makefile:		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
+Makefile:		-exec grep -Hn "type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
 pyproject.toml:    "pragma: no cover",
 src/fluxx/data/dag_operations.py:        raise DAGOperationError(f"Node {source_node_id} not found")  # pragma: no cover
+src/fluxx/data/models.py:from typing import Annotated, Any, Literal, NamedTuple, NewType, TypedDict, cast
+src/fluxx/data/models.py:    rng_state: list[Any] = Field(
+src/fluxx/gui/controller.py:from typing import Any
+src/fluxx/gui/controller.py:        self._selection_validator: Any = None
+src/fluxx/gui/controller.py:    def set_selection_validator(self, validator: Any) -> None:
+src/fluxx/gui/controller.py:    def update_task(self, task_id: TaskId, **kwargs: Any) -> None:
+src/fluxx/gui/controller.py:    def update_branch(self, branch_id: BranchId, **kwargs: Any) -> None:
 src/fluxx/gui/simulation/gantt_optimizer.py:from pyomo.environ import (  # type: ignore[import-untyped]
 src/fluxx/gui/simulation/gantt_optimizer.py:            return model.start[variant] >= min_start_hours  # type: ignore[no-any-return]
 src/fluxx/gui/simulation/gantt_optimizer.py:            return model.duration[variant] >= stats.percentile_duration_hours  # type: ignore[no-any-return]
