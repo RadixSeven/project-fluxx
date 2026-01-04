@@ -106,17 +106,27 @@ The codebase is organized into three main packages:
 - **Pydantic validation** for all data schemas
 - **Pre-commit hooks** must pass before commits
 
-### Static Analysis Suppressions
+### Static Analysis (and policy exceptions)
 
-The codebase tracks all `type: ignore` and `pragma: no cover` comments in `allowed_static_analysis_suppression.txt`. This file is checked during `make all_checks` to ensure no new suppressions are added without human review.
+We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
+`cast`, and `Any` must be justified and undergo human review. This is enforced by listing
+all reviewed uses in `allowed_static_analysis_suppression.txt`. `make all_checks` checks
+it to ensure no new exceptions are added without human review.
 
-**To add a new suppression (type: ignore or pragma: no cover) or mention those terms in other files:**
+This is an aid, helping us avoid introducing new violations. It depends on our
+professionalism, recognizing that the type system is a limitation that improves our
+software when we stay within its boundaries. This policy enforcement is not airtight,
+an attacker could bypass it.
+
+**If you need a new exception to the policy**
+If you have written code that cannot be expressed with type safety (that is, it requires the use of `Any`, `type: ignore`, `cast`, or `pragma: no cover`) or you need to mention
+these terms in documentation or a comment, follow the steps below:
 
 1. Create the bypass file:
    ```bash
    touch dont_commit_waiting_for_review
    ```
-2. Add your suppression and run checks (will pass with bypass):
+2. Run all_checks (will pass with bypass):
    ```bash
    make all_checks
    ```
