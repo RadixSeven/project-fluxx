@@ -113,9 +113,9 @@ verify-coverage:
 				echo "       git commit"; \
 				exit 1; \
 			elif [ -n "$$REMOVED_SUPPRESSIONS" ]; then \
-				echo "  WARNING: Some suppressions have been removed from the codebase:"; \
+				echo -e "  \033[5;38;5;208mWARNING: Some suppressions have been removed from the codebase:\033[0m"; \
 				echo "$$REMOVED_SUPPRESSIONS" | sed 's/^> /    /'; \
-				echo "  Run 'make regenerate-suppressions' to update the list."; \
+				echo -e "  \033[5;38;5;208mRun 'make regenerate-suppressions' to update the list.\033[0m"; \
 				echo "  Suppression list: OK (with warnings)"; \
 			fi; \
 		else \
