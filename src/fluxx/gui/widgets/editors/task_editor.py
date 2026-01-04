@@ -41,6 +41,7 @@ from fluxx.data.models import (
 from fluxx.data.validation import (
     get_required_exclusion_dependency,
     has_required_exclusion_dependency,
+    validate_completion_change,
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
@@ -700,6 +701,20 @@ class TaskEditor(QWidget):
 
         if not self._validate_changes():
             return
+
+        # Validate completion changes against dependency constraints
+        if "completion" in self.pending_changes:
+            project = self.controller.get_project()
+            errors = validate_completion_change(
+                project, self.current_task_id, self.pending_changes["completion"]
+            )
+            if errors:
+                QMessageBox.warning(
+                    self,
+                    "Cannot Apply Changes",
+                    "\n\n".join(errors),
+                )
+                return
 
         # Handle dependencies separately (use add/remove_dependency calls)
         if "dependencies" in self.pending_changes:
@@ -1793,6 +1808,18 @@ class TaskEditor(QWidget):
             hours_logged=0.0,
         )
 
+        # Validate before applying
+        errors = validate_completion_change(
+            project, self.current_task_id, new_completion
+        )
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Cannot Start Task",
+                "\n\n".join(errors),
+            )
+            return
+
         # Apply directly (not pending, takes effect immediately)
         self.controller.update_task(self.current_task_id, completion=new_completion)
 
@@ -1819,6 +1846,15 @@ class TaskEditor(QWidget):
             completion = self.pending_changes["completion"]
             if not isinstance(completion, StartedCompletion):
                 return
+
+        # Validate hours_logged before completing
+        if completion.hours_logged <= 0:
+            QMessageBox.warning(
+                self,
+                "Cannot Complete Task",
+                "Hours logged must be greater than 0 to complete a task.",
+            )
+            return
 
         # Create DoneCompletion from StartedCompletion
         new_completion = DoneCompletion(

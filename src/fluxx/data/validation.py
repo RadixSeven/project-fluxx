@@ -1,17 +1,22 @@
 """DAG validation utilities."""
 
 from collections import defaultdict
+from datetime import datetime
 
 from fluxx.data.models import (
+    Branch,
     ConstraintType,
     DAGVersionId,
     Dependency,
     DependencyTargetId,
+    DoneCompletion,
     Endpoint,
     NodeId,
     PossibleWorldId,
     Project,
+    StartedCompletion,
     Task,
+    TaskCompletion,
     TaskId,
     type_explode_id,
 )
@@ -43,6 +48,12 @@ class WorkerConstraintError(ValidationError):
 
 class HierarchyError(ValidationError):
     """Raised when task hierarchy is invalid."""
+
+    pass
+
+
+class CompletionConstraintError(ValidationError):
+    """Raised when completion changes violate dependency constraints."""
 
     pass
 
@@ -629,3 +640,372 @@ def get_required_exclusion_dependency(
         target_endpoint=Endpoint.START,
         constraint_type=ConstraintType.GREATER_EQUAL,
     )
+
+
+def validate_completion_change(
+    project: Project,
+    task_id: TaskId,
+    new_completion: TaskCompletion,
+) -> list[str]:
+    """Validate a proposed completion change against dependency constraints.
+
+    Checks that:
+    1. When starting a task, all START dependencies are satisfied
+    2. When setting start_time, it respects dependency time constraints
+    3. When depending on branches, they must be resolved appropriately
+
+    Args:
+        project: The project containing the task
+        task_id: The task being modified
+        new_completion: The proposed new completion state
+
+    Returns:
+        List of validation error messages. Empty list means validation passed.
+    """
+    errors: list[str] = []
+
+    # Get the task
+    node_id: NodeId = task_id
+    persistent_id = project.dag.node_map.get(node_id)
+    if persistent_id is None:
+        errors.append(f"Task {task_id} not found")
+        return errors
+
+    if persistent_id not in project.persistent_tasks:
+        errors.append(f"Node {task_id} is not a task")
+        return errors
+
+    persistent_task = project.persistent_tasks[persistent_id]
+    current_version = project.dag.current_version_id
+    if current_version not in persistent_task.versions:
+        errors.append(f"Task {task_id} not in current version")
+        return errors
+
+    task = persistent_task.versions[current_version]
+
+    # If becoming started or done, validate START dependencies
+    if isinstance(new_completion, (StartedCompletion, DoneCompletion)):
+        start_errors = _validate_start_dependencies(
+            project, task, new_completion.start_time, task.parent_id
+        )
+        errors.extend(start_errors)
+
+    return errors
+
+
+def _validate_start_dependencies(
+    project: Project,
+    task: Task,
+    start_time: datetime,
+    parent_id: TaskId | None,
+) -> list[str]:
+    """Validate that all START dependencies are satisfied for a given start time.
+
+    Args:
+        project: The project containing the task
+        task: The task being started
+        start_time: The proposed start time
+        parent_id: The task's parent ID (if any), used to skip implicit parent deps
+
+    Returns:
+        List of validation error messages
+    """
+    errors: list[str] = []
+    current_version = project.dag.current_version_id
+
+    for dep in task.dependencies:
+        if dep.source_endpoint != Endpoint.START:
+            continue
+
+        # Only validate >= constraints (the common case)
+        if dep.constraint_type != ConstraintType.GREATER_EQUAL:
+            continue
+
+        error = _validate_dependency_for_start(
+            project, current_version, task.title, dep, start_time, parent_id
+        )
+        if error:
+            errors.append(error)
+
+    return errors
+
+
+def _validate_dependency_for_start(
+    project: Project,
+    version_id: DAGVersionId,
+    task_title: str,
+    dep: Dependency,
+    start_time: datetime,
+    parent_id: TaskId | None,
+) -> str | None:
+    """Validate a single dependency constraint for task start.
+
+    Args:
+        project: The project
+        version_id: Current DAG version
+        task_title: Title of the task being started (for error messages)
+        dep: The dependency to validate
+        start_time: The proposed start time
+        parent_id: The task's parent ID (if any), used to skip implicit parent deps
+
+    Returns:
+        Error message if validation fails, None if passes
+    """
+    target_id = dep.target_node_id
+    target_endpoint = dep.target_endpoint
+
+    try:
+        as_task, as_branch, as_world = type_explode_id(target_id)
+    except ValueError:
+        return f"Invalid dependency target: {target_id}"
+
+    # Handle possible world dependency
+    if as_world is not None:
+        return _validate_possible_world_dependency(
+            project, version_id, task_title, as_world.branch_id, as_world.world_id
+        )
+
+    # Handle task dependency
+    if as_task is not None:
+        return _validate_task_dependency_for_start(
+            project,
+            version_id,
+            task_title,
+            as_task,
+            target_endpoint,
+            start_time,
+            parent_id,
+        )
+
+    # Handle branch dependency
+    if as_branch is not None:
+        return _validate_branch_dependency(project, version_id, task_title, as_branch)
+
+    # Should be unreachable - type_explode_id returns exactly one non-None value
+    raise ValueError(f"Unknown dependency target type: {target_id}")
+
+
+def _validate_possible_world_dependency(
+    project: Project,
+    version_id: DAGVersionId,
+    task_title: str,
+    branch_id: NodeId,
+    world_id: str,
+) -> str | None:
+    """Validate a dependency on a specific possible world.
+
+    The branch must be resolved AND the specified world must be the chosen one.
+
+    Args:
+        project: The project
+        version_id: Current DAG version
+        task_title: Title of the task (for error messages)
+        branch_id: The branch node ID
+        world_id: The possible world ID
+
+    Returns:
+        Error message if validation fails, None if passes
+    """
+    branch = _get_branch(project, version_id, branch_id)
+    if branch is None:
+        return f"Cannot start '{task_title}': depends on non-existent branch"
+
+    if branch.chosen_world_id is None:
+        return (
+            f"Cannot start '{task_title}': depends on possible world "
+            f"in unresolved branch '{branch.title}'"
+        )
+
+    if branch.chosen_world_id != world_id:
+        # Find the world title for better error message
+        world_title: str = world_id
+        for pw in branch.possible_worlds:
+            if pw.id == world_id:
+                world_title = pw.title
+                break
+
+        chosen_title: str = branch.chosen_world_id or ""
+        for pw in branch.possible_worlds:
+            if pw.id == branch.chosen_world_id:
+                chosen_title = pw.title
+                break
+
+        return (
+            f"Cannot start '{task_title}': depends on possible world "
+            f"'{world_title}' but branch '{branch.title}' resolved to "
+            f"'{chosen_title}'"
+        )
+
+    return None
+
+
+def _validate_branch_dependency(
+    project: Project,
+    version_id: DAGVersionId,
+    task_title: str,
+    branch_id: NodeId,
+) -> str | None:
+    """Validate a dependency on a branch's occurrence point.
+
+    The branch must be resolved.
+
+    Args:
+        project: The project
+        version_id: Current DAG version
+        task_title: Title of the task (for error messages)
+        branch_id: The branch node ID
+
+    Returns:
+        Error message if validation fails, None if passes
+    """
+    branch = _get_branch(project, version_id, branch_id)
+    if branch is None:
+        return f"Cannot start '{task_title}': depends on non-existent branch"
+
+    if branch.chosen_world_id is None:
+        return (
+            f"Cannot start '{task_title}': depends on branch "
+            f"'{branch.title}' which is not yet resolved"
+        )
+
+    return None
+
+
+def _validate_task_dependency_for_start(
+    project: Project,
+    version_id: DAGVersionId,
+    task_title: str,
+    target_task_id: TaskId,
+    target_endpoint: Endpoint,
+    start_time: datetime,
+    parent_id: TaskId | None,
+) -> str | None:
+    """Validate a dependency on another task for starting.
+
+    Args:
+        project: The project
+        version_id: Current DAG version
+        task_title: Title of the task being started (for error messages)
+        target_task_id: The target task ID
+        target_endpoint: The target endpoint (START or END)
+        start_time: The proposed start time
+        parent_id: The source task's parent ID (if any)
+
+    Returns:
+        Error message if validation fails, None if passes
+    """
+    # Skip validation for implicit parent-child START dependency.
+    # When a child starts, the parent's start is implicitly defined as the
+    # minimum of all children's starts, so child.START >= parent.START is
+    # always satisfiable.
+    if (
+        parent_id is not None
+        and target_task_id == parent_id
+        and target_endpoint == Endpoint.START
+    ):
+        return None
+
+    target_task = _get_task(project, version_id, target_task_id)
+    if target_task is None:
+        return f"Cannot start '{task_title}': depends on non-existent task"
+
+    target_completion = target_task.completion
+
+    if target_endpoint == Endpoint.START:
+        # Dependency: this.start >= target.start
+        # Target must be started or done
+        if isinstance(target_completion, (StartedCompletion, DoneCompletion)):
+            # Check time constraint
+            if start_time < target_completion.start_time:
+                start_str = start_time.strftime("%Y-%m-%d %H:%M")
+                target_str = target_completion.start_time.strftime("%Y-%m-%d %H:%M")
+                return (
+                    f"Cannot start '{task_title}' at {start_str}: "
+                    f"must be after '{target_task.title}' started at {target_str}"
+                )
+        else:
+            # Target not started yet
+            return (
+                f"Cannot start '{task_title}': depends on '{target_task.title}' "
+                f"which has not started yet"
+            )
+
+    elif target_endpoint == Endpoint.END:
+        # Dependency: this.start >= target.end
+        # Target must be done
+        if isinstance(target_completion, DoneCompletion):
+            # Check time constraint
+            if start_time < target_completion.end_time:
+                start_str = start_time.strftime("%Y-%m-%d %H:%M")
+                end_str = target_completion.end_time.strftime("%Y-%m-%d %H:%M")
+                return (
+                    f"Cannot start '{task_title}' at {start_str}: "
+                    f"must be after '{target_task.title}' completed at {end_str}"
+                )
+        else:
+            # Target not completed yet
+            return (
+                f"Cannot start '{task_title}': depends on completion of "
+                f"'{target_task.title}' which is not yet complete"
+            )
+
+    return None
+
+
+def _get_task(
+    project: Project,
+    version_id: DAGVersionId,
+    task_id: TaskId,
+) -> Task | None:
+    """Get a task from the project.
+
+    Args:
+        project: The project
+        version_id: The DAG version
+        task_id: The task ID
+
+    Returns:
+        The task, or None if not found
+    """
+    node_id: NodeId = task_id
+    persistent_id = project.dag.node_map.get(node_id)
+    if persistent_id is None:
+        return None
+
+    if persistent_id not in project.persistent_tasks:
+        return None
+
+    persistent_task = project.persistent_tasks[persistent_id]
+    if version_id not in persistent_task.versions:
+        return None
+
+    return persistent_task.versions[version_id]
+
+
+def _get_branch(
+    project: Project,
+    version_id: DAGVersionId,
+    branch_id: NodeId,
+) -> Branch | None:
+    """Get a branch from the project.
+
+    Args:
+        project: The project
+        version_id: The DAG version
+        branch_id: The branch node ID
+
+    Returns:
+        The branch, or None if not found
+    """
+    persistent_id = project.dag.node_map.get(branch_id)
+    if persistent_id is None:
+        return None
+
+    if persistent_id not in project.persistent_branches:
+        return None
+
+    persistent_branch = project.persistent_branches[persistent_id]
+    if version_id not in persistent_branch.versions:
+        return None
+
+    return persistent_branch.versions[version_id]

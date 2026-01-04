@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
@@ -2359,3 +2360,2102 @@ def test_cycle_detection_dfs_visits_end_endpoint_separately() -> None:
     # - task_a.START is visited first during another DFS
     # - task_a.END needs separate DFS because it has outgoing edges
     validate_dag(project)
+
+
+# =============================================================================
+# Completion Validation Tests
+# =============================================================================
+
+
+def test_validate_completion_change_no_dependencies() -> None:
+    """Test that a task with no dependencies can be started."""
+
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    worker_id = WorkerId("w1")
+
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={task_id: PersistentObjectId("p1")},
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("p1"): PersistentTask(
+                id=PersistentObjectId("p1"),
+                versions={version_id: task},
+            ),
+        },
+    )
+
+    # Should be able to start the task
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_change_depends_on_incomplete_task() -> None:
+    """Test that starting fails if depending on incomplete task's end."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task A is not started
+    task_a = Task(
+        id=task_a_id,
+        title="Task A",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Task B depends on Task A's end
+    task_b = Task(
+        id=task_b_id,
+        title="Task B",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task_a_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_a_id: PersistentObjectId("pa"),
+                task_b_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pa"): PersistentTask(
+                id=PersistentObjectId("pa"),
+                versions={version_id: task_a},
+            ),
+            PersistentObjectId("pb"): PersistentTask(
+                id=PersistentObjectId("pb"),
+                versions={version_id: task_b},
+            ),
+        },
+    )
+
+    # Try to start Task B - should fail because Task A is not complete
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_b_id, new_completion)
+    assert len(errors) == 1
+    assert "Task A" in errors[0]
+    assert "not yet complete" in errors[0]
+
+
+def test_validate_completion_change_depends_on_unstarted_task() -> None:
+    """Test that starting fails if depending on unstarted task's start."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task A is not started
+    task_a = Task(
+        id=task_a_id,
+        title="Task A",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Task B depends on Task A's start
+    task_b = Task(
+        id=task_b_id,
+        title="Task B",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task_a_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_a_id: PersistentObjectId("pa"),
+                task_b_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pa"): PersistentTask(
+                id=PersistentObjectId("pa"),
+                versions={version_id: task_a},
+            ),
+            PersistentObjectId("pb"): PersistentTask(
+                id=PersistentObjectId("pb"),
+                versions={version_id: task_b},
+            ),
+        },
+    )
+
+    # Try to start Task B - should fail because Task A has not started
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_b_id, new_completion)
+    assert len(errors) == 1
+    assert "Task A" in errors[0]
+    assert "not started yet" in errors[0]
+
+
+def test_validate_completion_change_start_time_before_dependency() -> None:
+    """Test that start time before dependency's start time fails."""
+    from datetime import timedelta
+
+    from fluxx.data.models import StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task A is started
+    task_a = Task(
+        id=task_a_id,
+        title="Task A",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=StartedCompletion(
+            assignee=worker_id,
+            start_time=now,
+            hours_logged=0.0,
+        ),
+    )
+
+    # Task B depends on Task A's start
+    task_b = Task(
+        id=task_b_id,
+        title="Task B",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task_a_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=StartedCompletion(
+            assignee=worker_id,
+            start_time=now + timedelta(hours=1),
+            hours_logged=0.0,
+        ),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_a_id: PersistentObjectId("pa"),
+                task_b_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pa"): PersistentTask(
+                id=PersistentObjectId("pa"),
+                versions={version_id: task_a},
+            ),
+            PersistentObjectId("pb"): PersistentTask(
+                id=PersistentObjectId("pb"),
+                versions={version_id: task_b},
+            ),
+        },
+    )
+
+    # Try to change Task B's start time to before Task A started
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now - timedelta(hours=1),  # Before Task A started
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_b_id, new_completion)
+    assert len(errors) == 1
+    assert "must be after" in errors[0]
+    assert "Task A" in errors[0]
+
+
+def test_validate_completion_change_depends_on_unresolved_branch() -> None:
+    """Test that starting fails if depending on unresolved branch."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+
+    # Branch is not resolved
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("w1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("w2"), title="World 2", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=None,
+    )
+
+    # Task depends on the branch
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=branch_id,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Try to start the task - should fail because branch is not resolved
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "Branch" in errors[0]
+    assert "not yet resolved" in errors[0]
+
+
+def test_validate_completion_change_depends_on_wrong_possible_world() -> None:
+    """Test that starting fails if depending on unchosen possible world."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+    world_1_id = PossibleWorldId("world_1")
+    world_2_id = PossibleWorldId("world_2")
+
+    # Branch is resolved to World 2
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=world_1_id, title="World 1", weight=1.0),
+            PossibleWorld(id=world_2_id, title="World 2", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=world_2_id,
+    )
+
+    # Task depends on World 1 (which was not chosen)
+    # Use string format for possible world reference: branch_id:world_id
+    from fluxx.data.models import PossibleWorldReference
+
+    world_ref = PossibleWorldReference(f"{branch_id}:{world_1_id}")
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=world_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Try to start the task - should fail because World 1 was not chosen
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "World 1" in errors[0]
+    assert "World 2" in errors[0]
+
+
+def test_validate_completion_change_satisfied_dependencies() -> None:
+    """Test that starting succeeds with all dependencies satisfied."""
+    from datetime import timedelta
+
+    from fluxx.data.models import (
+        DoneCompletion,
+        NotStartedCompletion,
+        StartedCompletion,
+    )
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task A is done
+    task_a = Task(
+        id=task_a_id,
+        title="Task A",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=DoneCompletion(
+            assignee=worker_id,
+            start_time=now - timedelta(days=1),
+            hours_logged=8.0,
+            end_time=now - timedelta(hours=1),
+        ),
+    )
+
+    # Task B depends on Task A's end
+    task_b = Task(
+        id=task_b_id,
+        title="Task B",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task_a_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_a_id: PersistentObjectId("pa"),
+                task_b_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pa"): PersistentTask(
+                id=PersistentObjectId("pa"),
+                versions={version_id: task_a},
+            ),
+            PersistentObjectId("pb"): PersistentTask(
+                id=PersistentObjectId("pb"),
+                versions={version_id: task_b},
+            ),
+        },
+    )
+
+    # Start Task B after Task A ended - should succeed
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,  # After Task A ended
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_b_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_change_task_not_found() -> None:
+    """Test validation fails for non-existent task."""
+    from fluxx.data.models import StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={},
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+    )
+
+    # Try to start a non-existent task
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(
+        project, TaskId("t_nonexistent"), new_completion
+    )
+    assert len(errors) == 1
+    assert "not found" in errors[0]
+
+
+def test_validate_completion_change_start_time_before_end_dependency() -> None:
+    """Test that start time before dependency's end time fails."""
+    from datetime import timedelta
+
+    from fluxx.data.models import (
+        DoneCompletion,
+        NotStartedCompletion,
+        StartedCompletion,
+    )
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_a_id = TaskId("t1")
+    task_b_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task A is completed
+    task_a = Task(
+        id=task_a_id,
+        title="Task A",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=DoneCompletion(
+            assignee=worker_id,
+            start_time=now - timedelta(days=1),
+            hours_logged=8.0,
+            end_time=now,
+        ),
+    )
+
+    # Task B depends on Task A's end
+    task_b = Task(
+        id=task_b_id,
+        title="Task B",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task_a_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_a_id: PersistentObjectId("pa"),
+                task_b_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pa"): PersistentTask(
+                id=PersistentObjectId("pa"),
+                versions={version_id: task_a},
+            ),
+            PersistentObjectId("pb"): PersistentTask(
+                id=PersistentObjectId("pb"),
+                versions={version_id: task_b},
+            ),
+        },
+    )
+
+    # Try to start Task B before Task A ended
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now - timedelta(hours=1),  # Before Task A ended
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_b_id, new_completion)
+    assert len(errors) == 1
+    assert "must be after" in errors[0]
+    assert "Task A" in errors[0]
+    assert "completed at" in errors[0]
+
+
+def test_validate_completion_change_resolved_branch_dependency() -> None:
+    """Test that starting succeeds when depending on resolved branch."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+
+    # Branch is resolved
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("w1"), title="World 1", weight=1.0),
+            PossibleWorld(id=PossibleWorldId("w2"), title="World 2", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=PossibleWorldId("w1"),
+    )
+
+    # Task depends on the branch
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=branch_id,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Start the task - should succeed because branch is resolved
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_change_chosen_possible_world() -> None:
+    """Test that starting succeeds when depending on chosen possible world."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+    world_1_id = PossibleWorldId("world_1")
+    world_2_id = PossibleWorldId("world_2")
+
+    # Branch is resolved to World 1
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=world_1_id, title="World 1", weight=1.0),
+            PossibleWorld(id=world_2_id, title="World 2", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=world_1_id,
+    )
+
+    # Task depends on World 1 (which IS chosen)
+    from fluxx.data.models import PossibleWorldReference
+
+    world_ref = PossibleWorldReference(f"{branch_id}:{world_1_id}")
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=world_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Start the task - should succeed because World 1 is chosen
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_change_unresolved_possible_world() -> None:
+    """Test that starting fails for possible world of unresolved branch."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+    world_1_id = PossibleWorldId("world_1")
+    world_2_id = PossibleWorldId("world_2")
+
+    # Branch is NOT resolved
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=world_1_id, title="World 1", weight=1.0),
+            PossibleWorld(id=world_2_id, title="World 2", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=None,
+    )
+
+    # Task depends on World 1
+    from fluxx.data.models import PossibleWorldReference
+
+    world_ref = PossibleWorldReference(f"{branch_id}:{world_1_id}")
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=world_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Try to start the task - should fail because branch is not resolved
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "unresolved" in errors[0]
+
+
+def test_validate_completion_change_node_is_branch_not_task() -> None:
+    """Test that validating a branch ID (not task) returns error."""
+    from fluxx.data.models import StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("world_1"), title="World 1", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=None,
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={},
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Try to validate a branch ID as if it were a task
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    # Pass branch_id where task_id is expected
+    errors = validate_completion_change(project, TaskId(branch_id), new_completion)
+    assert len(errors) == 1
+    assert "not a task" in errors[0]
+
+
+def test_validate_completion_change_task_not_in_current_version() -> None:
+    """Test validation when task exists but not in current version."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    other_version = DAGVersionId("v2")
+    task_id = TaskId("t1")
+    worker_id = WorkerId("w1")
+
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Task exists but only in a different version (not current)
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,  # Current version is v1
+            node_map={
+                task_id: PersistentObjectId("pt"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={other_version: task},  # But task is only in v2
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "not in current version" in errors[0]
+
+
+def test_validate_completion_change_skips_end_dependencies() -> None:
+    """Test that END endpoint dependencies are skipped during validation."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task1_id = TaskId("t1")
+    task2_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task 2 is NOT started - would fail START dependency validation
+    task2 = Task(
+        id=task2_id,
+        title="Task 2",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Task 1 has END dependency on task 2 (END >= task2.END)
+    # This should be skipped, not validated
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.END,  # END dependency, not START
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task1_id: PersistentObjectId("pt1"),
+                task2_id: PersistentObjectId("pt2"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task1},
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={version_id: task2},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    # Starting task1 should succeed because END dependencies are skipped
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task1_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_change_skips_equal_constraints() -> None:
+    """Test that EQUAL constraint types are skipped during validation."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task1_id = TaskId("t1")
+    task2_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task 2 is NOT started
+    task2 = Task(
+        id=task2_id,
+        title="Task 2",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Task 1 has EQUAL constraint (START == task2.START)
+    # This should be skipped, not validated
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.EQUAL,  # EQUAL, not GREATER_EQUAL
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task1_id: PersistentObjectId("pt1"),
+                task2_id: PersistentObjectId("pt2"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task1},
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={version_id: task2},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    # Starting task1 should succeed because EQUAL constraints are skipped
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task1_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_change_branch_dependency_not_found() -> None:
+    """Test validation when branch dependency target doesn't exist."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+
+    # Task depends on a branch that doesn't exist
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=branch_id,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Branch is NOT in node_map (doesn't exist)
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                # branch_id is NOT in node_map
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent branch" in errors[0]
+
+
+def test_validate_completion_change_possible_world_branch_not_found() -> None:
+    """Test validation when possible world's branch doesn't exist."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    world_id = PossibleWorldId("world_1")
+    worker_id = WorkerId("w1")
+
+    from fluxx.data.models import PossibleWorldReference
+
+    world_ref = PossibleWorldReference(f"{branch_id}:{world_id}")
+
+    # Task depends on a possible world whose branch doesn't exist
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=world_ref,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Branch doesn't exist
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                # branch_id is NOT in node_map
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent branch" in errors[0]
+
+
+def test_validate_completion_change_target_task_not_found() -> None:
+    """Test validation when target task dependency doesn't exist."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task1_id = TaskId("t1")
+    task2_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task 1 depends on task 2 which doesn't exist
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # task2_id is NOT in node_map
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task1_id: PersistentObjectId("pt1"),
+                # task2_id NOT in node_map
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task1},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task1_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent task" in errors[0]
+
+
+def test_validate_hierarchy_with_branch_in_node_map(base_project: Project) -> None:
+    """Test that validate_hierarchy skips branches in node_map."""
+    # Create a valid project with both a task and a branch
+    task = Task(
+        id=TaskId("t1"),
+        title="Task",
+        description="Test",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    branch = Branch(
+        id=BranchId("b1"),
+        title="Branch",
+        description="Test",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("world_1"), title="World 1", weight=1.0),
+        ],
+    )
+
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt"),
+        versions={base_project.dag.current_version_id: task},
+    )
+    persistent_branch = PersistentBranch(
+        id=PersistentObjectId("pb"),
+        versions={base_project.dag.current_version_id: branch},
+    )
+
+    project = Project(
+        **base_project.model_dump(
+            exclude={"persistent_tasks", "persistent_branches", "dag"}
+        ),
+        dag=base_project.dag.model_copy(
+            update={
+                "node_map": {
+                    TaskId("t1"): PersistentObjectId("pt"),
+                    BranchId("b1"): PersistentObjectId("pb"),  # Branch in node_map
+                }
+            }
+        ),
+        persistent_tasks={
+            PersistentObjectId("pt"): persistent_task,
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): persistent_branch,
+        },
+    )
+
+    # Should pass - branch should be skipped, only tasks are validated
+    validate_dag(project)
+
+
+def test_validate_worker_constraints_with_branch_in_node_map() -> None:
+    """Test that validate_worker_constraints skips branches in node_map."""
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+
+    # Task with specific worker constraint that would fail if branch was checked
+    task = Task(
+        id=TaskId("t1"),
+        title="Task",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=[WorkerId("w1")],  # Use allowed_workers to trigger validation
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+    )
+
+    branch = Branch(
+        id=BranchId("b1"),
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("world_1"), title="World 1", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=None,
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                TaskId("t1"): PersistentObjectId("pt"),
+                BranchId("b1"): PersistentObjectId("pb"),  # Branch in node_map
+            },
+        ),
+        workers=[Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    # Should pass - branch should be skipped, only tasks are validated
+    validate_dag(project)
+
+
+def test_validate_completion_task_persistent_id_not_in_tasks() -> None:
+    """Test when persistent_id exists but is not in persistent_tasks."""
+    from fluxx.data.models import StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    worker_id = WorkerId("w1")
+
+    # Task has persistent_id in node_map but that ID is not in persistent_tasks
+    # (it's a branch ID being used where a task ID should be)
+    branch = Branch(
+        id=BranchId("t1"),  # Using same ID as task
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("world_1"), title="World 1", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=None,
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pb"),  # Points to a branch
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={},  # No tasks
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "not a task" in errors[0]
+
+
+def test_validate_completion_target_task_not_in_persistent_tasks() -> None:
+    """Test when dependency target has persistent_id not in persistent_tasks."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task1_id = TaskId("t1")
+    task2_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task 1 depends on task 2, but task 2's persistent_id is a branch
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    branch = Branch(
+        id=BranchId("t2"),  # Same as task2_id
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("world_1"), title="World 1", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=None,
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task1_id: PersistentObjectId("pt1"),
+                task2_id: PersistentObjectId("pb"),  # task2 points to a branch
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task1},
+            ),
+            # No pt2 - task2's persistent_id points to a branch
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={version_id: branch},
+            ),
+        },
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task1_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent task" in errors[0]
+
+
+def test_validate_completion_target_task_not_in_version() -> None:
+    """Test when dependency target exists but not in current version."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    other_version = DAGVersionId("v2")
+    task1_id = TaskId("t1")
+    task2_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    # Task 1 depends on task 2, but task 2 is only in a different version
+    task1 = Task(
+        id=task1_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    task2 = Task(
+        id=task2_id,
+        title="Task 2",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task1_id: PersistentObjectId("pt1"),
+                task2_id: PersistentObjectId("pt2"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task1},  # task1 in v1
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={other_version: task2},  # task2 only in v2
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task1_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent task" in errors[0]
+
+
+def test_validate_completion_branch_not_in_persistent_branches() -> None:
+    """Test when branch dependency has persistent_id not in persistent_branches."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+
+    # Task depends on branch, but branch's persistent_id is a task
+    task1 = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=branch_id,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    task2 = Task(
+        id=TaskId("b1"),  # Same ID as branch
+        title="Task 2",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt1"),
+                branch_id: PersistentObjectId("pt2"),  # branch points to a task
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt1"): PersistentTask(
+                id=PersistentObjectId("pt1"),
+                versions={version_id: task1},
+            ),
+            PersistentObjectId("pt2"): PersistentTask(
+                id=PersistentObjectId("pt2"),
+                versions={version_id: task2},
+            ),
+        },
+        persistent_branches={},  # No branches
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent branch" in errors[0]
+
+
+def test_validate_completion_branch_not_in_version() -> None:
+    """Test when branch dependency exists but not in current version."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    other_version = DAGVersionId("v2")
+    task_id = TaskId("t1")
+    branch_id = BranchId("b1")
+    worker_id = WorkerId("w1")
+
+    # Task depends on branch, but branch is only in a different version
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=branch_id,
+                target_endpoint=Endpoint.OCCURRENCE,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    branch = Branch(
+        id=branch_id,
+        title="Branch",
+        description="",
+        possible_worlds=[
+            PossibleWorld(id=PossibleWorldId("world_1"), title="World 1", weight=1.0),
+        ],
+        dependencies=[],
+        chosen_world_id=PossibleWorldId("world_1"),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+                branch_id: PersistentObjectId("pb"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={
+            PersistentObjectId("pb"): PersistentBranch(
+                id=PersistentObjectId("pb"),
+                versions={other_version: branch},  # Branch only in v2
+            ),
+        },
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "non-existent branch" in errors[0]
+
+
+def test_validate_completion_invalid_dependency_target() -> None:
+    """Test validation with malformed dependency target ID."""
+    from fluxx.data.models import (
+        DependencyTargetId,
+        NotStartedCompletion,
+        StartedCompletion,
+    )
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    worker_id = WorkerId("w1")
+
+    # Create a dependency with an invalid target ID format
+    # "invalid_format" doesn't match task, branch, or possible world patterns
+    invalid_target: DependencyTargetId = cast(TaskId, "invalid_format")
+
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=invalid_target,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, task_id, new_completion)
+    assert len(errors) == 1
+    assert "Invalid dependency target" in errors[0]
+
+
+def test_validate_completion_child_can_start_before_parent() -> None:
+    """Test that a child task can start even if parent hasn't started."""
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    parent_id = TaskId("t_parent")
+    child_id = TaskId("t_child")
+    worker_id = WorkerId("w1")
+
+    # Parent task is NOT started
+    parent_task = Task(
+        id=parent_id,
+        title="Parent Task",
+        description="",
+        duration_distribution=None,  # Parent has no duration
+        dependencies=[],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[child_id],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    # Child task with implicit dependency on parent.START
+    child_task = Task(
+        id=child_id,
+        title="Child Task",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=parent_id,
+                target_endpoint=Endpoint.START,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=parent_id,  # This is a child of parent_task
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                parent_id: PersistentObjectId("pp"),
+                child_id: PersistentObjectId("pc"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pp"): PersistentTask(
+                id=PersistentObjectId("pp"),
+                versions={version_id: parent_task},
+            ),
+            PersistentObjectId("pc"): PersistentTask(
+                id=PersistentObjectId("pc"),
+                versions={version_id: child_task},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    # Starting the child should succeed even though parent hasn't started
+    # (because the parent's start is implicitly defined by the child's start)
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+    errors = validate_completion_change(project, child_id, new_completion)
+    assert errors == []
+
+
+def test_validate_completion_unknown_dependency_type() -> None:
+    """Test validation when type_explode_id returns all None (mocked)."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import NotStartedCompletion, StartedCompletion
+    from fluxx.data.validation import validate_completion_change
+
+    now = datetime.now(UTC)
+    version_id = DAGVersionId("v1")
+    task_id = TaskId("t1")
+    task2_id = TaskId("t2")
+    worker_id = WorkerId("w1")
+
+    task = Task(
+        id=task_id,
+        title="Task 1",
+        description="",
+        duration_distribution=Triangular(min=1, mode=2, max=3),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=task2_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+        allowed_workers=None,
+        excluded_worker_tasks=[],
+        children=[],
+        parent_id=None,
+        completion=NotStartedCompletion(),
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=DAG(
+            id=DAGId("dag1"),
+            current_version_id=version_id,
+            node_map={
+                task_id: PersistentObjectId("pt"),
+            },
+        ),
+        workers=[Worker(id=worker_id, name="Worker 1", hours_per_workday=8.0)],
+        persistent_tasks={
+            PersistentObjectId("pt"): PersistentTask(
+                id=PersistentObjectId("pt"),
+                versions={version_id: task},
+            ),
+        },
+        persistent_branches={},
+    )
+
+    new_completion = StartedCompletion(
+        assignee=worker_id,
+        start_time=now,
+        hours_logged=0.0,
+    )
+
+    # Mock type_explode_id to return (None, None, None)
+    with (
+        patch("fluxx.data.validation.type_explode_id", return_value=(None, None, None)),
+        pytest.raises(ValueError, match="Unknown dependency target type"),
+    ):
+        validate_completion_change(project, task_id, new_completion)
