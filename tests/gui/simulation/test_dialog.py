@@ -17,13 +17,56 @@ from fluxx.data.models import (
     Task,
     TaskId,
     Triangular,
+    Worker,
+    WorkerId,
 )
 from fluxx.gui.simulation.dialog import SimulationDialog
 
 
 @pytest.fixture
 def simple_project() -> Project:
-    """Create a simple project for testing."""
+    """Create a simple project for testing with workers."""
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    workers = [
+        Worker(id=WorkerId("w1"), name="Alice", hours_per_workday=8.0),
+        Worker(id=WorkerId("w2"), name="Bob", hours_per_workday=8.0),
+    ]
+
+    return Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+        workers=workers,
+    )
+
+
+@pytest.fixture
+def project_without_workers() -> Project:
+    """Create a project with no workers for testing."""
     task = Task(
         id=TaskId("t1"),
         title="Task 1",
@@ -53,6 +96,7 @@ def simple_project() -> Project:
         metadata=metadata,
         dag=dag,
         persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+        workers=[],
     )
 
 
@@ -63,8 +107,6 @@ def test_dialog_initialization(qtbot: QtBot, simple_project: Project) -> None:
 
     # Check default values
     assert dialog.num_samples_spin.value() == 1000
-    assert dialog.num_workers_spin.value() == 2
-    assert dialog.hours_per_day_spin.value() == 8
 
     # Check date is today
     today = datetime.now(UTC).date()
@@ -73,11 +115,14 @@ def test_dialog_initialization(qtbot: QtBot, simple_project: Project) -> None:
     assert dialog_date.month() == today.month
     assert dialog_date.day() == today.day
 
-    # Check widgets are enabled
+    # Check widgets are enabled (project has workers)
     assert dialog.num_samples_spin.isEnabled()
     assert dialog.start_date_edit.isEnabled()
-    assert dialog.num_workers_spin.isEnabled()
-    assert dialog.hours_per_day_spin.isEnabled()
+    assert dialog.run_button.isEnabled()
+
+    # Check workers are displayed
+    assert "2 workers" in dialog.workers_label.text()
+    assert "Alice" in dialog.workers_label.text()
 
     # Check progress widgets are hidden
     assert not dialog.progress_label.isVisible()
@@ -91,14 +136,10 @@ def test_dialog_modifies_parameters(qtbot: QtBot, simple_project: Project) -> No
 
     # Modify values
     dialog.num_samples_spin.setValue(500)
-    dialog.num_workers_spin.setValue(5)
-    dialog.hours_per_day_spin.setValue(6)
     dialog.start_date_edit.setDate(QDate(2025, 6, 15))
 
     # Verify changes
     assert dialog.num_samples_spin.value() == 500
-    assert dialog.num_workers_spin.value() == 5
-    assert dialog.hours_per_day_spin.value() == 6
 
     date = dialog.start_date_edit.date()
     assert date.year() == 2025
@@ -106,17 +147,21 @@ def test_dialog_modifies_parameters(qtbot: QtBot, simple_project: Project) -> No
     assert date.day() == 15
 
 
-def test_dialog_create_workers(simple_project: Project) -> None:
-    """Test worker creation method."""
-    dialog = SimulationDialog(simple_project)
+def test_dialog_no_workers_disables_run(
+    qtbot: QtBot, project_without_workers: Project
+) -> None:
+    """Test that Run button is disabled when no workers."""
+    dialog = SimulationDialog(project_without_workers)
+    qtbot.addWidget(dialog)
 
-    workers = dialog._create_workers(3, 7.5)
+    # Run button should be disabled
+    assert not dialog.run_button.isEnabled()
 
-    assert len(workers) == 3
-    assert all(w.hours_per_workday == 7.5 for w in workers)
-    assert workers[0].name == "Worker 1"
-    assert workers[1].name == "Worker 2"
-    assert workers[2].name == "Worker 3"
+    # Should have tooltip explaining why
+    assert "Add workers" in dialog.run_button.toolTip()
+
+    # Workers label should indicate no workers
+    assert "No workers" in dialog.workers_label.text()
 
 
 def test_dialog_set_inputs_enabled(simple_project: Project) -> None:
@@ -128,8 +173,6 @@ def test_dialog_set_inputs_enabled(simple_project: Project) -> None:
 
     assert not dialog.num_samples_spin.isEnabled()
     assert not dialog.start_date_edit.isEnabled()
-    assert not dialog.num_workers_spin.isEnabled()
-    assert not dialog.hours_per_day_spin.isEnabled()
     assert not dialog.run_button.isEnabled()
 
     # Re-enable inputs
@@ -137,8 +180,6 @@ def test_dialog_set_inputs_enabled(simple_project: Project) -> None:
 
     assert dialog.num_samples_spin.isEnabled()
     assert dialog.start_date_edit.isEnabled()
-    assert dialog.num_workers_spin.isEnabled()
-    assert dialog.hours_per_day_spin.isEnabled()
     assert dialog.run_button.isEnabled()
 
 
@@ -190,3 +231,116 @@ def test_dialog_reject_closes_dialog(qtbot: QtBot, simple_project: Project) -> N
 
     with qtbot.waitSignal(dialog.rejected):
         cancel_button.click()
+
+
+def test_dialog_single_worker(qtbot: QtBot) -> None:
+    """Test dialog with exactly one worker shows correct text."""
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    # Only one worker
+    workers = [Worker(id=WorkerId("w1"), name="Alice", hours_per_workday=8.0)]
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+        workers=workers,
+    )
+
+    dialog = SimulationDialog(project)
+    qtbot.addWidget(dialog)
+
+    # Check single worker text format
+    assert "1 worker" in dialog.workers_label.text()
+    assert "Alice" in dialog.workers_label.text()
+
+
+def test_dialog_many_workers(qtbot: QtBot) -> None:
+    """Test dialog with more than 3 workers shows truncated list."""
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    # More than 3 workers
+    workers = [
+        Worker(id=WorkerId("w1"), name="Alice", hours_per_workday=8.0),
+        Worker(id=WorkerId("w2"), name="Bob", hours_per_workday=8.0),
+        Worker(id=WorkerId("w3"), name="Carol", hours_per_workday=8.0),
+        Worker(id=WorkerId("w4"), name="Dave", hours_per_workday=8.0),
+        Worker(id=WorkerId("w5"), name="Eve", hours_per_workday=8.0),
+    ]
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+        workers=workers,
+    )
+
+    dialog = SimulationDialog(project)
+    qtbot.addWidget(dialog)
+
+    # Check many workers text format with truncation
+    assert "5 workers" in dialog.workers_label.text()
+    assert "(+2 more)" in dialog.workers_label.text()
+
+
+def test_dialog_set_inputs_enabled_no_workers(
+    project_without_workers: Project,
+) -> None:
+    """Test enabling inputs keeps Run disabled when no workers."""
+    dialog = SimulationDialog(project_without_workers)
+
+    # Run button should start disabled
+    assert not dialog.run_button.isEnabled()
+
+    # Disable and re-enable inputs
+    dialog._set_inputs_enabled(False)
+    dialog._set_inputs_enabled(True)
+
+    # Run button should still be disabled (no workers)
+    assert not dialog.run_button.isEnabled()

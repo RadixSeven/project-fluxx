@@ -165,76 +165,128 @@ def optimize_gantt_schedule(
         model.duration_constraints = Constraint(variants, rule=duration_constraint_rule)
 
         # Dependency constraints
+        # Build map of parent tasks to their children for constraint expansion
+        from fluxx.gui.simulation.analysis import get_all_tasks_from_project
+
+        all_tasks = get_all_tasks_from_project(project)
+        task_children: dict[TaskId, list[TaskId]] = {}
+        for task in all_tasks:
+            if task.children:
+                task_children[task.id] = [TaskId(str(c)) for c in task.children]
+
+        def get_leaf_descendants(task_id: TaskId) -> list[TaskId]:
+            """Get all leaf task descendants of a task (recursive)."""
+            children = task_children.get(task_id)
+            if not children:
+                return [task_id]  # This is a leaf task
+            leaves: list[TaskId] = []
+            for child_id in children:
+                leaves.extend(get_leaf_descendants(child_id))
+            return leaves
+
         # For each dependency in the project, create constraints for all world sequences
         for dep_info in statistics.dependencies:
             source_id = dep_info.source_task_id
             dep = dep_info.dependency
             target_node_id = dep.target_node_id
+            target_task_id = TaskId(str(target_node_id))
 
             # For each world sequence, add dependency constraint if both tasks exist
             for world_seq in statistics.world_sequences:
                 source_variant = TaskVariantKey(source_id, world_seq)
-                target_variant = TaskVariantKey(TaskId(str(target_node_id)), world_seq)
 
-                # Skip if either variant doesn't exist in this world sequence
-                if source_variant not in variants or target_variant not in variants:
+                # Skip if source doesn't exist in this world sequence
+                if source_variant not in variants:
                     continue
 
-                # Build constraint based on source/target endpoints
-                # Source is always the task with the dependency
-                # Target is what it depends on
-                if (
-                    dep.source_endpoint == Endpoint.START
-                    and dep.target_endpoint == Endpoint.END
-                ):
-                    # B.start >= A.end  =>  start[B] >= start[A] + duration[A]
-                    model.add_component(
-                        f"dep_{source_id}_{target_node_id}_{world_seq}",
-                        Constraint(
-                            expr=model.start[source_variant]
-                            >= model.start[target_variant]
-                            + model.duration[target_variant]
-                        ),
+                # Check if target is a leaf task or parent task
+                target_variant = TaskVariantKey(target_task_id, world_seq)
+                if target_variant in variants:
+                    # Target is a leaf task - use directly
+                    target_variants_to_use = [target_variant]
+                elif dep.target_endpoint == Endpoint.END:
+                    # Target is a parent task with END endpoint - expand to children
+                    # parent.end = max(child.end), so X >= parent.end means
+                    # X >= child1.end AND X >= child2.end AND ...
+                    leaf_task_ids = get_leaf_descendants(target_task_id)
+                    target_variants_to_use = [
+                        TaskVariantKey(leaf_id, world_seq)
+                        for leaf_id in leaf_task_ids
+                        if TaskVariantKey(leaf_id, world_seq) in variants
+                    ]
+                else:
+                    # Target is a parent task with START endpoint
+                    # parent.start = min(child.start) - can't expand meaningfully
+                    # For child.start >= parent.start where child is in parent,
+                    # this is always satisfied by definition. Skip this constraint.
+                    continue
+
+                # Skip if no valid targets found
+                if not target_variants_to_use:
+                    continue
+
+                # Add constraint for each target variant
+                for idx, target_variant in enumerate(target_variants_to_use):
+                    # Unique constraint name includes index for expanded parent deps
+                    constraint_name = (
+                        f"dep_{source_id}_{target_variant.task_id}_{world_seq}_{idx}"
                     )
-                elif (
-                    dep.source_endpoint == Endpoint.START
-                    and dep.target_endpoint == Endpoint.START
-                ):
-                    # B.start >= A.start  =>  start[B] >= start[A]
-                    model.add_component(
-                        f"dep_{source_id}_{target_node_id}_{world_seq}",
-                        Constraint(
-                            expr=model.start[source_variant]
-                            >= model.start[target_variant]
-                        ),
-                    )
-                elif (
-                    dep.source_endpoint == Endpoint.END
-                    and dep.target_endpoint == Endpoint.END
-                ):
-                    # B.end >= A.end => start[B] + duration[B] >= start[A] + duration[A]
-                    model.add_component(
-                        f"dep_{source_id}_{target_node_id}_{world_seq}",
-                        Constraint(
-                            expr=model.start[source_variant]
-                            + model.duration[source_variant]
-                            >= model.start[target_variant]
-                            + model.duration[target_variant]
-                        ),
-                    )
-                elif (
-                    dep.source_endpoint == Endpoint.END
-                    and dep.target_endpoint == Endpoint.START
-                ):
-                    # B.end >= A.start  =>  start[B] + duration[B] >= start[A]
-                    model.add_component(
-                        f"dep_{source_id}_{target_node_id}_{world_seq}",
-                        Constraint(
-                            expr=model.start[source_variant]
-                            + model.duration[source_variant]
-                            >= model.start[target_variant]
-                        ),
-                    )
+
+                    # Build constraint based on source/target endpoints
+                    # Source is always the task with the dependency
+                    # Target is what it depends on
+                    if (
+                        dep.source_endpoint == Endpoint.START
+                        and dep.target_endpoint == Endpoint.END
+                    ):
+                        # B.start >= A.end  =>  start[B] >= start[A] + duration[A]
+                        model.add_component(
+                            constraint_name,
+                            Constraint(
+                                expr=model.start[source_variant]
+                                >= model.start[target_variant]
+                                + model.duration[target_variant]
+                            ),
+                        )
+                    elif (
+                        dep.source_endpoint == Endpoint.START
+                        and dep.target_endpoint == Endpoint.START
+                    ):
+                        # B.start >= A.start  =>  start[B] >= start[A]
+                        model.add_component(
+                            constraint_name,
+                            Constraint(
+                                expr=model.start[source_variant]
+                                >= model.start[target_variant]
+                            ),
+                        )
+                    elif (
+                        dep.source_endpoint == Endpoint.END
+                        and dep.target_endpoint == Endpoint.END
+                    ):
+                        # B.end >= A.end => start[B]+duration[B] >= start[A]+duration[A]
+                        model.add_component(
+                            constraint_name,
+                            Constraint(
+                                expr=model.start[source_variant]
+                                + model.duration[source_variant]
+                                >= model.start[target_variant]
+                                + model.duration[target_variant]
+                            ),
+                        )
+                    elif (
+                        dep.source_endpoint == Endpoint.END
+                        and dep.target_endpoint == Endpoint.START
+                    ):
+                        # B.end >= A.start  =>  start[B] + duration[B] >= start[A]
+                        model.add_component(
+                            constraint_name,
+                            Constraint(
+                                expr=model.start[source_variant]
+                                + model.duration[source_variant]
+                                >= model.start[target_variant]
+                            ),
+                        )
 
         # Objective: minimize sum of starts and durations (both in calendar hours)
         def objective_rule(model: ConcreteModel) -> float:

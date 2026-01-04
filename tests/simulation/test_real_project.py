@@ -528,8 +528,11 @@ def test_gantt_chart_with_loaded_test_prj_json() -> None:
     # Deserialize to Project
     project = Project.model_validate(project_data)
 
-    # Run simulation
-    workers = [Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)]
+    # Run simulation using project's workers (required for in-progress tasks)
+    workers = list(project.workers)
+    if not workers:
+        # Fall back to default worker if project has no workers
+        workers = [Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)]
     start_date = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
     engine = SimulationEngine(num_samples=10, start_date=start_date)
     samples = engine.run(project, workers)

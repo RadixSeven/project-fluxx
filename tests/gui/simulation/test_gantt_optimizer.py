@@ -536,3 +536,199 @@ def test_optimize_returns_error_on_exception(simple_project: Project) -> None:
     # This should work normally
     schedule = optimize_gantt_schedule(statistics, simple_project)
     assert schedule.optimization_status in ("optimal", "error")
+
+
+def test_optimize_dependency_on_parent_task_expands_to_children() -> None:
+    """Test that C.start >= Parent.end expands to C.start >= max(child.end).
+
+    When a task C depends on parent task B's end, and B has children,
+    the constraint must expand to ensure C starts after ALL of B's children
+    complete (since B.end = max(child.end) by definition).
+    """
+    from fluxx.data.models import (
+        PersistentObjectId,
+        PersistentTask,
+        Task,
+        Triangular,
+    )
+
+    project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+
+    # Task IDs
+    parent_id = TaskId("parent_B")
+    child1_id = TaskId("child_B1")
+    child2_id = TaskId("child_B2")
+    task_c_id = TaskId("task_C")
+
+    # Create project with parent task B that has children B1 and B2
+    version_id = DAGVersionId("v1")
+
+    # Define tasks with parent-child relationship
+    child1 = Task(
+        id=child1_id,
+        title="Child B1",
+        description="",
+        parent_id=parent_id,
+        children=[],
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        dependencies=[],
+    )
+    child2 = Task(
+        id=child2_id,
+        title="Child B2",
+        description="",
+        parent_id=parent_id,
+        children=[],
+        duration_distribution=Triangular(min=2.0, mode=3.0, max=4.0),
+        dependencies=[],
+    )
+    parent_b = Task(
+        id=parent_id,
+        title="Parent B",
+        description="",
+        parent_id=None,
+        children=[child1_id, child2_id],
+        duration_distribution=None,  # Parent has no direct duration
+        dependencies=[],
+    )
+    task_c = Task(
+        id=task_c_id,
+        title="Task C",
+        description="",
+        parent_id=None,
+        children=[],
+        duration_distribution=Triangular(min=1.0, mode=1.5, max=2.0),
+        # C depends on parent B's end
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=parent_id,
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    # Create persistent tasks
+    persistent_tasks = {
+        PersistentObjectId("pobj_parent"): PersistentTask(
+            id=PersistentObjectId("pobj_parent"),
+            versions={version_id: parent_b},
+        ),
+        PersistentObjectId("pobj_child1"): PersistentTask(
+            id=PersistentObjectId("pobj_child1"),
+            versions={version_id: child1},
+        ),
+        PersistentObjectId("pobj_child2"): PersistentTask(
+            id=PersistentObjectId("pobj_child2"),
+            versions={version_id: child2},
+        ),
+        PersistentObjectId("pobj_c"): PersistentTask(
+            id=PersistentObjectId("pobj_c"),
+            versions={version_id: task_c},
+        ),
+    }
+
+    # Create node_map - NodeId is TaskId | BranchId
+    from fluxx.data.models import NodeId
+
+    node_map: dict[NodeId, PersistentObjectId] = {
+        parent_id: PersistentObjectId("pobj_parent"),
+        child1_id: PersistentObjectId("pobj_child1"),
+        child2_id: PersistentObjectId("pobj_child2"),
+        task_c_id: PersistentObjectId("pobj_c"),
+    }
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map=node_map,
+    )
+
+    project = Project(
+        metadata=ProjectMetadata(
+            name="Parent Dependency Test",
+            created=datetime.now(UTC),
+            last_modified=datetime.now(UTC),
+        ),
+        dag=dag,
+        persistent_tasks=persistent_tasks,
+    )
+
+    # Create statistics with ONLY leaf tasks (parent B is NOT included)
+    # This simulates real behavior where parent tasks don't have direct events
+    variant_child1 = TaskVariantKey(child1_id, ())
+    variant_child2 = TaskVariantKey(child2_id, ())
+    variant_c = TaskVariantKey(task_c_id, ())
+
+    task_stats = {
+        variant_child1: GanttTaskStatistics(
+            variant_key=variant_child1,
+            task_title="Child B1",
+            percentile_start_time=project_start,
+            percentile_duration_hours=2.0,  # Ends at hour 2
+            sample_count=10,
+        ),
+        variant_child2: GanttTaskStatistics(
+            variant_key=variant_child2,
+            task_title="Child B2",
+            percentile_start_time=project_start,
+            percentile_duration_hours=4.0,  # Ends at hour 4 (latest)
+            sample_count=10,
+        ),
+        variant_c: GanttTaskStatistics(
+            variant_key=variant_c,
+            task_title="Task C",
+            # Would start at hour 0 if unconstrained
+            percentile_start_time=project_start,
+            percentile_duration_hours=1.0,
+            sample_count=10,
+        ),
+    }
+
+    # Dependency: C.start >= Parent_B.end (but Parent_B is not in statistics)
+    dependencies = [
+        DependencyInfo(
+            source_task_id=task_c_id,
+            dependency=Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=parent_id,  # Target is the parent!
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            ),
+        ),
+    ]
+
+    statistics = GanttStatistics(
+        task_statistics=task_stats,
+        dependencies=dependencies,
+        percentile=0.97,
+        project_start_date=project_start,
+        world_sequences={()},
+    )
+
+    schedule = optimize_gantt_schedule(statistics, project)
+
+    assert schedule.optimization_status == "optimal"
+
+    # Key assertion: C must start AFTER both children complete
+    # Since child2 ends at hour 4, C must start at or after hour 4
+    sched_child1 = schedule.variant_schedules[variant_child1]
+    sched_child2 = schedule.variant_schedules[variant_child2]
+    sched_c = schedule.variant_schedules[variant_c]
+
+    # C must start after BOTH children end (constraint was expanded)
+    assert sched_c.start_time >= sched_child1.end_time, (
+        f"C.start ({sched_c.start_time}) should be >= "
+        f"child1.end ({sched_child1.end_time})"
+    )
+    assert sched_c.start_time >= sched_child2.end_time, (
+        f"C.start ({sched_c.start_time}) should be >= "
+        f"child2.end ({sched_child2.end_time})"
+    )
+
+    # Specifically, since child2 ends later (hour 4), C should start at hour 4
+    expected_c_start = project_start + timedelta(hours=4)
+    assert sched_c.start_time == expected_c_start, (
+        f"C should start at {expected_c_start}, but started at {sched_c.start_time}"
+    )

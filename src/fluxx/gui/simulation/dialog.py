@@ -9,13 +9,14 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QLabel,
+    QMessageBox,
     QProgressBar,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from fluxx.data.models import Project, Sample, Worker, WorkerId
+from fluxx.data.models import Project, Sample, Worker
 from fluxx.simulation.engine import SimulationEngine
 
 
@@ -25,8 +26,8 @@ class SimulationDialog(QDialog):
     Allows user to specify:
     - Number of simulation samples
     - Project start date
-    - Number of workers
-    - Hours per workday for workers
+
+    Uses the workers defined in the project.
 
     Runs the simulation and emits results when complete.
 
@@ -49,7 +50,7 @@ class SimulationDialog(QDialog):
 
         self.setWindowTitle("Run Simulation")
         self.setModal(True)
-        self.resize(400, 300)
+        self.resize(400, 250)
 
         # Create UI
         self._create_widgets()
@@ -69,15 +70,18 @@ class SimulationDialog(QDialog):
         today = datetime.now(UTC).date()
         self.start_date_edit.setDate(QDate(today.year, today.month, today.day))
 
-        self.num_workers_spin = QSpinBox()
-        self.num_workers_spin.setMinimum(1)
-        self.num_workers_spin.setMaximum(100)
-        self.num_workers_spin.setValue(2)
-
-        self.hours_per_day_spin = QSpinBox()
-        self.hours_per_day_spin.setMinimum(1)
-        self.hours_per_day_spin.setMaximum(24)
-        self.hours_per_day_spin.setValue(8)
+        # Workers info label
+        worker_count = len(self.project.workers)
+        if worker_count == 0:
+            workers_text = "No workers defined (add workers first)"
+        elif worker_count == 1:
+            workers_text = f"1 worker: {self.project.workers[0].name}"
+        else:
+            worker_names = ", ".join(w.name for w in self.project.workers[:3])
+            if worker_count > 3:
+                worker_names += f", ... (+{worker_count - 3} more)"
+            workers_text = f"{worker_count} workers: {worker_names}"
+        self.workers_label = QLabel(workers_text)
 
         # Progress widgets (initially hidden)
         self.progress_label = QLabel("Running simulation...")
@@ -95,6 +99,11 @@ class SimulationDialog(QDialog):
         assert self.run_button is not None
         self.run_button.setText("Run")
 
+        # Disable Run button if no workers and add tooltip
+        if worker_count == 0:
+            self.run_button.setEnabled(False)
+            self.run_button.setToolTip("Add workers to the project to run a simulation")
+
     def _create_layout(self) -> None:
         """Create dialog layout."""
         layout = QVBoxLayout()
@@ -103,8 +112,7 @@ class SimulationDialog(QDialog):
         form = QFormLayout()
         form.addRow("Number of samples:", self.num_samples_spin)
         form.addRow("Start date:", self.start_date_edit)
-        form.addRow("Number of workers:", self.num_workers_spin)
-        form.addRow("Hours per workday:", self.hours_per_day_spin)
+        form.addRow("Workers:", self.workers_label)
 
         layout.addLayout(form)
         layout.addSpacing(20)
@@ -126,6 +134,15 @@ class SimulationDialog(QDialog):
 
     def _on_run(self) -> None:
         """Handle Run button click."""
+        # Check for workers
+        if not self.project.workers:
+            QMessageBox.warning(
+                self,
+                "No Workers",
+                "Please add workers to the project before running a simulation.",
+            )
+            return
+
         # Get parameters
         num_samples = self.num_samples_spin.value()
         start_date_qdate = self.start_date_edit.date()
@@ -138,11 +155,6 @@ class SimulationDialog(QDialog):
             0,
             tzinfo=UTC,
         )
-        num_workers = self.num_workers_spin.value()
-        hours_per_day = float(self.hours_per_day_spin.value())
-
-        # Create workers
-        workers = self._create_workers(num_workers, hours_per_day)
 
         # Disable inputs and show progress
         self._set_inputs_enabled(False)
@@ -150,11 +162,13 @@ class SimulationDialog(QDialog):
         self.progress_bar.show()
         self.progress_bar.setValue(0)
 
-        # Run simulation
+        # Run simulation using project workers
         # NOTE: This is synchronous and will block the UI
         # For better UX, this should be moved to a worker thread in the future
         try:
-            samples = self._run_simulation(num_samples, start_date, workers)
+            samples = self._run_simulation(
+                num_samples, start_date, list(self.project.workers)
+            )
 
             # Emit results
             self.simulation_completed.emit(samples)
@@ -168,25 +182,6 @@ class SimulationDialog(QDialog):
             self.progress_bar.hide()
             # Re-raise to let caller handle
             raise
-
-    def _create_workers(self, num_workers: int, hours_per_day: float) -> list[Worker]:
-        """Create worker objects for simulation.
-
-        Args:
-            num_workers: Number of workers to create
-            hours_per_day: Hours per workday for each worker
-
-        Returns:
-            List of Worker objects
-        """
-        return [
-            Worker(
-                id=WorkerId(f"sim_worker_{i}"),
-                name=f"Worker {i + 1}",
-                hours_per_workday=hours_per_day,
-            )
-            for i in range(num_workers)
-        ]
 
     def _run_simulation(
         self, num_samples: int, start_date: datetime, workers: list[Worker]
@@ -214,6 +209,8 @@ class SimulationDialog(QDialog):
         """
         self.num_samples_spin.setEnabled(enabled)
         self.start_date_edit.setEnabled(enabled)
-        self.num_workers_spin.setEnabled(enabled)
-        self.hours_per_day_spin.setEnabled(enabled)
-        self.run_button.setEnabled(enabled)
+        # Only enable Run button if there are workers
+        if enabled and not self.project.workers:
+            self.run_button.setEnabled(False)
+        else:
+            self.run_button.setEnabled(enabled)

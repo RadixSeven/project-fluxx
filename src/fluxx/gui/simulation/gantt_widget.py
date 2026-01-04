@@ -166,18 +166,35 @@ class GanttChartWidget(QWidget):
     def _draw_dependencies(self, y_positions: dict[TaskVariantKey, int]) -> None:
         """Draw dependency arrows between tasks.
 
+        Only draws start >= end dependencies (finish-to-start dependencies),
+        which represent "source can only start after target completes".
+
         Args:
             y_positions: Mapping from variant keys to y-axis positions
         """
+        from fluxx.data.models import ConstraintType, Endpoint
+
         # For each dependency, draw arrow if both tasks are visible
         for dep_info in self.dependencies:
+            dep = dep_info.dependency
+
+            # Only draw start >= end dependencies (finish-to-start)
+            if (
+                dep.source_endpoint != Endpoint.START
+                or dep.target_endpoint != Endpoint.END
+                or dep.constraint_type != ConstraintType.GREATER_EQUAL
+            ):
+                continue
+
             source_task_id = dep_info.source_task_id
-            target_node_id = dep_info.dependency.target_node_id
+            target_node_id = dep.target_node_id
 
             # Find variants for source and target
             # Note: This is simplified - in reality we'd need to match world sequences
             source_schedule = None
             target_schedule = None
+            source_key = None
+            target_key = None
 
             for variant_key, schedule in self.gantt_schedule.variant_schedules.items():
                 if str(variant_key.task_id) == str(source_task_id):
@@ -190,6 +207,9 @@ class GanttChartWidget(QWidget):
             if not source_schedule or not target_schedule:
                 continue
 
+            if source_key is None or target_key is None:
+                continue
+
             # Get y positions
             source_y = y_positions.get(source_key)
             target_y = y_positions.get(target_key)
@@ -198,7 +218,7 @@ class GanttChartWidget(QWidget):
                 continue
 
             # Draw arrow from target end to source start
-            # (target must finish before source can start, typically)
+            # (target must finish before source can start)
             target_end_num = mdates.date2num(target_schedule.end_time)  # type: ignore[no-untyped-call]
             source_start_num = mdates.date2num(source_schedule.start_time)  # type: ignore[no-untyped-call]
 

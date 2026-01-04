@@ -262,6 +262,9 @@ class DAGGraphicsView(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         # Restore default cursor
         self.unsetCursor()
+        # Re-highlight the currently selected node
+        selected_node_id = self.controller.get_selected_node_id()
+        self._on_selection_changed(selected_node_id)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Handle mouse press to select nodes.
