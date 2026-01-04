@@ -41,3 +41,5 @@ repos:
           - types-networkx
           - rapidfuzz
           - numpy
+          - requests
+          - types-requests

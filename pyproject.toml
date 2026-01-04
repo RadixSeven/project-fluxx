@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pyomo>=6.7.0",
     "rapidfuzz>=3.0.0",
+    "requests>=2.28.0",
 ]
 
 [project.optional-dependencies]
@@ -25,11 +26,13 @@ dev = [
     "pytest-qt>=4.0.0",
     "PySide6-stubs>=6.0",
     "types-networkx>=3.0",
+    "types-requests>=2.28.0",
 ]
 
 [project.scripts]
 fluxx = "fluxx.__main__:main"
 fluxx-remove-history = "fluxx.remove_history:main"
+jql = "fluxx.jql:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
