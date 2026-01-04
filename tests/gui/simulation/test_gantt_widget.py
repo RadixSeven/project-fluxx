@@ -30,6 +30,7 @@ from fluxx.gui.simulation.gantt_optimizer import (
 )
 from fluxx.gui.simulation.gantt_widget import (
     GanttChartWidget,
+    _compute_common_world_prefix,
     _compute_world_sequence_sort_key,
     _group_and_sort_variants,
 )
@@ -488,3 +489,137 @@ def test_gantt_widget_falls_back_to_id_without_world_titles(qtbot: QtBot) -> Non
     y_labels = [label.get_text() for label in widget.ax.get_yticklabels()]
     assert len(y_labels) == 1
     assert "pw_123_abc" in y_labels[0]
+
+
+# Tests for common world prefix computation
+
+
+def test_compute_common_world_prefix_empty_list() -> None:
+    """Test that empty list returns empty prefix."""
+    result = _compute_common_world_prefix([])
+    assert result == ()
+
+
+def test_compute_common_world_prefix_single_sequence() -> None:
+    """Test that single non-empty sequence returns empty prefix (no comparison)."""
+    world_a = PossibleWorldId("world_a")
+    result = _compute_common_world_prefix([(world_a,)])
+    assert result == ()
+
+
+def test_compute_common_world_prefix_all_empty() -> None:
+    """Test that all empty sequences return empty prefix."""
+    result = _compute_common_world_prefix([(), ()])
+    assert result == ()
+
+
+def test_compute_common_world_prefix_one_empty_one_nonempty() -> None:
+    """Test that one empty, one non-empty returns empty prefix."""
+    world_a = PossibleWorldId("world_a")
+    result = _compute_common_world_prefix([(), (world_a,)])
+    assert result == ()
+
+
+def test_compute_common_world_prefix_common_single_element() -> None:
+    """Test common prefix with single common element."""
+    world_x = PossibleWorldId("world_x")
+    world_a = PossibleWorldId("world_a")
+    world_b = PossibleWorldId("world_b")
+
+    result = _compute_common_world_prefix([(world_x, world_a), (world_x, world_b)])
+    assert result == (world_x,)
+
+
+def test_compute_common_world_prefix_no_common_prefix() -> None:
+    """Test no common prefix when first element differs."""
+    world_a = PossibleWorldId("world_a")
+    world_b = PossibleWorldId("world_b")
+
+    result = _compute_common_world_prefix([(world_a,), (world_b,)])
+    assert result == ()
+
+
+def test_compute_common_world_prefix_multiple_common_elements() -> None:
+    """Test common prefix with multiple common elements."""
+    world_x = PossibleWorldId("world_x")
+    world_y = PossibleWorldId("world_y")
+    world_a = PossibleWorldId("world_a")
+    world_b = PossibleWorldId("world_b")
+
+    result = _compute_common_world_prefix(
+        [(world_x, world_y, world_a), (world_x, world_y, world_b)]
+    )
+    assert result == (world_x, world_y)
+
+
+def test_compute_common_world_prefix_with_empty_sequence_ignored() -> None:
+    """Test that empty sequences are ignored when computing prefix."""
+    world_x = PossibleWorldId("world_x")
+    world_a = PossibleWorldId("world_a")
+    world_b = PossibleWorldId("world_b")
+
+    # Empty sequence present but should be ignored
+    result = _compute_common_world_prefix([(), (world_x, world_a), (world_x, world_b)])
+    assert result == (world_x,)
+
+
+def test_gantt_widget_strips_common_prefix_from_labels(qtbot: QtBot) -> None:
+    """Test that common world sequence prefix is stripped from labels."""
+    project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+
+    # Create world sequences with common prefix (world_x, ...)
+    world_x = PossibleWorldId("pw_x")
+    world_a = PossibleWorldId("pw_a")
+    world_b = PossibleWorldId("pw_b")
+
+    seq_xa: WorldSequence = (world_x, world_a)
+    seq_xb: WorldSequence = (world_x, world_b)
+
+    task1_xa = TaskVariantKey(TaskId("task1"), seq_xa)
+    task1_xb = TaskVariantKey(TaskId("task1"), seq_xb)
+
+    schedule = GanttSchedule(
+        variant_schedules={
+            task1_xa: GanttVariantSchedule(
+                variant_key=task1_xa,
+                task_title="Task 1",
+                start_time=project_start,
+                duration_hours=2.0,
+                end_time=project_start + timedelta(hours=2),
+            ),
+            task1_xb: GanttVariantSchedule(
+                variant_key=task1_xb,
+                task_title="Task 1",
+                start_time=project_start + timedelta(hours=3),
+                duration_hours=2.0,
+                end_time=project_start + timedelta(hours=5),
+            ),
+        },
+        optimization_status="optimal",
+        project_start_date=project_start,
+        world_sequences={seq_xa, seq_xb},
+    )
+
+    # Provide world titles mapping
+    world_titles = {
+        world_x: "X1",
+        world_a: "Do A1",
+        world_b: "Do A2",
+    }
+
+    widget = GanttChartWidget(schedule, [], world_titles)
+    qtbot.addWidget(widget)
+
+    # Check that y-axis labels do NOT include "X1" (the common prefix)
+    # They should only include "Do A1" and "Do A2"
+    y_labels = [label.get_text() for label in widget.ax.get_yticklabels()]
+    assert len(y_labels) == 2
+
+    # Both labels should NOT contain the common prefix "X1"
+    for label in y_labels:
+        assert "X1" not in label
+
+    # Labels should contain the distinguishing world titles
+    label_texts = " ".join(y_labels)
+    assert "Do A1" in label_texts
+    assert "Do A2" in label_texts

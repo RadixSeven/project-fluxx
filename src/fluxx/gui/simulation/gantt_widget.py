@@ -18,6 +18,45 @@ from fluxx.gui.simulation.gantt_analysis import TaskVariantKey, WorldSequence
 from fluxx.gui.simulation.gantt_optimizer import GanttSchedule, GanttVariantSchedule
 
 
+def _compute_common_world_prefix(
+    world_sequences: list[WorldSequence],
+) -> WorldSequence:
+    """Compute the longest common prefix across all non-empty world sequences.
+
+    If the same possible worlds appear at the start of every world sequence,
+    they can be omitted from labels since they add no distinguishing information.
+
+    Args:
+        world_sequences: List of world sequences to find common prefix for
+
+    Returns:
+        The longest common prefix as a WorldSequence (tuple of PossibleWorldIds).
+        Returns empty tuple if there are fewer than 2 non-empty sequences
+        (since a prefix is only meaningful when comparing multiple sequences).
+    """
+    # Filter out empty sequences - they don't participate in prefix calculation
+    non_empty_seqs = [ws for ws in world_sequences if ws]
+
+    if len(non_empty_seqs) < 2:
+        # Need at least 2 non-empty sequences to have a meaningful common prefix
+        return ()
+
+    # Find minimum length
+    min_len = min(len(ws) for ws in non_empty_seqs)
+
+    # Find longest common prefix
+    prefix_len = 0
+    for i in range(min_len):
+        # Check if all sequences have the same element at position i
+        first_elem = non_empty_seqs[0][i]
+        if all(ws[i] == first_elem for ws in non_empty_seqs):
+            prefix_len = i + 1
+        else:
+            break
+
+    return non_empty_seqs[0][:prefix_len]
+
+
 def _compute_world_sequence_sort_key(
     world_seq: WorldSequence,
     earliest_start_by_world_seq: dict[WorldSequence, datetime],
@@ -187,16 +226,22 @@ class GanttChartWidget(QWidget):
             self.gantt_schedule.variant_schedules
         )
 
+        # Compute common world sequence prefix to strip from labels
+        all_world_seqs = [vk.world_sequence for vk, _ in sorted_variants]
+        common_prefix = _compute_common_world_prefix(all_world_seqs)
+        prefix_len = len(common_prefix)
+
         # Create y-position mapping (task names on y-axis)
         y_positions: dict[TaskVariantKey, int] = {}
         task_labels: list[str] = []
         for i, (variant_key, schedule) in enumerate(sorted_variants):
             y_positions[variant_key] = i
-            # Include world sequence info in label if not empty
-            if variant_key.world_sequence:
+            # Include world sequence info in label if not empty (after stripping prefix)
+            display_world_seq = variant_key.world_sequence[prefix_len:]
+            if display_world_seq:
                 # Use human-readable titles if available, fall back to IDs
                 world_titles_list = [
-                    self.world_titles.get(w, str(w)) for w in variant_key.world_sequence
+                    self.world_titles.get(w, str(w)) for w in display_world_seq
                 ]
                 world_str = ", ".join(world_titles_list)
                 label = f"{schedule.task_title} ({world_str})"
