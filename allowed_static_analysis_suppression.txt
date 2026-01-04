@@ -1,11 +1,15 @@
 .claude/hooks/stop_check.py:    return json.load(sys.stdin)  # type: ignore[no-any-return]
 CLAUDE.md:We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
 CLAUDE.md:If you have written code that cannot be expressed with type safety (that is, it requires the use of `Any`, `type: ignore`, `cast`, or `pragma: no cover`) or you need to mention
-Makefile:		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
-Makefile:		-exec grep -Hn "type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
+Makefile:		CURRENT_SUPPRESSIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
+Makefile:		-exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
 pyproject.toml:    "pragma: no cover",
 src/fluxx/data/dag_operations.py:        raise DAGOperationError(f"Node {source_node_id} not found")  # pragma: no cover
 src/fluxx/data/models.py:from typing import Annotated, Any, Literal, NamedTuple, NewType, TypedDict, cast
+src/fluxx/data/models.py:        return None, None, split_world_reference(cast(PossibleWorldReference, ref))
+src/fluxx/data/models.py:        return cast(TaskId, ref), None, None
+src/fluxx/data/models.py:        return None, cast(BranchId, ref), None
+src/fluxx/data/models.py:    as_task, as_branch, _ = type_explode_id(cast(NodeId, node_id_str))
 src/fluxx/data/models.py:    rng_state: list[Any] = Field(
 src/fluxx/gui/controller.py:from typing import Any
 src/fluxx/gui/controller.py:        self._selection_validator: Any = None
@@ -55,4 +59,8 @@ tests/gui/test_dag_view.py:    qtbot.mouseClick(  # type: ignore[no-untyped-call
 tests/gui/test_dag_view.py:        qtbot.mouseClick(  # type: ignore[no-untyped-call]
 tests/gui/test_dag_view.py:        qtbot.mouseClick(  # type: ignore[no-untyped-call]
 tests/gui/test_dag_view.py:    qtbot.mouseClick(  # type: ignore[no-untyped-call]
+tests/gui/test_main_window.py:            file_menu = cast(QMenu | None, action.menu())
+tests/gui/test_main_window.py:            edit_menu = cast(QMenu | None, action.menu())
+tests/simulation/test_engine.py:    task.duration_distribution = cast(Triangular, cast(object, "not a distribution"))
+tests/test_validation.py:    invalid_target: DependencyTargetId = cast(TaskId, "invalid_format")
 type_safety.md:3. **Never use `# type: ignore`** without a specific error code and justification
