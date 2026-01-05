@@ -7,7 +7,7 @@ This plan implements the Jira integration specified in Section 11 of `project_fl
 1. **TDD Throughout**: Write tests first for all non-exploratory work. Tests define the contract.
 2. **Small, Focused Methods**: Each method does one thing. Easier to test, easier to maintain.
 3. **Separation of Concerns**: Keep I/O (API calls) separate from logic (data transformation).
-4. **Mock at Boundaries**: Mock the HTTP layer, not internal functions.
+4. **Mock at Boundaries**: Prefer mocking the HTTP layer and file system, not internal functions. Exception: mocking internal functions is appropriate for testing defensive "should never happen" code paths that are difficult to trigger through normal boundaries.
 
 ---
 
@@ -271,168 +271,190 @@ def test_client_adds_bearer_token(mocker):
 ```python
 def test_parse_issue_basic_fields():
     raw = load_fixture("issue_basic.json")
-    issue = parse_issue(raw)
+    issue = JiraIssueResponse.model_validate(raw)
     assert issue.key == "FHIR-1234"
-    assert issue.summary == "..."
+    assert issue.fields.summary == "..."
 
 def test_parse_issue_with_parent():
     raw = load_fixture("issue_with_parent.json")
-    issue = parse_issue(raw)
-    assert issue.parent_key == "FHIR-1000"
+    issue = JiraIssueResponse.model_validate(raw)
+    assert issue.fields.parent.key == "FHIR-1000"
 
 def test_parse_issue_links_dependencies():
     raw = load_fixture("issue_with_links.json")
-    issue = parse_issue(raw)
-    assert len(issue.depends_on) == 2
+    issue = JiraIssueResponse.model_validate(raw)
+    depends_on = [link for link in issue.fields.issuelinks if link.type.name == "Depends"]
+    assert len(depends_on) == 2
 
 def test_parse_issue_worklogs():
     raw = load_fixture("issue_with_worklogs.json")
-    issue = parse_issue(raw)
-    assert len(issue.worklogs) == 3
+    issue = JiraIssueResponse.model_validate(raw)
+    assert len(issue.fields.worklog.worklogs) == 3
 
 def test_parse_issue_handles_missing_optional_fields():
     raw = load_fixture("issue_minimal.json")
-    issue = parse_issue(raw)
-    assert issue.story_points is None
+    issue = JiraIssueResponse.model_validate(raw)
+    assert issue.fields.customfield_10473 is None  # Story points
+```
+
+**Fixture Loading** (portable for hermetic builds):
+```python
+# tests/jira/conftest.py
+import importlib.resources
+import json
+
+def load_fixture(name: str) -> dict:
+    """Load JSON fixture using importlib.resources for portability."""
+    files = importlib.resources.files("tests.jira.fixtures")
+    return json.loads(files.joinpath(name).read_text())
 ```
 
 **Implementation**:
-1. Create `src/fluxx/jira/parsing.py`
-2. Define `ParsedJiraIssue` dataclass with all extracted fields
-3. Define `ParsedWorklog` dataclass
-4. Implement `parse_issue(raw: dict) -> ParsedJiraIssue`
-5. Handle all the field mappings from spec Section 11.4.2
+1. Create `src/fluxx/jira/api_types.py`
+2. Define Pydantic models for Jira API responses with `model_config = ConfigDict(extra="ignore")`:
+   - `JiraIssueResponse` - top-level issue response
+   - `JiraIssueFields` - the `fields` object
+   - `JiraWorklog`, `JiraIssueLink`, `JiraTimeTracking`, etc.
+3. These models validate external API input and provide type safety throughout
+4. Use `model_validate()` to parse raw JSON dicts
 
-**Fixtures**: Save real (anonymized) Jira API responses as test fixtures.
+**Why Pydantic for API responses**: Validating input from external sources like APIs is crucial. By defining expected semantics as Pydantic models (with `extra="ignore"` to tolerate fields we don't care about), we get:
+- Runtime validation that API responses match expectations
+- Type safety through the entire data pipeline
+- Clear documentation of what fields we depend on
+- Early failure with clear errors if Jira API changes
 
 **Files**:
-- `src/fluxx/jira/parsing.py`
-- `tests/jira/test_parsing.py`
-- `tests/jira/fixtures/` (JSON files)
+- `src/fluxx/jira/api_types.py`
+- `tests/jira/test_api_types.py`
+- `tests/jira/fixtures/` (JSON files, accessed via importlib.resources)
+- `tests/jira/fixtures/__init__.py` (empty, makes it a package)
 
 ---
 
-## Phase 3: Data Mapping (Jira → Fluxx)
+## Phase 3: Data Extraction (Jira → Fluxx)
 
-### 3.1 Task Completion Mapping
+Note: We use "extract" rather than "map" to emphasize that we're converting part of the data in a Jira structure to a different representation for a specific part of a Fluxx structure.
+
+### 3.1 Task Completion Extraction
 **TDD**: Yes
 
 **Tests first**:
 ```python
-def test_map_not_started_no_worklogs():
-    issue = ParsedJiraIssue(worklogs=[], resolution=None, ...)
-    completion = map_completion(issue)
+def test_extract_completion_not_started_no_worklogs():
+    issue = JiraIssueResponse(...)  # worklogs=[], resolution=None
+    completion = extract_completion(issue, workers)
     assert isinstance(completion, NotStartedCompletion)
 
-def test_map_not_started_with_assignee_sets_allowed_workers():
-    issue = ParsedJiraIssue(worklogs=[], assignee="user1", ...)
-    completion, allowed = map_completion_and_constraints(issue)
-    assert allowed == ["user1"]
+def test_extract_completion_not_started_with_assignee_sets_allowed_workers():
+    issue = JiraIssueResponse(...)  # worklogs=[], assignee="user1"
+    completion, allowed = extract_completion_and_constraints(issue, workers)
+    assert allowed == [workers["user1"].id]
 
-def test_map_started_has_worklogs_no_resolution():
-    issue = ParsedJiraIssue(worklogs=[...], resolution=None, ...)
-    completion = map_completion(issue)
+def test_extract_completion_started_has_worklogs_no_resolution():
+    issue = JiraIssueResponse(...)  # worklogs=[...], resolution=None
+    completion = extract_completion(issue, workers)
     assert isinstance(completion, StartedCompletion)
     assert completion.assignee == expected_worker_id
 
-def test_map_done_with_work_logged():
-    issue = ParsedJiraIssue(worklogs=[...], resolution="Done", ...)
-    completion = map_completion(issue)
+def test_extract_completion_done_with_work_logged():
+    issue = JiraIssueResponse(...)  # worklogs=[...], resolution="Done"
+    completion = extract_completion(issue, workers)
     assert isinstance(completion, DoneCompletion)
     assert completion.end_time == last_worklog_date  # Not resolution_date
 
-def test_map_done_without_work_uses_resolution_date():
-    issue = ParsedJiraIssue(worklogs=[], resolution="Done", ...)
-    completion = map_completion(issue)
+def test_extract_completion_done_without_work_uses_resolution_date():
+    issue = JiraIssueResponse(...)  # worklogs=[], resolution="Done"
+    completion = extract_completion(issue, workers)
     assert completion.hours_logged == 1e-6  # Or NaN per investigation
     assert completion.end_time == resolution_date
 
-def test_map_started_uses_assignee_or_most_worklogs():
+def test_extract_completion_uses_assignee_or_most_worklogs():
     # Test the priority: jira_assignee > author_with_most_worklogs
     ...
 ```
 
 **Implementation**:
-1. Create `src/fluxx/jira/mapping.py`
-2. Implement `map_completion(issue: ParsedJiraIssue, workers: dict[str, WorkerId]) -> TaskCompletion`
+1. Create `src/fluxx/jira/extraction.py`
+2. Implement `extract_completion(issue: JiraIssueResponse, workers: dict[str, WorkerId]) -> TaskCompletion`
 3. Implement logic per spec Section 11.7
 
 **Files**:
-- `src/fluxx/jira/mapping.py`
-- `tests/jira/test_mapping.py`
+- `src/fluxx/jira/extraction.py`
+- `tests/jira/test_extraction.py`
 
-### 3.2 Dependency Mapping
+### 3.2 Dependency Extraction
 **TDD**: Yes
 
 **Tests first**:
 ```python
-def test_map_depends_on_link():
-    issue = ParsedJiraIssue(depends_on=["FHIR-100"], ...)
-    deps = map_dependencies(issue, task_map)
+def test_extract_dependencies_depends_on_link():
+    issue = JiraIssueResponse(...)  # has "depends on" link to FHIR-100
+    deps = extract_dependencies(issue, task_map)
     assert len(deps) == 1
     assert deps[0].constraint_type == ">="
 
-def test_map_schedule_after_link():
-    issue = ParsedJiraIssue(schedule_after=["FHIR-100"], ...)
-    deps = map_dependencies(issue, task_map)
+def test_extract_dependencies_schedule_after_link():
+    issue = JiraIssueResponse(...)  # has "schedule after" link
+    deps = extract_dependencies(issue, task_map)
     # Same as depends_on
 
-def test_skip_dependency_when_both_started():
-    issue_a = ParsedJiraIssue(key="A", depends_on=["B"], worklogs=[...])
-    issue_b = ParsedJiraIssue(key="B", worklogs=[...])
-    deps = map_dependencies(issue_a, task_map, started_issues={"A", "B"})
+def test_extract_dependencies_skip_when_both_started():
+    issue_a = JiraIssueResponse(...)  # depends on B, has worklogs
+    issue_b = JiraIssueResponse(...)  # has worklogs
+    deps = extract_dependencies(issue_a, task_map, started_issues={"A", "B"})
     assert len(deps) == 0  # Skipped because both started
 
-def test_keep_dependency_when_only_one_started():
-    issue_a = ParsedJiraIssue(key="A", depends_on=["B"], worklogs=[...])
-    issue_b = ParsedJiraIssue(key="B", worklogs=[])
-    deps = map_dependencies(issue_a, task_map, started_issues={"A"})
+def test_extract_dependencies_keep_when_only_one_started():
+    issue_a = JiraIssueResponse(...)  # depends on B, has worklogs
+    issue_b = JiraIssueResponse(...)  # no worklogs
+    deps = extract_dependencies(issue_a, task_map, started_issues={"A"})
     assert len(deps) == 1  # Kept because B not started
 ```
 
 **Implementation**:
-1. Add to `src/fluxx/jira/mapping.py`
-2. Implement `map_dependencies()` per spec Section 11.4.4
+1. Add to `src/fluxx/jira/extraction.py`
+2. Implement `extract_dependencies()` per spec Section 11.4.4
 
 **Files**:
-- `src/fluxx/jira/mapping.py` (extend)
-- `tests/jira/test_mapping.py` (extend)
+- `src/fluxx/jira/extraction.py` (extend)
+- `tests/jira/test_extraction.py` (extend)
 
-### 3.3 Hierarchy Mapping
+### 3.3 Hierarchy Extraction
 **TDD**: Yes
 
 **Tests first**:
 ```python
-def test_map_parent_child_from_parent_field():
+def test_build_hierarchy_from_parent_field():
     issues = [
-        ParsedJiraIssue(key="EPIC-1", parent_key=None),
-        ParsedJiraIssue(key="FHIR-100", parent_key="EPIC-1"),
+        JiraIssueResponse(key="EPIC-1", ...),  # no parent
+        JiraIssueResponse(key="FHIR-100", ...),  # parent_key="EPIC-1"
     ]
     hierarchy = build_hierarchy(issues)
     assert hierarchy["FHIR-100"].parent == "EPIC-1"
 
-def test_map_parent_child_from_link_types():
+def test_build_hierarchy_from_link_types():
     # "parent of" / "child of" links
     ...
 
-def test_detect_sub_epic_warning():
+def test_build_hierarchy_detects_sub_epic():
     issues = [
-        ParsedJiraIssue(key="EPIC-1", issue_type="Epic"),
-        ParsedJiraIssue(key="EPIC-2", issue_type="Epic", parent_key="EPIC-1"),
+        JiraIssueResponse(key="EPIC-1", issue_type="Epic", ...),
+        JiraIssueResponse(key="EPIC-2", issue_type="Epic", parent="EPIC-1", ...),
     ]
     hierarchy, warnings = build_hierarchy(issues)
     assert "EPIC-2" in warnings  # Sub-epic detected
 ```
 
 **Implementation**:
-1. Add to `src/fluxx/jira/mapping.py`
+1. Add to `src/fluxx/jira/extraction.py`
 2. Implement `build_hierarchy()` per spec Section 11.4.3
 
 **Files**:
-- `src/fluxx/jira/mapping.py` (extend)
-- `tests/jira/test_mapping.py` (extend)
+- `src/fluxx/jira/extraction.py` (extend)
+- `tests/jira/test_extraction.py` (extend)
 
-### 3.4 Worker Mapping
+### 3.4 Worker Extraction
 **TDD**: Yes
 
 **Tests first**:
@@ -449,9 +471,9 @@ def test_extract_workers_from_assignees():
 
 def test_calculate_hours_per_workday():
     worklogs = [
-        Worklog(author="user1", date=date(2024, 1, 1), seconds=4*3600),
-        Worklog(author="user1", date=date(2024, 1, 1), seconds=2*3600),  # Same day
-        Worklog(author="user1", date=date(2024, 1, 2), seconds=8*3600),
+        JiraWorklog(author="user1", started=date(2024, 1, 1), timeSpentSeconds=4*3600),
+        JiraWorklog(author="user1", started=date(2024, 1, 1), timeSpentSeconds=2*3600),  # Same day
+        JiraWorklog(author="user1", started=date(2024, 1, 2), timeSpentSeconds=8*3600),
     ]
     hours = calculate_hours_per_workday("user1", worklogs)
     assert hours == (6 + 8) / 2  # Average of 6h and 8h days
@@ -466,40 +488,40 @@ def test_populate_allowed_workers_for_epic():
 ```
 
 **Implementation**:
-1. Add to `src/fluxx/jira/mapping.py`
+1. Add to `src/fluxx/jira/extraction.py`
 2. Implement `extract_workers()` and `calculate_hours_per_workday()`
 
 **Files**:
-- `src/fluxx/jira/mapping.py` (extend)
-- `tests/jira/test_mapping.py` (extend)
+- `src/fluxx/jira/extraction.py` (extend)
+- `tests/jira/test_extraction.py` (extend)
 
-### 3.5 Full Issue-to-Task Mapping
+### 3.5 Full Issue-to-Task Extraction
 **TDD**: Yes
 
 **Tests first**:
 ```python
-def test_map_issue_to_task():
-    issue = ParsedJiraIssue(...)
-    task = map_issue_to_task(issue, parent_task_id, workers)
-    assert task.title == issue.summary
+def test_extract_task_from_issue():
+    issue = JiraIssueResponse(...)
+    task = extract_task(issue, parent_task_id, workers)
+    assert task.title == issue.fields.summary
     assert task.jira_reference.issue_key.project_key == "FHIR"
 
-def test_map_issue_preserves_description():
+def test_extract_task_preserves_description():
     ...
 
-def test_map_issue_sets_duration_distribution():
-    issue = ParsedJiraIssue(original_estimate=3600, story_points=5, ...)
-    task = map_issue_to_task(...)
+def test_extract_task_sets_duration_distribution():
+    issue = JiraIssueResponse(...)  # has original_estimate and story_points
+    task = extract_task(...)
     assert isinstance(task.duration_distribution, JiraDurationDistribution)
 ```
 
 **Implementation**:
-1. Add to `src/fluxx/jira/mapping.py`
-2. Implement `map_issue_to_task()` combining all the above
+1. Add to `src/fluxx/jira/extraction.py`
+2. Implement `extract_task()` combining all the above
 
 **Files**:
-- `src/fluxx/jira/mapping.py` (extend)
-- `tests/jira/test_mapping.py` (extend)
+- `src/fluxx/jira/extraction.py` (extend)
+- `tests/jira/test_extraction.py` (extend)
 
 ---
 
@@ -565,18 +587,47 @@ def test_find_bin_for_estimate():
     bin = find_bin_for_estimate(estimate=3600, bins=bins)
     # Should find bin whose center is closest
 
+def test_fit_bin_distribution_allows_shift():
+    # Bins with non-zero lower bound should fit with loc != 0
+    bin_data = [100, 120, 150, 180]  # All positive, no values near 0
+    dist = fit_bin_distribution(bin_data, lower_bound=50)
+    assert dist.loc > 0  # Shifted lognormal
+
+def test_fit_bin_distribution_zero_bound_uses_floc0():
+    # Only the lowest bin (lower_bound=0) should use floc=0
+    bin_data = [1, 5, 10, 20, 50]
+    dist = fit_bin_distribution(bin_data, lower_bound=0)
+    assert dist.loc == 0
+
+def test_loc_monotonicity_enforced():
+    # loc should increase monotonically with estimate bin center
+    bins = create_estimate_bins(data, min_samples=30)
+    enforce_loc_monotonicity(bins)
+    for i in range(len(bins) - 1):
+        assert bins[i].distribution.loc <= bins[i+1].distribution.loc
+
 def test_sample_from_bin():
+    rng = np.random.default_rng(42)
     bin = EstimateBin(...)
-    samples = [bin.sample() for _ in range(1000)]
+    samples = [bin.sample(rng) for _ in range(1000)]
     # Verify distribution looks right
 ```
 
+**scipy Fitting Notes**:
+- Do NOT use `floc=0` for bins whose lower bound is not 0. Bins contain data from a specific estimate range; outputs may reasonably be shifted and not include 0.
+- Only use `floc=0` for the bins with (lower_bound=0) - which may not be the lowest bin depending on the distribution of times.
+- After fitting all bins, enforce monotonicity: `loc` should increase or stay the same with increasing bin center estimate. Walk bins from highest to lowest and set `max_loc = min(loc, min_loc_of_larger_bins)`. If a bin's loc calcuated with no loc constraint exceeds this minimum, re-fit with `floc=min_loc_of_larger_bins`.
+- You can do this in one pass if you fit the largest bins first: fit top bin unconstrained. max_loc=top_bin.loc. Now second_largest unconstrained. If second_largest.loc > max_loc, fit again with floc=max_loc. Continue down the line.
+- Whether the one-pass algorithm is worth it will be up to you to evaluate once you are implementing it.
+
 **Implementation**:
 1. Add to `src/fluxx/jira/distributions.py`
-2. Implement `EstimateBin` dataclass
-3. Implement `create_estimate_bins()`
-4. Implement `find_bin_for_estimate()`
-5. Implement `BinBasedDistributionModel` class
+2. Implement `EstimateBin` dataclass with `distribution: ShiftedLognormal`
+3. Implement `fit_bin_distribution(data, lower_bound)` with proper floc handling
+4. Implement `create_estimate_bins()`
+5. Implement `enforce_loc_monotonicity(bins)`
+6. Implement `find_bin_for_estimate()`
+7. Implement `BinBasedDistributionModel` class
 
 **Files**:
 - `src/fluxx/jira/distributions.py` (extend)
@@ -585,24 +636,55 @@ def test_sample_from_bin():
 ### 4.3 Integrate Distribution Fitting with Simulation
 **TDD**: Yes
 
+**Sampling API Design**:
+We're sampling from a conditional distribution. The API should reflect this:
+```python
+# The model holds the fitted bin distributions
+model = BinBasedDistributionModel(history_entries)
+
+# JiraDurationDistribution holds the conditioning parameters
+jira_params = JiraDurationDistribution(original_estimate_seconds=3600)
+
+# Sample from the conditional distribution
+rng = np.random.default_rng(seed)
+sample = model.conditioned_on(jira_params).sample(rng)
+```
+
 **Tests first**:
 ```python
-def test_jira_duration_distribution_samples():
-    dist = JiraDurationDistribution(original_estimate_seconds=3600)
+def test_conditioned_distribution_samples():
     model = BinBasedDistributionModel(history_entries)
-    sample = dist.sample(model)
+    jira_params = JiraDurationDistribution(original_estimate_seconds=3600)
+    rng = np.random.default_rng(42)
+    sample = model.conditioned_on(jira_params).sample(rng)
     assert sample > 0
 
-def test_jira_duration_distribution_no_estimate_uses_fallback():
-    dist = JiraDurationDistribution(original_estimate_seconds=None)
+def test_conditioned_distribution_no_estimate_uses_fallback():
     model = BinBasedDistributionModel(history_entries)
-    sample = dist.sample(model)
+    jira_params = JiraDurationDistribution(original_estimate_seconds=None)
+    rng = np.random.default_rng(42)
+    sample = model.conditioned_on(jira_params).sample(rng)
     # Should use fallback distribution
+    assert sample > 0
+
+def test_conditioned_distribution_deterministic_with_mock_rng():
+    # Use mock RNG to get predictable samples for testing
+    model = BinBasedDistributionModel(history_entries)
+    jira_params = JiraDurationDistribution(original_estimate_seconds=3600)
+
+    mock_rng = MockRng(returns=[0.5])  # Returns 0.5 for uniform draws
+    sample = model.conditioned_on(jira_params).sample(mock_rng)
+    assert sample == expected_value_for_0_5
+
+def test_simulation_uses_conditioned_sampling():
+    # Verify simulation engine correctly uses the conditional API
+    ...
 ```
 
 **Implementation**:
-1. Add `sample()` method to `JiraDurationDistribution`
-2. Integrate with simulation engine
+1. Implement `ConditionalDistribution` class returned by `model.conditioned_on(params)`
+2. `ConditionalDistribution.sample(rng)` finds the right bin and samples
+3. Integrate with simulation engine, passing through the RNG
 
 **Files**:
 - `src/fluxx/jira/distributions.py` (extend)
@@ -901,9 +983,9 @@ src/fluxx/jira/
 ├── __init__.py
 ├── auth.py           # Token management (factored from jql.py)
 ├── client.py         # HTTP client with rate limiting/retry
-├── models.py         # Jira-specific Pydantic models
-├── parsing.py        # Parse Jira API responses
-├── mapping.py        # Map Jira data to Fluxx models
+├── models.py         # Fluxx-side Jira models (JiraReference, JiraIssueKey, etc.)
+├── api_types.py      # Pydantic models for Jira API responses (validation at boundary)
+├── extraction.py     # Extract Fluxx data from Jira responses
 ├── distributions.py  # Bin-based distribution fitting
 ├── importer.py       # Epic import orchestration
 └── linker.py         # Link existing tasks to Jira
@@ -914,11 +996,13 @@ src/fluxx/gui/jira/
 
 tests/jira/
 ├── __init__.py
-├── fixtures/         # JSON fixtures for API responses
+├── fixtures/         # JSON fixtures for API responses (accessed via importlib.resources)
+│   └── __init__.py   # Makes fixtures a package for importlib.resources
+├── conftest.py       # load_fixture() helper using importlib.resources
 ├── test_auth.py
 ├── test_client.py
-├── test_parsing.py
-├── test_mapping.py
+├── test_api_types.py
+├── test_extraction.py
 ├── test_distributions.py
 ├── test_importer.py
 └── test_linker.py
