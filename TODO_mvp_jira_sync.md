@@ -559,6 +559,61 @@ def test_fit_fallback_single_value():
 ### 4.2 Bin-Based Distribution Fitting
 **TDD**: Yes
 
+**Key Concepts**:
+- A bin is "N+ elements at minimum distance from center estimate" (not "next N unique estimates")
+- With ties at boundaries, count can jump significantly when moving center
+- Multiple consecutive center values can produce identical bin contents
+- Lower bound = 0 when bin's lowest element is dataset's lowest (no excluded element for midpoint)
+- Upper bound = ∞ when bin's highest element is dataset's highest
+
+**Example 1: Repeated estimates with center at 9 hours** (min_samples=10)
+
+Data pairs (estimate, actual):
+```
+Below center's bin: [(7, 10) (7, 10) (7, 12)]
+In bin (dist ≤ 1.5): [(7.5, 8) (7.5, 9) (7.5, 12) (7.5, 12) (7.75, 7) (8, 8) (8, 10) (8, 16) (8, 25) (8, 48) (9, 50)]
+Above center's bin: [(11, 15) (12, 13) (12, 24) (12, 26) (14, 15)]
+```
+
+Result:
+- lower_bound = 7.25 (midpoint between excluded 7 and included 7.5)
+- Call: `fit_bin_distribution([8, 9, 12, 12, 7, 8, 10, 16, 25, 48, 50], lower_bound=7.25)`
+
+Next bin centered at 11:
+```
+In bin (dist ≤ 3): [(8, 8) (8, 10) (8, 16) (8, 25) (8, 48) (9, 50) (11, 15) (12, 13) (12, 24) (12, 26)]
+```
+- lower_bound = 7.875 (midpoint between excluded 7.75 and included 8)
+
+**Example 2: Lower bound = 0** (log space, min_samples=5)
+
+Raw data:
+```
+[(0.25, 0.5) (0.5, 0.5) (0.75, 4) (1.5, 4.5) (1.5, 6) (1.5, 6) (1.75, 3.5) (2, 4) (2, 5) (2, 8) (2, 12.5) (2, 24) (3, 25)]
+```
+
+Bin centered on 0.25:
+```
+Contents: [(0.25, 0.5) (0.5, 0.5) (0.75, 4) (1.5, 4.5) (1.5, 6) (1.5, 6)]
+dist=1.25, lower_bound=0 (0.25 is lowest estimate in dataset)
+```
+
+Bin centered on 0.5 → **same contents**, dist=1, lower_bound=0
+
+Bin centered on 0.75 → **same contents**, dist=0.75, lower_bound=0
+
+Bin centered on 1.5:
+```
+Contents: [(1.5, 4.5) (1.5, 6) (1.5, 6) (1.75, 3.5) (2, 4) (2, 5) (2, 8) (2, 12.5) (2, 24)]
+dist=0.5, lower_bound=1.125 (midpoint between excluded 0.75 and included 1.5)
+```
+
+**Test Constants**: Use readable constants for log-space values:
+```python
+log_1_hour = math.log(3600)  # 8.188...
+log_2_hours = math.log(7200)
+```
+
 **Tests first**:
 ```python
 def test_create_bins_minimum_samples():
@@ -581,6 +636,36 @@ def test_lowest_bin_has_zero_lower_bound():
 
 def test_highest_bin_has_inf_upper_bound():
     ...
+
+def test_overlapping_bins_with_repeated_estimates():
+    # Example 2 above: centers 0.25, 0.5, 0.75 all yield same bin
+    data = [
+        (0.25, 0.5), (0.5, 0.5), (0.75, 4), (1.5, 4.5), (1.5, 6), (1.5, 6),
+        (1.75, 3.5), (2, 4), (2, 5), (2, 8), (2, 12.5), (2, 24), (3, 25)
+    ]
+    bins_at_025 = create_bin_centered_at(0.25, data, min_samples=5)
+    bins_at_050 = create_bin_centered_at(0.5, data, min_samples=5)
+    bins_at_075 = create_bin_centered_at(0.75, data, min_samples=5)
+    # All three should have the same samples
+    assert bins_at_025.samples == bins_at_050.samples == bins_at_075.samples
+    # But different distances from center
+    assert bins_at_025.max_distance == 1.25
+    assert bins_at_050.max_distance == 1.0
+    assert bins_at_075.max_distance == 0.75
+
+def test_bin_with_repeated_estimates_at_boundary():
+    # Example 1 above: center 9 includes many (8, *) entries
+    data = [
+        (7, 10), (7, 10), (7, 12),
+        (7.5, 8), (7.5, 9), (7.5, 12), (7.5, 12),
+        (7.75, 7),
+        (8, 8), (8, 10), (8, 16), (8, 25), (8, 48),
+        (9, 50),
+        (11, 15), (12, 13), (12, 24), (12, 26), (14, 15)
+    ]
+    bin_at_9 = create_bin_centered_at(9, data, min_samples=10)
+    assert bin_at_9.lower_bound == 7.25  # Midpoint between 7 and 7.5
+    assert len(bin_at_9.samples) == 11
 
 def test_find_bin_for_estimate():
     bins = [...]
