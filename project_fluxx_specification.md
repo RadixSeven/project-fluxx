@@ -78,6 +78,8 @@ Task {
   }
 
   # Worker constraints
+  default_workers: list of worker ids that children without a list are limited to.
+                   On upgrade, defaults to listing all workers.
   allowed_workers: optional list of worker ids (if absent, all allowed)
   excluded_worker_tasks: list of task ids whose assignees cannot be assigned to this task
 
@@ -106,7 +108,7 @@ StartedCompletion {
 
 DoneCompletion {
   status: "done"  # discriminator
-  assignee: worker id
+  assignee: worker id | None  #If assignee was not recorded
   start_time: datetime  # when work began
   hours_logged: float  # total work-hours spent
   end_time: datetime  # when work finished (for Gantt charts)
@@ -1153,43 +1155,579 @@ Each event records:
 - Lazy loading where appropriate
 - Efficient graph algorithms for dependency checking
 
-## 11. Future Improvements
+## 11. Jira Integration
+
+### 11.1 Overview
+
+Project Fluxx integrates with Jira Data Center to import epics and their issues, enabling data-driven duration estimation based on historical ticket completion data.
+
+**Core Workflow**:
+1. User imports an epic by key (e.g., FHIR-1234) via File menu
+2. System creates a root task representing the epic
+3. All issues in the epic become subtasks with proper hierarchy
+4. Duration distributions are derived from historical project data
+5. Workers are imported based on who logged work on epic tasks
+6. User can hit "Update from Jira" to sync changes
+
+### 11.2 Configuration and Authentication
+
+**Server Configuration**:
+- Each `.fluxx` file supports at most one Jira server
+- Server URL stored in the project file
+- On first import, user is prompted for the server URL
+- Server URL cannot be changed after initial configuration (migration path for future)
+
+**Authentication**:
+- Personal Access Token (PAT) only
+- Token is NOT stored in the `.fluxx` file
+- Token is read from: `~/.local/share/secrets/<host>[.<port>]/<path>/personal_access_token.txt`
+  - Example: For `https://jira.example.com:8443/jira`, token at `~/.local/share/secrets/jira.example.com.8443/jira/personal_access_token.txt`
+- Reuses token path derivation from `fluxx.jql` module (factor out for shared use)
+
+**Rate Limiting**:
+- Default: 1 request per second
+- User-configurable via import dialog
+- Implemented using `requests_ratelimiter` library
+
+**Retry Logic**:
+- Exponential backoff on failures
+- Maximum retry interval: 10 minutes
+- Retries on transient errors (5xx, timeouts, connection errors)
+
+### 11.3 Data Model Extensions
+
+#### 11.3.1 Jira Reference Schema
+
+```
+ProjectKey: string # Matching [A-Z0-9_]{2,}
+
+JiraIssueKey { # e.g., "FHIR-1234"
+  project_key: ProjectKey
+
+  issue_number: int
+}
+
+JiraReference {
+  server_url: string  # Base URL of the Jira server
+  issue_key: JiraIssueKey   # e.g., "FHIR-1234"
+}
+```
+
+JiraIssueKey has a validator that it is of the form letters-numbers and is treated for type safety.
+
+Added to Task schema:
+```
+Task {
+  ...
+  jira_reference: optional JiraReference  # Link to Jira issue
+  jira_issue_type: optional string  # e.g., "Story", "Bug", "Task"
+}
+```
+
+#### 11.3.2 Worker Jira Reference
+
+```
+Worker {
+  ...
+  jira_account_id: optional string  # Jira user account ID - default to None when upgrading
+  default_worker_for: list[TaskId]  # If T is in this list, this worker is in the
+                                    # default list for that task and all its subtasks.
+
+                                    # When upgrading, make this list a list of all the tasks that
+                                    # have no parent. (So the worker is a default worker in all
+                                    # tasks.)
+}
+```
+
+#### 11.3.3 Jira Duration Distribution
+
+New distribution type for Jira-imported tasks:
+
+```
+JiraDurationDistribution(DurationDistribution) {
+  original_estimate_seconds: optional int  # timetracking.originalEstimateSeconds
+  story_points: optional float  # customfield_10473
+  remaining_estimate_seconds: optional int  # timetracking.remainingEstimateSeconds
+}
+```
+
+#### 11.3.4 Historical Duration Data
+
+Stored in the project file for distribution fitting:
+
+```
+JiraDurationHistoryEntry {
+  server_url: string
+  issue_key: JiraIssueKey  # For deduplication on update
+  original_estimate_seconds: optional int
+  worker_jira_id: optional string
+  issue_type: string
+  total_logged_time_seconds: optional int
+}
+
+JiraSyncMetadata {
+  # The list of project keys to sync is the set of
+  # keys in the issues in the project.
+  #
+  # Only parents with attached issues in the project
+  # are synchronized. So, if an issue is attached to an
+
+  # epic, that epic will be sync'd but siblings in the
+  # same strategic release will not be. However, if a
+  # strategic release is linked to a task, then all its
+  # epics will be synchronized.
+
+  server_url: string
+  last_history_sync: datetime  # For incremental updates, all projects are updated when one is
+  history_entries: list of JiraDurationHistoryEntry
+}
+```
+
+#### 11.3.5 Project-Level Jira Configuration
+
+```
+ProjectFile {
+  ...
+  jira_config: optional {
+    server_url: string
+    sync_metadata: JiraSyncMetadata  # sync state
+  }
+}
+```
+
+### 11.4 Epic Import Process
+
+#### 11.4.1 Import Dialog
+
+Accessed via **File → Import from Jira...**
+
+**First-time setup** (no server configured):
+1. Prompt for Jira server URL
+2. Validate URL format
+3. Test authentication (verify PAT exists and works)
+4. Store server URL in project file
+
+**Import form**:
+- Epic key input (e.g., "FHIR-1234")
+- Rate limit setting (requests/second, default: 1)
+- Import button
+
+**Progress display** (modal):
+- Current operation description
+- Progress bar (when determinable)
+- Cancel button
+- Error display with retry option
+
+#### 11.4.2 Issue Fetching
+
+**API Endpoints Used**:
+- `GET {path}/rest/api/2/search` - Query issues in epic
+- `GET {path}/rest/api/2/issue/{key}` - Get issue details (if needed)
+
+**JQL Queries**:
+```
+# Get all issues in epic
+"Epic Link" = {epic_key} OR parent = {epic_key}
+
+# Get historical data for distribution fitting (all completed issues in project)
+project = {project_key} AND resolution in ("Complete", "Fixed", "Not a bug", "Done", "Cannot Reproduce") AND updated >= "{last_sync_date}"
+```
+
+**Fields to Request**:
+- `key`, `summary`, `description`
+- `issuetype` (for issue_type)
+- `parent` (for hierarchy)
+- `issuelinks` (for dependencies and hierarchy)
+- `timetracking` (originalEstimateSeconds, remainingEstimateSeconds, timeSpentSeconds)
+- `customfield_10473` (Story Points)
+- `assignee` (for worker constraints on unstarted tasks or assignees on started/completed task)
+- `resolution`, `resolutiondate` (for completion detection)
+- `worklog` (for start detection and worker import)
+- `status` (for completion detection and future intermediate statuses)
+
+**Note on `names` expansion**: During development/debugging, include `expand=names` to see human-readable custom field names. This adds ~5KB per issue (~20% overhead) and should be disabled in production.
+
+#### 11.4.3 Hierarchy Mapping
+
+**Parent-Child Relationships**:
+- Issues with `parent` field set become subtasks of the parent issue
+- Epic becomes root task
+- Standard Jira subtasks map to Project Fluxx subtasks
+- "parent of"/"child of" link types also establish hierarchy
+
+**Sub-epic Detection**:
+- If an issue within the epic has `issuetype.name == "Epic"`, display warning:
+  - "Warning: Issue {key} is a sub-epic. Sub-epics are not fully supported. It will be imported as a regular task."
+
+#### 11.4.4 Dependency Mapping
+
+**Jira Link Types → Project Fluxx Dependencies**:
+- A "depends on" B / B "depended on by" A → `A.start >= B.end`
+- A "schedule after" B / B "schedule before" A → `A.start >= B.end`
+
+**Special Case - Both Tasks Started**:
+When both linked tasks for a "depends on" or "schedule after" relationship have work logged (both are "started"):
+- Remove the dependency from the import
+- Rationale: This typically represents work moving to review phase, which we don't model yet
+
+#### 11.4.5 Deduplication on Update
+
+When syncing/updating:
+- Match issues by `(server_url, issue_key)` tuple
+- If task with matching `jira_reference` exists:
+  - Update fields (summary→title, description, issue_type, etc.)
+  - Update completion status
+  - Update dependencies (respecting the "both started" rule)
+- If no match: create new task
+
+### 11.5 Duration Distribution Fitting
+
+#### 11.5.1 Historical Data Collection
+
+**Data Source**: All completed issues in the project containing the epic
+
+**Completion Criteria**: `resolution.name` in:
+- "Complete"
+- "Fixed"
+- "Not a bug"
+- "Done"
+- "Cannot Reproduce"
+
+**Data Recorded Per Issue**:
+```python
+(
+    original_estimate_seconds,  # or None
+    worker_jira_id,
+    issue_type,
+    total_logged_time_seconds,  # or None
+)
+```
+
+**Multi-worker Issues**: If multiple workers logged time on an issue, create one entry per worker, each with the total logged time. This is intentionally duplicative for initial implementation.
+
+**Incremental Sync**: Track `last_history_sync` per project. On subsequent syncs, query only issues with `updated >= last_sync_date`.
+
+#### 11.5.2 Bin-Based Distribution Fitting (MVP Algorithm)
+
+**Step 1: Fallback Distribution**
+- Collect all `total_logged_time_seconds` values from completed issues
+- Fit a shifted lognormal distribution to this data
+- Use as fallback when original estimate is missing
+
+**Step 2: Estimate-Based Binning**
+- Minimum samples per bin: X = 30
+- Work in log-space for all binning operations
+
+**Algorithm**:
+1. Sort all completed issues by `log(original_estimate_seconds)`
+2. For each unique original estimate value E:
+   a. Create initial symmetric bin (in log-space) around E, wide enough to contain X or more samples
+   b. Set lower bound = midpoint between lowest included sample and next lower excluded sample
+   c. Set upper bound = midpoint between highest included sample and next higher excluded sample
+   d. Lowest bins (containing the minimum estimate) have lower bound = 0
+   e. Highest bins (containing the maximum estimate) have upper bound = ∞
+3. If total samples < X, create single bin covering all data
+4. Fit shifted lognormal to `total_logged_time_seconds` within each bin
+
+**At Simulation Time**:
+- Run algorithm
+- For task with original estimate E:
+  - Find bin whose center is closest to E
+  - Sample from that bin's fitted lognormal distribution
+- For task with no original estimate:
+  - Sample from fallback distribution
+
+#### 11.5.3 Future: Improved Bayesian Model (Design Notes)
+
+Use PyMC with a Bayesian Hierarchical model:
+
+log(duration) ~ Normal(μ, σ)
+
+μ = α_base + α_worker[w] + α_task_type[t] + f(log(estimate))
+σ = σ_base + σ_worker[w] + σ_task_type[t] + g(log(estimate))
+
+Where f and g are linear or spline functions (we can see what makes sense when we get to this phase and we know what the data distribution looks like.) And the α and σ terms are random variables.
+
+**Input Features**:
+- One-hot encoded issue type
+- One-hot encoded worker ID
+- log(original_estimate)
+
+**Output**: log(total_logged_time)
+
+Implement using PyMC (latest version). Use standard Bayesian operations to deal with missingness.
+
+*Benefits*
+Better handling of sparse data. Predictions better model the distribution.
+
+
+### 11.6 Worker Import
+
+#### 11.6.1 Import Criteria
+
+We import all workers who have logged time or been assigned an issue in the project we import from.
+
+If a worker logged work on an epic, add the worker to the default_workers list for the epic.
+
+At the beginning of a simulation, all tickets without an explicit `allowed_workers` list will be assigned
+the union of the `default_workers` sets from their ancestors as the `allowed_workers` list.
+
+TODO: This information belongs in the simulation.
+
+#### 11.6.2 Productivity Calculation
+
+**Days Counted**: Only days on which the worker logged at least one worklog entry on any issue in any epic within the current `.fluxx` model.
+
+**Calculation**:
+1. For each day the worker logged work:
+   - Sum all time logged that day (across all issues in imported epics)
+2. `hours_per_workday` = average of daily logged hours
+
+If the worker logged no work, assign them the average of all daily logged hours for all workers. It's not a good estimate (they are clearly from a different distribution), but it gives us a number to stick in the box.
+
+**Deduplication**: Match workers by `jira_account_id`. Update existing worker's productivity on sync.
+
+### 11.7 Task Completion Mapping
+
+#### 11.7.1 Not Started
+
+A task is "not started" if:
+- No worklog entries exist
+
+**Assignee Handling**:
+- If issue has an assignee but no work logged:
+  - Set `allowed_workers` to only that assignee (constraint, not started status)
+
+#### 11.7.2 Started
+
+A task is "started" if:
+- Has worklog entries
+- Resolution is not set (or not in completed list)
+
+**Mapping**:
+```python
+StartedCompletion(
+    assignee=jira_assignee_field or author_with_most_worklogs,
+    start_time=first_worklog_date,
+    hours_logged=sum(worklog.timeSpentSeconds) / 3600,
+)
+```
+
+#### 11.7.3 Done
+
+A task is "done" if:
+- Has a completed resolution
+
+**With Work Logged**:
+```python
+DoneCompletion(
+    assignee=jira_assignee_field if present else author_with_most_worklogs,
+    start_time=first_worklog_date,
+    hours_logged=sum(worklog.timeSpentSeconds) / 3600,
+    end_time=last_worklog_date,
+)
+```
+
+**Without Work Logged** (closed with no work):
+```python
+DoneCompletion(
+    assignee=assignee or first_available_worker,
+    start_time=issue_created_date,  # Best approximation
+    hours_logged=1e-6,  # See Section 11.7.4
+    end_time=resolution_date,
+)
+```
+
+#### 11.7.4 Zero-Work Completed Tasks
+
+**Issue**: Tasks closed without logged work need a `hours_logged` value.
+
+**Investigation Required**: Before implementation, analyze whether `NaN` could be used safely:
+- Check all calculations that use `hours_logged`
+- Verify NaN propagation doesn't break simulation
+- Document findings
+
+**Initial Approach**: Use `1e-6` (effectively zero but numeric) until investigation complete.
+
+### 11.8 Linking Existing Tasks to Jira
+
+Users can link a manually-created task to a Jira issue after the fact:
+
+**UI Flow**:
+1. In Task Editor, there is a Jira Issue field. Displays <enter issue key> prompt when `jira_reference` is None.
+   You can edit it when it has been set.
+2. On loss of focus, system validates:
+   - Issue exists on configured server - if not, displays a warning and returns the field to its previous value.
+   - Displays issue summary for confirmation
+3. On confirm:
+   - Sets `jira_reference`
+   - Imports issue details (title, description, etc.)
+   - On next "Update from Jira", task will be synced
+
+### 11.9 "Become Child Of" Feature
+
+A general-purpose feature to reparent any task (not just Jira-imported ones).
+
+#### 11.9.1 UI
+
+**Location**: Task Editor panel, button labeled "Become Child Of..."
+
+**Flow**:
+1. Click button
+2. Enter select-task-node mode (similar to dependency selection)
+3. Select target parent task
+4. System validates and executes reparenting
+
+#### 11.9.2 Validation
+
+**Automatic Changes**:
+- Remove existing parent-child dependencies (from old parent, if any)
+- Add new parent-child dependencies:
+  - `child.start >= new_parent.start`
+  - `new_parent.end >= child.end`
+- If new parent was a leaf task, convert it to parent (remove duration distribution)
+
+**Conflict Detection**:
+Check if existing explicit dependencies conflict with new parent-child relationship:
+- Would create a cycle
+- Violate temporal constraints
+
+**On Conflict**:
+- Display dialog listing conflicting dependencies
+- "The following dependencies conflict with making this task a child of {parent}:"
+  - List each conflict with explanation
+- Ensure task is now unchanged.
+- The user must manually resolve conflicts via the rest of the UI.
+
+### 11.10 Menu Structure
+
+```
+File
+├── ...
+├── ───────────
+├── Import from Jira...
+├── Update from Jira        (enabled when jira_config exists)
+├── ───────────
+├── ...
+```
+
+### 11.11 Error Handling
+
+**Authentication Errors**:
+- Token not found: "Personal access token not found at {path}. Please create the file with your Jira PAT."
+- Token invalid: "Authentication failed. Please verify your personal access token at {path}."
+
+**Network Errors**:
+- Retry with exponential backoff (max 10 minutes)
+- After max retries: "Failed to connect to Jira after multiple attempts. Check your network connection."
+- The user can abort early in the progress bar display.
+
+**Rate Limiting (429 responses)**:
+- Honor `Retry-After` header if present
+- Otherwise use exponential backoff
+
+**Issue Not Found**:
+- "Issue {key} not found on {server}. Please verify the issue key."
+
+### 11.12 Implementation Notes
+
+**Dependencies**:
+- `requests` - HTTP client (already used)
+- `requests_ratelimiter` - Rate limiting
+- `tenacity` or custom - Retry logic with exponential backoff
+
+**Code Organization**:
+```
+fluxx/
+├── jira/
+│   ├── __init__.py
+│   ├── client.py      # Jira REST API client with rate limiting
+│   ├── auth.py        # Token management (factored from jql.py)
+│   ├── import.py      # Epic import logic
+│   ├── sync.py        # Update/sync logic
+│   ├── mapping.py     # Jira → Project Fluxx data mapping
+│   └── distributions.py  # Bin-based distribution fitting
+```
+
+**Testing**:
+- Mock Jira API responses for unit tests
+- Integration tests against test Jira instance (optional, manual)
+
+## 12. Future Improvements
 
 These features are planned but not part of the initial implementation:
 
-### 11.1 Jira Integration
+### 12.1 Jira Integration Enhancements
 
-- Use past performance to constrain variance of task lengths
-- Allow Jira plan updates as project plan updates
-- Update timeline as tasks finish
-- Discover new tasks from Jira
-- Estimate costs of adding new tasks using history
-- Associate tasks/branches with Jira issues
-- Store metadata that doesn't map to Jira fields in attachments
+#### 12.1.1 Configurable Resolution Names
+- Allow user to configure which resolution names indicate completion
+- Current hardcoded list: "Complete", "Fixed", "Not a bug", "Done", "Cannot Reproduce"
 
-### 11.2 Enhanced Task Features
+#### 12.1.2 Configurable Dependency Link Types
+- Allow user to configure which Jira link types map to dependencies
+- Current hardcoded list: "depends on"/"depended on by", "schedule after"/"schedule before"
+
+#### 12.1.3 Configurable Custom Fields
+- Allow mapping of custom field IDs for:
+  - Story Points (currently `customfield_10473`)
+  - Any additional fields that may be useful
+
+#### 12.1.4 Strategic Releases and Initiatives
+- Support for "Strategic Releases" (parents of epics) from Jira Portfolio Plan
+- Support for "Initiatives" (parents of strategic releases)
+- Full hierarchy: Initiative → Strategic Release → Epic → Story/Task → Subtask
+  (the "parent of"/"child of" links allow unlimited nesting)
+
+#### 12.1.5 Multiple Server Support
+- Allow a single `.fluxx` file to reference multiple Jira servers
+- Migration path from single-server model
+
+#### 12.1.6 Hierarchical Bayesian Duration Model
+- Replace bin-based fitting with Hierarchical Bayesian Duration Model
+- See design notes in section 11.5.3
+
+#### 12.1.7 Enhanced Duration Estimation with In-Progress Data
+- Include remaining estimate and/or total time logged for non-completed tasks in model
+- Reduces need for rejection sampling during simulation and more accurately reflects knowledge
+
+#### 12.1.8 Worker Productivity Distribution
+- Replace single `hours_per_workday` with a distribution
+- Derive from historical worklog patterns per worker
+- Account for variability in daily productivity
+
+#### 12.1.9 Review Phase Modeling
+- Model the "under review" phase for tasks.
+- Better model the actual workflow for many issues.
+- Better utilizes when both a reviewer and a developer log time on a task.
+- Better handling of dependencies when both tasks are in progress
+
+#### 12.1.10 Multi-Worker Issue Handling
+- More sophisticated handling when multiple workers log time on an issue
+- Currently: duplicates entry for each worker with total time
+
+### 12.2 Enhanced Task Features
 
 - Review time and potential reviewers
 - Worker affinities (different workers take different amounts of time)
 
-### 11.3 Calendar Enhancements
+### 12.3 Calendar Enhancements
 
 - Holidays
 - Vacations
 - Sick days
 - Custom work schedules
 
-### 11.4 Enhanced Sampling
+### 12.4 Enhanced Sampling
 
 - Sample until all possible worlds happen at least K times
 - Use pymc for sampling (enables oversampling rare worlds while keeping probabilities correct)
 
-### 11.5 Visualization Enhancements
+### 12.5 Visualization Enhancements
 
 - Interactive hiding/showing of sub-tasks in Gantt charts
 - Additional visualization types
 
-## 12. Glossary
+## 13. Glossary
 
 **DAG**: Directed Acyclic Graph - the structure of tasks and branches with dependencies
 
