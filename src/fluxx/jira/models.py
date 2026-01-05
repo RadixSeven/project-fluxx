@@ -159,8 +159,14 @@ class JiraConfig(BaseModel):
 
     Attributes:
         server_url: Base URL of the Jira server
+        server_timezone: IANA timezone name for the server (e.g., 'America/New_York').
+            Used as fallback when datetime strings lack timezone information.
         sync_metadata: Synchronization metadata for this server
     """
 
     server_url: str = Field(description="Jira server base URL")
+    server_timezone: str = Field(
+        default="UTC",
+        description="IANA timezone name for fallback datetime parsing",
+    )
     sync_metadata: JiraSyncMetadata = Field(description="Sync state for this server")
