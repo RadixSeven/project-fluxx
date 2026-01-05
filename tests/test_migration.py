@@ -10,6 +10,7 @@ from fluxx.data.migration import (
     MigrationError,
     _migrate_task_completion,
     migrate_1_0_to_1_1,
+    migrate_1_1_to_1_2,
     migrate_project_data,
 )
 
@@ -234,3 +235,91 @@ class TestMigrateTaskCompletion:
         _migrate_task_completion(task, migration_time, {})
 
         assert task["completion"] == {"status": "not_started"}
+
+
+class TestMigrateV11ToV12:
+    """Tests for migrate_1_1_to_1_2 function."""
+
+    def test_updates_version(self) -> None:
+        """Migration updates version to 1.2."""
+        json_data: JsonObject = {
+            "version": "1.1",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_1_to_1_2(json_data)
+        assert result["version"] == "1.2"
+
+    def test_preserves_existing_data(self) -> None:
+        """Migration preserves existing project data."""
+        json_data: JsonObject = {
+            "version": "1.1",
+            "metadata": {"name": "Test Project"},
+            "workers": [{"id": "w1", "name": "Alice", "hours_per_workday": 8.0}],
+            "persistent_tasks": {
+                "p1": {
+                    "id": "p1",
+                    "versions": {
+                        "v1": {
+                            "id": "t1",
+                            "title": "Task",
+                            "description": "Test",
+                            "completion": {"status": "not_started"},
+                        }
+                    },
+                }
+            },
+        }
+        result = migrate_1_1_to_1_2(json_data)
+
+        # Data should be preserved
+        assert result["metadata"] == {"name": "Test Project"}
+        workers = result["workers"]
+        assert isinstance(workers, list)
+        assert len(workers) == 1
+        persistent_tasks = result["persistent_tasks"]
+        assert isinstance(persistent_tasks, dict)
+        assert "p1" in persistent_tasks
+
+    def test_migrate_from_1_1_to_current(self) -> None:
+        """Migrating from 1.1 should update to current version."""
+        json_data: JsonObject = {
+            "version": "1.1",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_project_data(json_data)
+        assert result["version"] == CURRENT_VERSION
+
+    def test_migrate_chain_1_0_to_current(self) -> None:
+        """Migrating from 1.0 should chain through 1.1 to current."""
+        json_data: JsonObject = {
+            "version": "1.0",
+            "workers": [],
+            "persistent_tasks": {
+                "p1": {
+                    "id": "p1",
+                    "versions": {
+                        "v1": {
+                            "id": "t1",
+                            "title": "Task",
+                            "description": "Test",
+                            "actual_start_time": "2024-01-15T10:00:00+00:00",
+                            "actual_assignee": "w1",
+                        }
+                    },
+                }
+            },
+        }
+        result = migrate_project_data(json_data)
+        assert result["version"] == CURRENT_VERSION
+        # Should have completion from 1.0->1.1 migration
+        persistent_tasks = result["persistent_tasks"]
+        assert isinstance(persistent_tasks, dict)
+        p1 = persistent_tasks["p1"]
+        assert isinstance(p1, dict)
+        versions = p1["versions"]
+        assert isinstance(versions, dict)
+        task = versions["v1"]
+        assert isinstance(task, dict)
+        assert "completion" in task

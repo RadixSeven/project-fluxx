@@ -8,10 +8,10 @@ from datetime import UTC, datetime, timedelta
 from fluxx.data.json_types import JsonObject
 
 # Current version of the file format
-CURRENT_VERSION = "1.1"
+CURRENT_VERSION = "1.2"
 
 # Versions we can migrate from
-SUPPORTED_VERSIONS = ["1.0", "1.1"]
+SUPPORTED_VERSIONS = ["1.0", "1.1", "1.2"]
 
 
 class MigrationError(Exception):
@@ -43,6 +43,10 @@ def migrate_project_data(json_data: JsonObject) -> JsonObject:
     # Apply migrations in sequence
     if version == "1.0":
         json_data = migrate_1_0_to_1_1(json_data)
+        version = "1.1"  # Update version for next migration in chain
+
+    if version == "1.1":
+        json_data = migrate_1_1_to_1_2(json_data)
 
     return json_data
 
@@ -158,3 +162,27 @@ def _migrate_task_completion(
     else:
         # Fallback for invalid duration type
         task["completion"] = {"status": "not_started"}
+
+
+def migrate_1_1_to_1_2(json_data: JsonObject) -> JsonObject:
+    """Migrate from version 1.1 to 1.2.
+
+    Changes:
+    - Adds jira_config field to Project (optional, defaults to None)
+    - Task model gets jira_reference and jira_issue_type fields (optional, default None)
+    - Worker model gets jira_account_id field (optional, default None)
+    - Task.duration_distribution now supports JiraDurationDistribution
+
+    All new fields have default values of None, so no data transformation is needed.
+    This migration only updates the version number.
+
+    Args:
+        json_data: Project data in version 1.1 format
+
+    Returns:
+        Project data in version 1.2 format
+    """
+    # Update version
+    json_data["version"] = "1.2"
+
+    return json_data

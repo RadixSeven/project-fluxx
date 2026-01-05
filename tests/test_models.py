@@ -516,7 +516,7 @@ def test_project_creation() -> None:
         metadata=metadata,
         dag=dag,
     )
-    assert project.version == "1.1"
+    assert project.version == "1.2"
     assert project.metadata.name == "Test Project"
     assert len(project.workers) == 0
     assert len(project.simulations) == 0
@@ -664,3 +664,291 @@ def test_extract_node_id_with_all_none(monkeypatch: pytest.MonkeyPatch) -> None:
     task_id = TaskId("t1")
     with pytest.raises(ValueError, match="Forgot to add branch"):
         models.extract_node_id(task_id)
+
+
+# Jira integration tests
+
+
+class TestTaskJiraFields:
+    """Tests for Jira-related fields on Task model."""
+
+    def test_task_with_jira_reference_serializes(self) -> None:
+        """Test that task with jira_reference serializes correctly."""
+        from fluxx.jira.models import JiraIssueKey, JiraReference
+
+        jira_ref = JiraReference(
+            server_url="https://jira.example.com",
+            issue_key=JiraIssueKey(project_key="FHIR", issue_number=1234),
+        )
+        task = Task(
+            id=TaskId("t1"),
+            title="Test Task",
+            description="Description",
+            jira_reference=jira_ref,
+            jira_issue_type="Story",
+        )
+        data = task.model_dump()
+        assert "jira_reference" in data
+        assert data["jira_reference"]["server_url"] == "https://jira.example.com"
+        assert data["jira_reference"]["issue_key"]["project_key"] == "FHIR"
+        assert data["jira_reference"]["issue_key"]["issue_number"] == 1234
+        assert data["jira_issue_type"] == "Story"
+
+    def test_task_without_jira_reference_allowed(self) -> None:
+        """Test that task without jira_reference is valid."""
+        task = Task(
+            id=TaskId("t1"),
+            title="Test Task",
+            description="Description",
+        )
+        assert task.jira_reference is None
+        assert task.jira_issue_type is None
+
+    def test_task_jira_reference_deserialization(self) -> None:
+        """Test deserializing task with jira_reference."""
+        data = {
+            "id": "t1",
+            "title": "Test Task",
+            "description": "Description",
+            "jira_reference": {
+                "server_url": "https://jira.example.com",
+                "issue_key": {"project_key": "TEST", "issue_number": 42},
+            },
+            "jira_issue_type": "Bug",
+        }
+        task = Task.model_validate(data)
+        assert task.jira_reference is not None
+        assert task.jira_reference.server_url == "https://jira.example.com"
+        assert task.jira_reference.issue_key.project_key == "TEST"
+        assert task.jira_reference.issue_key.issue_number == 42
+        assert task.jira_issue_type == "Bug"
+
+    def test_task_jira_issue_type_without_reference(self) -> None:
+        """Test that jira_issue_type can be set without jira_reference."""
+        task = Task(
+            id=TaskId("t1"),
+            title="Test Task",
+            description="Description",
+            jira_issue_type="Epic",
+        )
+        assert task.jira_reference is None
+        assert task.jira_issue_type == "Epic"
+
+
+class TestWorkerJiraFields:
+    """Tests for Jira-related fields on Worker model."""
+
+    def test_worker_with_jira_account_id(self) -> None:
+        """Test worker with jira_account_id."""
+        worker = Worker(
+            id=WorkerId("w1"),
+            name="Alice",
+            worker_id="alice_1",
+            hours_per_workday=8.0,
+            jira_account_id="alice123",
+        )
+        assert worker.jira_account_id == "alice123"
+
+    def test_worker_jira_account_id_defaults_none(self) -> None:
+        """Test that jira_account_id defaults to None."""
+        worker = Worker(
+            id=WorkerId("w1"),
+            name="Bob",
+            worker_id="bob_1",
+            hours_per_workday=8.0,
+        )
+        assert worker.jira_account_id is None
+
+    def test_worker_jira_account_id_serialization(self) -> None:
+        """Test serialization of worker with jira_account_id."""
+        worker = Worker(
+            id=WorkerId("w1"),
+            name="Charlie",
+            worker_id="charlie_1",
+            hours_per_workday=6.0,
+            jira_account_id="charlie_jira",
+        )
+        data = worker.model_dump()
+        assert data["jira_account_id"] == "charlie_jira"
+
+    def test_worker_jira_account_id_deserialization(self) -> None:
+        """Test deserialization of worker with jira_account_id."""
+        data = {
+            "id": "w1",
+            "name": "Diana",
+            "worker_id": "diana_1",
+            "hours_per_workday": 7.5,
+            "jira_account_id": "diana_jira_id",
+        }
+        worker = Worker.model_validate(data)
+        assert worker.jira_account_id == "diana_jira_id"
+
+
+class TestJiraDurationDistribution:
+    """Tests for JiraDurationDistribution model."""
+
+    def test_jira_duration_distribution_is_duration_distribution(self) -> None:
+        """Test that JiraDurationDistribution is a DurationDistribution."""
+        from fluxx.data.models import JiraDurationDistribution
+
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+        # Should be a valid DurationDistribution subclass
+        assert hasattr(dist, "original_estimate_seconds")
+
+    def test_jira_duration_distribution_all_optional(self) -> None:
+        """Test that all fields are optional."""
+        from fluxx.data.models import JiraDurationDistribution
+
+        dist = JiraDurationDistribution()
+        assert dist.original_estimate_seconds is None
+        assert dist.story_points is None
+        assert dist.remaining_estimate_seconds is None
+
+    def test_jira_duration_distribution_with_all_fields(self) -> None:
+        """Test with all fields populated."""
+        from fluxx.data.models import JiraDurationDistribution
+
+        dist = JiraDurationDistribution(
+            original_estimate_seconds=28800,  # 8 hours
+            story_points=5.0,
+            remaining_estimate_seconds=14400,  # 4 hours
+        )
+        assert dist.original_estimate_seconds == 28800
+        assert dist.story_points == 5.0
+        assert dist.remaining_estimate_seconds == 14400
+
+    def test_jira_duration_distribution_serialization(self) -> None:
+        """Test JSON serialization."""
+        from fluxx.data.models import JiraDurationDistribution
+
+        dist = JiraDurationDistribution(
+            original_estimate_seconds=3600,
+            story_points=3.0,
+        )
+        data = dist.model_dump()
+        assert data["original_estimate_seconds"] == 3600
+        assert data["story_points"] == 3.0
+        assert data["remaining_estimate_seconds"] is None
+
+    def test_jira_duration_distribution_deserialization(self) -> None:
+        """Test JSON deserialization."""
+        from fluxx.data.models import JiraDurationDistribution
+
+        data = {
+            "original_estimate_seconds": 7200,
+            "story_points": 2.0,
+            "remaining_estimate_seconds": 3600,
+        }
+        dist = JiraDurationDistribution.model_validate(data)
+        assert dist.original_estimate_seconds == 7200
+        assert dist.story_points == 2.0
+        assert dist.remaining_estimate_seconds == 3600
+
+    def test_task_with_jira_duration_distribution(self) -> None:
+        """Test that Task can have JiraDurationDistribution."""
+        from fluxx.data.models import JiraDurationDistribution
+
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+        task = Task(
+            id=TaskId("t1"),
+            title="Test Task",
+            description="Description",
+            duration_distribution=dist,
+        )
+        assert task.duration_distribution is not None
+        assert isinstance(task.duration_distribution, JiraDurationDistribution)
+        assert task.duration_distribution.original_estimate_seconds == 3600
+
+
+class TestProjectJiraConfig:
+    """Tests for jira_config field on Project model."""
+
+    def test_project_jira_config_defaults_none(self) -> None:
+        """Test that jira_config defaults to None."""
+        now = datetime.now(UTC)
+        metadata = ProjectMetadata(
+            name="Test Project",
+            created=now,
+            last_modified=now,
+        )
+        dag = DAG(id=DAGId("dag1"), current_version_id=DAGVersionId("v1"))
+        project = Project(
+            metadata=metadata,
+            dag=dag,
+        )
+        assert project.jira_config is None
+
+    def test_project_with_jira_config(self) -> None:
+        """Test project with jira_config."""
+        from fluxx.jira.models import (
+            JiraConfig,
+            JiraDurationHistoryEntry,
+            JiraIssueKey,
+            JiraSyncMetadata,
+        )
+
+        now = datetime.now(UTC)
+        metadata = ProjectMetadata(
+            name="Test Project",
+            created=now,
+            last_modified=now,
+        )
+        dag = DAG(id=DAGId("dag1"), current_version_id=DAGVersionId("v1"))
+
+        # Create a JiraConfig with sync metadata
+        history_entry = JiraDurationHistoryEntry(
+            server_url="https://jira.example.com",
+            issue_key=JiraIssueKey(project_key="FHIR", issue_number=100),
+            issue_type="Story",
+            original_estimate_seconds=28800,
+        )
+        sync_metadata = JiraSyncMetadata(
+            server_url="https://jira.example.com",
+            last_history_sync=now,
+            history_entries=[history_entry],
+        )
+        jira_config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=sync_metadata,
+        )
+
+        project = Project(
+            metadata=metadata,
+            dag=dag,
+            jira_config=jira_config,
+        )
+        assert project.jira_config is not None
+        assert project.jira_config.server_url == "https://jira.example.com"
+        assert len(project.jira_config.sync_metadata.history_entries) == 1
+
+    def test_project_jira_config_serialization(self) -> None:
+        """Test serialization of project with jira_config."""
+        from fluxx.jira.models import (
+            JiraConfig,
+            JiraSyncMetadata,
+        )
+
+        now = datetime.now(UTC)
+        metadata = ProjectMetadata(
+            name="Test Project",
+            created=now,
+            last_modified=now,
+        )
+        dag = DAG(id=DAGId("dag1"), current_version_id=DAGVersionId("v1"))
+        sync_metadata = JiraSyncMetadata(
+            server_url="https://jira.example.com",
+            last_history_sync=now,
+            history_entries=[],
+        )
+        jira_config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=sync_metadata,
+        )
+        project = Project(
+            metadata=metadata,
+            dag=dag,
+            jira_config=jira_config,
+        )
+        data = project.model_dump(mode="json")
+        assert "jira_config" in data
+        assert data["jira_config"]["server_url"] == "https://jira.example.com"

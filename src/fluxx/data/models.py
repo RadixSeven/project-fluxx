@@ -19,6 +19,7 @@ from pydantic import (
 )
 
 from fluxx.data.json_types import JsonObject
+from fluxx.jira.models import JiraConfig, JiraReference
 
 # Type definitions for IDs to provide semantic meaning
 
@@ -223,6 +224,30 @@ class Triangular(DurationDistribution):
         return self
 
 
+class JiraDurationDistribution(DurationDistribution):
+    """Duration distribution for Jira-imported tasks.
+
+    Stores Jira-specific parameters that are used to condition the sampling
+    from a bin-based distribution model. The actual sampling is deferred to
+    the simulation engine which uses a BinBasedDistributionModel.
+
+    All fields are optional since Jira data may not include these values.
+    """
+
+    original_estimate_seconds: int | None = Field(
+        default=None,
+        description="Original estimate from Jira in seconds",
+    )
+    story_points: float | None = Field(
+        default=None,
+        description="Story points assigned to the issue",
+    )
+    remaining_estimate_seconds: int | None = Field(
+        default=None,
+        description="Remaining estimate from Jira in seconds",
+    )
+
+
 class Worker(BaseModel):
     """Worker in the project."""
 
@@ -233,6 +258,12 @@ class Worker(BaseModel):
     )
     description: str | None = Field(default=None, description="Worker description")
     hours_per_workday: float = Field(description="Hours worker completes per workday")
+
+    # Jira integration
+    jira_account_id: str | None = Field(
+        default=None,
+        description="Jira account ID for mapping worklogs to this worker",
+    )
 
 
 # Enums and supporting classes
@@ -397,7 +428,9 @@ class Task(BaseModel):
     )
 
     # Duration distribution (for leaf tasks only)
-    duration_distribution: Triangular | ShiftedLognormal | None = Field(
+    duration_distribution: (
+        Triangular | ShiftedLognormal | JiraDurationDistribution | None
+    ) = Field(
         default=None,
         description="Duration distribution for leaf tasks (work-hours)",
     )
@@ -439,6 +472,16 @@ class Task(BaseModel):
     completion: TaskCompletion = Field(
         default_factory=NotStartedCompletion,
         description="Task completion state",
+    )
+
+    # Jira integration
+    jira_reference: JiraReference | None = Field(
+        default=None,
+        description="Reference to linked Jira issue (server URL + issue key)",
+    )
+    jira_issue_type: str | None = Field(
+        default=None,
+        description="Jira issue type (e.g., 'Epic', 'Story', 'Bug', 'Task')",
     )
 
     def get_allowed_worker_ids(self, all_workers: list[WorkerId]) -> list[WorkerId]:
@@ -653,7 +696,7 @@ class ProjectMetadata(BaseModel):
 class Project(BaseModel):
     """Top-level project container."""
 
-    version: str = Field(default="1.1", description="File format version")
+    version: str = Field(default="1.2", description="File format version")
     metadata: ProjectMetadata = Field(description="Project metadata")
 
     # Core data
@@ -681,4 +724,9 @@ class Project(BaseModel):
     # Simulations
     simulations: list[Simulation] = Field(
         default_factory=list, description="All simulations for this project"
+    )
+
+    # Jira integration
+    jira_config: JiraConfig | None = Field(
+        default=None, description="Jira integration configuration"
     )
