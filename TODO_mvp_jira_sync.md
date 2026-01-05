@@ -13,20 +13,16 @@ This plan implements the Jira integration specified in Section 11 of `project_fl
 
 ## Phase 0: Investigation & Preparation
 
-### 0.1 NaN Investigation for Zero-Work Tasks
+### 0.1 NaN Investigation for Zero-Work Tasks ✓ COMPLETE
 **Goal**: Determine if `hours_logged=NaN` is safe for completed tasks with no work logged.
 
-**Steps**:
-1. Grep codebase for all uses of `hours_logged`
-2. Trace through simulation engine to see how `hours_logged` affects:
-   - Rejection sampling (duration must be >= hours_logged)
-   - Any arithmetic operations
-   - Serialization/deserialization
-3. Check if `float('nan')` comparisons behave correctly (NaN < x is always False)
-4. Document findings
-5. **Decision point**: Use NaN or stick with 1e-6
+**Decision**: Use `1e-6`, NOT NaN.
 
-**Output**: Update spec Section 11.7.4 with findings; proceed with chosen approach.
+**Findings** (see spec Section 11.7.4 for details):
+- NaN bypasses Pydantic validation (`v <= 0` is False for NaN)
+- NaN causes rejection sampling to exhaust max_attempts (1000 iterations)
+- NaN propagates through arithmetic, corrupting simulation results
+- NaN produces non-standard JSON output
 
 ### 0.2 Factor Out Auth Module from `jql.py`
 **TDD**: Yes
@@ -366,7 +362,7 @@ def test_extract_completion_done_with_work_logged():
 def test_extract_completion_done_without_work_uses_resolution_date():
     issue = JiraIssueResponse(...)  # worklogs=[], resolution="Done"
     completion = extract_completion(issue, workers)
-    assert completion.hours_logged == 1e-6  # Or NaN per investigation
+    assert completion.hours_logged == 1e-6  # Epsilon for zero-work tasks
     assert completion.end_time == resolution_date
 
 def test_extract_completion_uses_assignee_or_most_worklogs():

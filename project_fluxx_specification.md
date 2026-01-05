@@ -1564,12 +1564,18 @@ DoneCompletion(
 
 **Issue**: Tasks closed without logged work need a `hours_logged` value.
 
-**Investigation Required**: Before implementation, analyze whether `NaN` could be used safely:
-- Check all calculations that use `hours_logged`
-- Verify NaN propagation doesn't break simulation
-- Document findings
+**Investigation Results** (NaN is NOT safe):
+- **Validation bypass**: `hours_logged` validators use `v <= 0` comparisons. Since NaN comparisons always return False, NaN passes validation incorrectly.
+- **Rejection sampling failure**: The simulation uses `sample >= hours_logged` for rejection sampling. With NaN, this comparison is always False, causing the loop to exhaust `max_attempts` (1000 iterations) and fall back to exponential approximation.
+- **Arithmetic corruption**: The fallback returns `min_value + tail_sample` which propagates NaN. Subsequently, `total_duration - elapsed_hours` yields NaN, corrupting the entire simulation.
+- **Non-compliant JSON**: Python's `json.dump` outputs `NaN` by default, but this is a non-standard extension. External JSON tools may fail to parse such files.
 
-**Initial Approach**: Use `1e-6` (effectively zero but numeric) until investigation complete.
+**Decision**: Use `1e-6` (epsilon) for completed tasks with no logged work:
+- Passes positive validation correctly
+- Rejection sampling works normally (any sample >= 1e-6, which is essentially all samples)
+- Clean arithmetic behavior
+- Valid JSON output
+- Semantically represents "essentially zero work logged"
 
 ### 11.8 Linking Existing Tasks to Jira
 
