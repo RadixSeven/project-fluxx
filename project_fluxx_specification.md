@@ -78,12 +78,12 @@ Task {
   }
 
   # Worker constraints
-  default_workers: optional list of worker ids  # If set, descendants inherit this as their
-                                                # allowed_workers unless overridden (see Section 7.2).
-                                                # Empty/absent means inherit from parent (or all workers
-                                                # for root tasks). On file format upgrade, leave empty.
-  allowed_workers: optional list of worker ids  # If absent, inherited from nearest ancestor's
-                                                # default_workers (see Section 7.2)
+  allowed_workers: optional list of worker ids  # Dual semantics based on task type:
+                                                # - Parent tasks: defines the worker pool inherited by
+                                                #   descendants (unless they override with their own list)
+                                                # - Leaf tasks: the actual constraint on assignable workers
+                                                # If absent, inherited from nearest ancestor with a list set,
+                                                # or all workers if no ancestor has one (see Section 7.2).
   excluded_worker_tasks: list of task ids whose assignees cannot be assigned to this task
 
   # Completion tracking (see Section 3.1.1)
@@ -635,14 +635,14 @@ Located above the DAG view, contains:
 - **Add Dependency** button
 
 **Worker Constraints Section**:
-- **Default Workers** (for parent tasks):
-  - Defines the worker pool inherited by descendants without explicit `allowed_workers` (see Section 7.2)
-  - If empty: "Inheriting from parent" (or "All workers" for root tasks)
-  - If populated: List with + button to add, trashcan to remove
-  - Tooltip: "Workers in this list are available to all subtasks unless overridden"
 - **Allowed Workers**:
-  - If empty: "All workers allowed. [Click to add reduced list of allowed workers]"
-  - If populated: List with + button to add, trashcan to remove
+  - Unified field with dual semantics (see Section 7.2):
+    - For parent tasks: defines the worker pool inherited by descendants
+    - For leaf tasks: the actual constraint on who can be assigned
+  - Display states:
+    - If empty and no ancestor has a list: "All workers (click to restrict)"
+    - If empty and ancestor has a list: "Inherited from {ancestor name}: {worker list}" (read-only display, click to override)
+    - If populated: Editable list with + button to add, trashcan to remove
 - **Excluded Assignees**:
   - List of tasks whose assignees cannot be assigned here
   - **Add Task** button enters "select-task-node mode" (see Section 5.3.4)
@@ -897,14 +897,16 @@ Tasks can depend on one or more branch possible worlds:
   - Must be in allowed workers list (if specified)
   - Cannot be assignee of excluded tasks
 
-**Default Workers Resolution** (computed ephemerally at simulation start):
-- Each task has an optional `default_workers` list and an optional `allowed_workers` list
+**Allowed Workers Resolution** (computed ephemerally at simulation start):
+- Each task has an optional `allowed_workers` list with unified semantics:
+  - For parent tasks: defines the worker pool inherited by descendants
+  - For leaf tasks: the actual constraint on who can be assigned
 - For tasks without an explicit `allowed_workers` list, the effective allowed workers are determined by walking up the ancestor chain:
-  - Find the nearest ancestor with a `default_workers` list set
-  - Use that list as the effective `allowed_workers` for this task
-  - If no ancestor has `default_workers` set, all workers are allowed
+  - Find the nearest ancestor with an `allowed_workers` list set
+  - Use that list as the effective allowed workers for this task
+  - If no ancestor has a list set, all workers are allowed
 - This resolution happens once at simulation start; the computed values are not stored on the Task
-- Note: A task's `default_workers` list defines the pool for its descendants, not for itself
+- On sync/update from Jira: workers are added to `allowed_workers` but never removed, preserving manually-added workers
 
 **Tasks in Progress**:
 - A task with `StartedCompletion` is in progress
@@ -1473,13 +1475,13 @@ Better handling of sparse data. Predictions better model the distribution.
 
 We import all workers who have logged time or been assigned an issue in the project we import from.
 
-**Default Workers List Population**:
-- If a worker logged work on an epic, add the worker to the `default_workers` list for the epic task
-- A task's `default_workers` list replaces (not unions with) its ancestors' lists for descendant tasks (see Section 7.2 for resolution semantics)
-- On sync/update: workers are added to `default_workers` but never removed
+**Allowed Workers List Population**:
+- If a worker logged work on an epic, add the worker to the `allowed_workers` list for the epic task
+- The epic's `allowed_workers` list is inherited by all its descendants (unless they override with their own list—see Section 7.2 for resolution semantics)
+- On sync/update: workers are added to `allowed_workers` but never removed
   - This preserves manually-added workers (useful when planning ahead with workers who haven't yet logged time on the epic)
 
-**Rationale**: The broad worker import (project-wide, not just epic-scoped) provides historical data for duration estimation. The `default_workers` mechanism distinguishes which workers are expected to work on a specific epic, since personnel shift over time.
+**Rationale**: The broad worker import (project-wide, not just epic-scoped) provides historical data for duration estimation. The `allowed_workers` mechanism on parent tasks distinguishes which workers are expected to work on a specific epic, since personnel shift over time.
 
 #### 11.6.2 Productivity Calculation
 
@@ -1560,18 +1562,24 @@ DoneCompletion(
 
 ### 11.8 Linking Existing Tasks to Jira
 
-Users can link a manually-created task to a Jira issue after the fact:
+Users can link a manually-created task to a Jira issue after the fact.
+
+**Prerequisite**: A Jira server must already be configured (via a prior "Import from Jira" operation). If no server is configured, the Jira Issue field displays an error: "No Jira server configured. Use File → Import from Jira to configure."
+
+**Expected Workflow**: Typically, users create an epic in Jira first, then import it to start a Jira-linked `.fluxx` file. Manual linking is for cases where a task was planned in Project Fluxx before the corresponding Jira issue existed.
 
 **UI Flow**:
-1. In Task Editor, there is a Jira Issue field. Displays <enter issue key> prompt when `jira_reference` is None.
-   You can edit it when it has been set.
-2. On loss of focus, system validates:
-   - Issue exists on configured server - if not, displays a warning and returns the field to its previous value.
-   - Displays issue summary for confirmation
-3. On confirm:
-   - Sets `jira_reference`
-   - Imports issue details (title, description, etc.)
-   - On next "Update from Jira", task will be synced
+1. In Task Editor, there is a Jira Issue field. Displays `<enter issue key>` prompt when `jira_reference` is None. The field is editable when already set.
+2. On loss of focus (after user enters/changes the key):
+   a. **Invalid key**: Display warning, revert field to previous value.
+   b. **Valid key, no unsaved changes**: Load issue data from Jira, creating a new undo point. User can undo to recover previous values.
+   c. **Valid key, unsaved changes exist**: Save current changes first (creating a new history revision), then load issue data from Jira, creating another undo point.
+3. On subsequent "Update from Jira", the linked task will be synced.
+
+**Field Overwrite Warning**: If the user edits fields that are synced from Jira (title, description, etc.) and then clicks Apply, display a warning dialog:
+> "WARNING: Your changes to fields {list of changed synced fields} will be overwritten next time you sync with Jira." [OK]
+
+This ensures users understand that local edits to Jira-synced fields are temporary.
 
 ### 11.9 "Become Child Of" Feature
 
