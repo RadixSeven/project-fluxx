@@ -1468,6 +1468,17 @@ Implement using PyMC (latest version). Use standard Bayesian operations to deal 
 *Benefits*
 Better handling of sparse data. Predictions better model the distribution.
 
+*Testing*
+
+At this point, we will have quite a bit of real data. Before we start implementing, we should segment out a randomly-selected test set (30%) of tickets, which we will use for a final decision as to what method to use in the final product. We will also separate out a 30% validation set we can use to validate our test procedures and use for other consequential decisions. The remaining 40% of our data is a test set that we can use however we want.
+
+We will consider several methods: for example, the rough histogram binning method, baseline simple-as-possible predict/sample-from-closest (making sure we aren't being too complicated), Bayesian with linear elements, or Bayesian with spline. We'll decide what ones to implement when we get there.
+As part of engineering, we may do some calibration plots (predicted quantiles vs observed frequencies) for the models to understand how they are wrong - are they systematically over or under-estimating part of the data.
+
+Final decision:
+* Train all selected estimation methods on training + validation set.
+* Choose the model that assigns the highest probability to the test set.
+* Also do some calibration plots (see above) for a more subjective decision criterion. For example, if two models are similar but one has a superior calibration plot, we may choose the model with slightly lower probability if it's significantly better calibrated.
 
 ### 11.6 Worker Import
 
