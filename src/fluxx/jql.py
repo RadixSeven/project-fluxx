@@ -14,46 +14,20 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
-from urllib.parse import urlparse
 
 import requests
 
+# Import auth functions from the jira module (re-export for backward compatibility)
+from fluxx.jira.auth import TokenNotFoundError, get_token_path, read_token
 
-def get_token_path(base_url: str) -> Path:
-    """Derive the personal access token file path from the Jira base URL.
-
-    Args:
-        base_url: The Jira base URL (e.g., https://example.com:8080/jira)
-
-    Returns:
-        Path to the personal_access_token.txt file
-    """
-    parsed = urlparse(base_url)
-    hostname = parsed.hostname or ""
-    port = parsed.port
-    url_path = parsed.path.rstrip("/")
-
-    host_part = hostname if port is None else f"{hostname}.{port}"
-
-    secrets_base = Path.home() / ".local" / "share" / "secrets"
-    return secrets_base / host_part / url_path.lstrip("/") / "personal_access_token.txt"
-
-
-def read_token(token_path: Path) -> str:
-    """Read the personal access token from the file.
-
-    Args:
-        token_path: Path to the token file
-
-    Returns:
-        The token string (whitespace stripped)
-
-    Raises:
-        FileNotFoundError: If the token file doesn't exist
-        PermissionError: If the token file can't be read
-    """
-    return token_path.read_text().strip()
+# Re-export for tests that import from fluxx.jql
+__all__ = [
+    "get_token_path",
+    "read_token",
+    "build_query_params",
+    "execute_search",
+    "main",
+]
 
 
 def build_query_params(
@@ -181,9 +155,9 @@ def main() -> int:
     token_path = get_token_path(base_url)
     try:
         token = read_token(token_path)
-    except FileNotFoundError:
+    except TokenNotFoundError as e:
         print(
-            f"Error: Personal access token not found at {token_path}",
+            f"Error: {e}",
             file=sys.stderr,
         )
         return 1

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from fluxx.jira.auth import TokenNotFoundError
 from fluxx.jql import (
     build_query_params,
     execute_search,
@@ -112,10 +113,10 @@ class TestReadToken:
         assert read_token(token_file) == "my-token"
 
     def test_read_token_file_not_found(self, tmp_path: Path) -> None:
-        """Test FileNotFoundError for missing token file."""
+        """Test TokenNotFoundError for missing token file."""
         token_file = tmp_path / "nonexistent.txt"
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(TokenNotFoundError):
             read_token(token_file)
 
     def test_read_token_permission_denied(self, tmp_path: Path) -> None:

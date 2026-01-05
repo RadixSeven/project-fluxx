@@ -24,36 +24,16 @@ This plan implements the Jira integration specified in Section 11 of `project_fl
 - NaN propagates through arithmetic, corrupting simulation results
 - NaN produces non-standard JSON output
 
-### 0.2 Factor Out Auth Module from `jql.py`
+### 0.2 Factor Out Auth Module from `jql.py` ✓ COMPLETE
 **TDD**: Yes
 
-**Tests first**:
-```python
-def test_get_token_path_with_port():
-    assert get_token_path("https://jira.example.com:8443/jira") == ...
-
-def test_get_token_path_without_port():
-    assert get_token_path("https://jira.example.com/jira") == ...
-
-def test_read_token_file_not_found():
-    with pytest.raises(TokenNotFoundError):
-        read_token(Path("/nonexistent"))
-
-def test_read_token_strips_whitespace():
-    # Use tmp_path fixture
-    ...
-```
-
-**Implementation**:
-1. Create `src/fluxx/jira/__init__.py`
-2. Create `src/fluxx/jira/auth.py`
-3. Move `get_token_path()` and `read_token()` from `jql.py`
-4. Update `jql.py` to import from new location
-5. Add `TokenNotFoundError` exception class
-
-**Files**:
-- `src/fluxx/jira/auth.py`
-- `tests/jira/test_auth.py`
+**Completed**:
+- Created `src/fluxx/jira/__init__.py`
+- Created `src/fluxx/jira/auth.py` with `get_token_path()`, `read_token()`, `TokenNotFoundError`
+- Updated `jql.py` to import from new location (re-exports for backward compatibility)
+- Created `tests/jira/test_auth.py` with 11 tests
+- Updated `tests/test_jql.py` to use `TokenNotFoundError`
+- All 36 tests passing, 100% coverage on auth module
 
 ---
 
