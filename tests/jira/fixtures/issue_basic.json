@@ -1,0 +1,51 @@
+{
+  "expand": "renderedFields,names,schema,operations,editmeta,changelog,versionedRepresentations",
+  "id": "12345",
+  "self": "https://jira.example.com/rest/api/2/issue/12345",
+  "key": "FHIR-1234",
+  "fields": {
+    "summary": "Implement OAuth2 authentication",
+    "description": "Add OAuth2 support for API authentication",
+    "issuetype": {
+      "self": "https://jira.example.com/rest/api/2/issuetype/10001",
+      "id": "10001",
+      "description": "A user story",
+      "iconUrl": "https://jira.example.com/images/icons/issuetypes/story.png",
+      "name": "Story",
+      "subtask": false
+    },
+    "status": {
+      "self": "https://jira.example.com/rest/api/2/status/10000",
+      "description": "",
+      "iconUrl": "https://jira.example.com/images/icons/statuses/done.png",
+      "name": "Done",
+      "id": "10000",
+      "statusCategory": {
+        "self": "https://jira.example.com/rest/api/2/statuscategory/3",
+        "id": 3,
+        "key": "done",
+        "colorName": "green",
+        "name": "Done"
+      }
+    },
+    "assignee": {
+      "self": "https://jira.example.com/rest/api/2/user?accountId=abc123",
+      "accountId": "abc123",
+      "emailAddress": "alice@example.com",
+      "displayName": "Alice Smith",
+      "active": true
+    },
+    "timetracking": {
+      "originalEstimate": "8h",
+      "remainingEstimate": "0h",
+      "timeSpent": "10h",
+      "originalEstimateSeconds": 28800,
+      "remainingEstimateSeconds": 0,
+      "timeSpentSeconds": 36000
+    },
+    "customfield_10473": 5.0,
+    "created": "2024-01-15T10:00:00.000+0000",
+    "updated": "2024-01-20T15:30:00.000+0000",
+    "resolutiondate": "2024-01-20T15:30:00.000+0000"
+  }
+}

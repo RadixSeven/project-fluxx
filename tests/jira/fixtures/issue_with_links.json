@@ -1,0 +1,98 @@
+{
+  "id": "12347",
+  "self": "https://jira.example.com/rest/api/2/issue/12347",
+  "key": "FHIR-1236",
+  "fields": {
+    "summary": "API rate limiting",
+    "description": "Implement rate limiting for API calls",
+    "issuetype": {
+      "name": "Story",
+      "id": "10001"
+    },
+    "status": {
+      "name": "To Do",
+      "id": "10002"
+    },
+    "issuelinks": [
+      {
+        "id": "10001",
+        "self": "https://jira.example.com/rest/api/2/issueLink/10001",
+        "type": {
+          "id": "10000",
+          "name": "Depends",
+          "inward": "is depended on by",
+          "outward": "depends on",
+          "self": "https://jira.example.com/rest/api/2/issueLinkType/10000"
+        },
+        "outwardIssue": {
+          "id": "12345",
+          "key": "FHIR-1234",
+          "self": "https://jira.example.com/rest/api/2/issue/12345",
+          "fields": {
+            "summary": "OAuth2 implementation",
+            "status": {
+              "name": "Done",
+              "id": "10000"
+            },
+            "issuetype": {
+              "name": "Story",
+              "id": "10001"
+            }
+          }
+        }
+      },
+      {
+        "id": "10002",
+        "self": "https://jira.example.com/rest/api/2/issueLink/10002",
+        "type": {
+          "id": "10000",
+          "name": "Depends",
+          "inward": "is depended on by",
+          "outward": "depends on"
+        },
+        "outwardIssue": {
+          "id": "12348",
+          "key": "FHIR-1237",
+          "self": "https://jira.example.com/rest/api/2/issue/12348",
+          "fields": {
+            "summary": "Database connection pooling",
+            "status": {
+              "name": "In Progress",
+              "id": "10001"
+            },
+            "issuetype": {
+              "name": "Story",
+              "id": "10001"
+            }
+          }
+        }
+      },
+      {
+        "id": "10003",
+        "self": "https://jira.example.com/rest/api/2/issueLink/10003",
+        "type": {
+          "id": "10001",
+          "name": "Blocks",
+          "inward": "is blocked by",
+          "outward": "blocks"
+        },
+        "inwardIssue": {
+          "id": "12349",
+          "key": "FHIR-1238",
+          "self": "https://jira.example.com/rest/api/2/issue/12349",
+          "fields": {
+            "summary": "API documentation",
+            "status": {
+              "name": "To Do",
+              "id": "10002"
+            },
+            "issuetype": {
+              "name": "Task",
+              "id": "10003"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "12346",
+  "self": "https://jira.example.com/rest/api/2/issue/12346",
+  "key": "FHIR-1235",
+  "fields": {
+    "summary": "Implement token refresh",
+    "description": "Subtask to handle OAuth token refresh",
+    "issuetype": {
+      "self": "https://jira.example.com/rest/api/2/issuetype/10002",
+      "id": "10002",
+      "description": "A subtask",
+      "name": "Sub-task",
+      "subtask": true
+    },
+    "status": {
+      "name": "In Progress",
+      "id": "10001"
+    },
+    "parent": {
+      "id": "12345",
+      "key": "FHIR-1000",
+      "self": "https://jira.example.com/rest/api/2/issue/12345",
+      "fields": {
+        "summary": "OAuth2 implementation epic",
+        "status": {
+          "name": "In Progress",
+          "id": "10001"
+        },
+        "issuetype": {
+          "name": "Epic",
+          "id": "10000"
+        }
+      }
+    },
+    "timetracking": {
+      "originalEstimate": "4h",
+      "originalEstimateSeconds": 14400
+    }
+  }
+}

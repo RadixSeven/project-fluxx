@@ -1,0 +1,16 @@
+{
+  "id": "99999",
+  "self": "https://jira.example.com/rest/api/2/issue/99999",
+  "key": "TEST-1",
+  "fields": {
+    "summary": "Minimal issue",
+    "issuetype": {
+      "name": "Task",
+      "id": "10003"
+    },
+    "status": {
+      "name": "To Do",
+      "id": "10002"
+    }
+  }
+}
