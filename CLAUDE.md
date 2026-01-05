@@ -221,3 +221,5 @@ fluxx
 5. **Simulation Reproducibility**: Never modify stored simulation results. If the simulation algorithm changes, historical simulations must remain unchanged (they store complete results, not just seeds).
 
 6. **Strenuously avoid using `Any` or `cast`**: The type system in this codebase is designed to be complete. If you think you need `Any` or `cast`, you're likely misunderstanding the types. See [type_safety.md](type_safety.md) and the above section on Static Analysis (and policy exceptions) for more details.
+
+7. **Use `JsonObject`/`JsonValue` for JSON data**: Never use `dict[str, Any]` for JSON data. Import `JsonObject` and `JsonValue` from `fluxx.data.json_types` instead. These provide proper recursive type definitions for JSON structures without using `Any`.
