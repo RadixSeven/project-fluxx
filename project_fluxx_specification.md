@@ -78,9 +78,12 @@ Task {
   }
 
   # Worker constraints
-  default_workers: list of worker ids that children without a list are limited to.
-                   On upgrade, defaults to listing all workers.
-  allowed_workers: optional list of worker ids (if absent, all allowed)
+  default_workers: optional list of worker ids  # If set, descendants inherit this as their
+                                                # allowed_workers unless overridden (see Section 7.2).
+                                                # Empty/absent means inherit from parent (or all workers
+                                                # for root tasks). On file format upgrade, leave empty.
+  allowed_workers: optional list of worker ids  # If absent, inherited from nearest ancestor's
+                                                # default_workers (see Section 7.2)
   excluded_worker_tasks: list of task ids whose assignees cannot be assigned to this task
 
   # Completion tracking (see Section 3.1.1)
@@ -632,6 +635,11 @@ Located above the DAG view, contains:
 - **Add Dependency** button
 
 **Worker Constraints Section**:
+- **Default Workers** (for parent tasks):
+  - Defines the worker pool inherited by descendants without explicit `allowed_workers` (see Section 7.2)
+  - If empty: "Inheriting from parent" (or "All workers" for root tasks)
+  - If populated: List with + button to add, trashcan to remove
+  - Tooltip: "Workers in this list are available to all subtasks unless overridden"
 - **Allowed Workers**:
   - If empty: "All workers allowed. [Click to add reduced list of allowed workers]"
   - If populated: List with + button to add, trashcan to remove
@@ -888,6 +896,15 @@ Tasks can depend on one or more branch possible worlds:
 - Worker constraints enforced:
   - Must be in allowed workers list (if specified)
   - Cannot be assignee of excluded tasks
+
+**Default Workers Resolution** (computed ephemerally at simulation start):
+- Each task has an optional `default_workers` list and an optional `allowed_workers` list
+- For tasks without an explicit `allowed_workers` list, the effective allowed workers are determined by walking up the ancestor chain:
+  - Find the nearest ancestor with a `default_workers` list set
+  - Use that list as the effective `allowed_workers` for this task
+  - If no ancestor has `default_workers` set, all workers are allowed
+- This resolution happens once at simulation start; the computed values are not stored on the Task
+- Note: A task's `default_workers` list defines the pool for its descendants, not for itself
 
 **Tasks in Progress**:
 - A task with `StartedCompletion` is in progress
@@ -1230,12 +1247,6 @@ Task {
 Worker {
   ...
   jira_account_id: optional string  # Jira user account ID - default to None when upgrading
-  default_worker_for: list[TaskId]  # If T is in this list, this worker is in the
-                                    # default list for that task and all its subtasks.
-
-                                    # When upgrading, make this list a list of all the tasks that
-                                    # have no parent. (So the worker is a default worker in all
-                                    # tasks.)
 }
 ```
 
@@ -1266,22 +1277,17 @@ JiraDurationHistoryEntry {
 }
 
 JiraSyncMetadata {
-  # The list of project keys to sync is the set of
-  # keys in the issues in the project.
-  #
-  # Only parents with attached issues in the project
-  # are synchronized. So, if an issue is attached to an
-
-  # epic, that epic will be sync'd but siblings in the
-  # same strategic release will not be. However, if a
-  # strategic release is linked to a task, then all its
-  # epics will be synchronized.
-
   server_url: string
-  last_history_sync: datetime  # For incremental updates, all projects are updated when one is
+  last_history_sync: datetime
   history_entries: list of JiraDurationHistoryEntry
 }
 ```
+
+**Sync Behavior Notes**:
+- The set of Jira project keys to sync is derived dynamically by iterating over all tasks with `jira_reference` and collecting the distinct `project_key` values. This is effectively instant even for large files (<100K issues).
+- A single `last_history_sync` timestamp is shared across all projects. When "Update from Jira" runs, historical data for all referenced projects is refreshed. This ensures the duration estimation model always uses globally up-to-date data.
+- Only tasks with an explicit `jira_reference` are synchronized. Parent tasks are synced if they have a linked issue, but sibling epics under the same strategic release are not automatically included unless they too have linked issues.
+- If per-project sync timestamps are ever needed, migration is straightforward: duplicate the single timestamp for each project.
 
 #### 11.3.5 Project-Level Jira Configuration
 
@@ -1405,7 +1411,7 @@ When syncing/updating:
 
 **Multi-worker Issues**: If multiple workers logged time on an issue, create one entry per worker, each with the total logged time. This is intentionally duplicative for initial implementation.
 
-**Incremental Sync**: Track `last_history_sync` per project. On subsequent syncs, query only issues with `updated >= last_sync_date`.
+**Incremental Sync**: A single `last_history_sync` timestamp tracks when history was last fetched. On subsequent syncs, query only issues with `updated >= last_sync_date` for all referenced projects (see Section 11.3.4 for sync behavior details). The first sync when adding any new project will sync all its issues.
 
 #### 11.5.2 Bin-Based Distribution Fitting (MVP Algorithm)
 
@@ -1467,12 +1473,13 @@ Better handling of sparse data. Predictions better model the distribution.
 
 We import all workers who have logged time or been assigned an issue in the project we import from.
 
-If a worker logged work on an epic, add the worker to the default_workers list for the epic.
+**Default Workers List Population**:
+- If a worker logged work on an epic, add the worker to the `default_workers` list for the epic task
+- A task's `default_workers` list replaces (not unions with) its ancestors' lists for descendant tasks (see Section 7.2 for resolution semantics)
+- On sync/update: workers are added to `default_workers` but never removed
+  - This preserves manually-added workers (useful when planning ahead with workers who haven't yet logged time on the epic)
 
-At the beginning of a simulation, all tickets without an explicit `allowed_workers` list will be assigned
-the union of the `default_workers` sets from their ancestors as the `allowed_workers` list.
-
-TODO: This information belongs in the simulation.
+**Rationale**: The broad worker import (project-wide, not just epic-scoped) provides historical data for duration estimation. The `default_workers` mechanism distinguishes which workers are expected to work on a specific epic, since personnel shift over time.
 
 #### 11.6.2 Productivity Calculation
 
@@ -1528,10 +1535,12 @@ DoneCompletion(
 )
 ```
 
+**Rationale for `last_worklog_date` as `end_time`**: In practice, tickets often receive little attention after work is complete—the resolution date may lag significantly behind when work actually finished. The last worklog entry is the best available signal of when substantive work ended. Occasionally the last worklog date falls after the resolution date (e.g., "just one little fix" logged retroactively); this is acceptable. This choice may be revisited or made configurable in the future; configurability would require a mechanism to preserve the setting across Jira updates.
+
 **Without Work Logged** (closed with no work):
 ```python
 DoneCompletion(
-    assignee=assignee or first_available_worker,
+    assignee=assignee,
     start_time=issue_created_date,  # Best approximation
     hours_logged=1e-6,  # See Section 11.7.4
     end_time=resolution_date,
