@@ -1018,6 +1018,30 @@ def test_e2e_sync_updates(qtbot, mock_jira_server):
 - Update CLAUDE.md if needed
 - Add docstrings to all public functions/classes
 
+### 7.5 Fix Skipped Gantt Test
+
+**Problem**: `test_gantt_chart_with_loaded_test_prj_json` in `tests/simulation/test_real_project.py` is currently skipped because it depends on a `test_prj.json` file that was provided separately and not checked into the repository. When development moved to a different machine, the file was lost.
+
+**Location**: `tests/simulation/test_real_project.py:513`
+
+**Steps**:
+1. Request `test_prj.json` from user (or regenerate a representative project file if the user can no longer provide it).
+2. Create fixtures directory: `tests/simulation/fixtures/`
+3. Add `tests/simulation/fixtures/__init__.py` (empty, makes it a package for `importlib.resources`)
+4. Place `test_prj.json` in `tests/simulation/fixtures/`
+5. Update test to load fixture using `importlib.resources`:
+   ```python
+   import importlib.resources
+   import json
+
+   def test_gantt_chart_with_loaded_test_prj_json() -> None:
+       files = importlib.resources.files("tests.simulation.fixtures")
+       project_data = json.loads(files.joinpath("test_prj.json").read_text())
+       # ... rest of test
+   ```
+6. Remove the `pytest.skip()` fallback
+7. Verify test passes with `QT_QPA_PLATFORM=offscreen pytest tests/simulation/test_real_project.py::test_gantt_chart_with_loaded_test_prj_json -v`
+
 ---
 
 ## Dependencies to Add
