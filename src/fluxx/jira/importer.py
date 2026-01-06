@@ -418,17 +418,7 @@ def import_from_jira(
 
     update_progress("extracting_workers", 0, len(issues))
 
-    # Extract workers
-    workers = extract_workers_with_no_hours(issues)
-
-    # Calculate hours per workday for each worker
-    all_worklogs = _collect_all_worklogs(issues)
-    for jira_id, worker in workers.items():
-        avg_hours = calculate_hours_per_workday(jira_id, all_worklogs)
-        if avg_hours is not None:
-            workers[jira_id] = worker.model_copy(
-                update={"hours_per_workday": avg_hours}
-            )
+    workers = extract_workers(issues)
 
     update_progress("building_history", len(issues) // 2, len(issues))
 
@@ -487,6 +477,28 @@ def import_from_jira(
         warnings=warnings,
         history_entries=history_entries,
     )
+
+
+def extract_workers(issues: list[JiraIssueResponse]) -> dict[str, Worker]:
+    """Extract workers from Jira issues.
+
+    Args:
+        issues: Jira issues to extract workers from
+
+    Returns:
+        mapping from jira_id (for the worker) to worker
+    """
+    workers = extract_workers_with_no_hours(issues)
+
+    # Calculate hours per workday for each worker
+    all_worklogs = _collect_all_worklogs(issues)
+    for jira_id, worker in workers.items():
+        avg_hours = calculate_hours_per_workday(jira_id, all_worklogs)
+        if avg_hours is not None:
+            workers[jira_id] = worker.model_copy(
+                update={"hours_per_workday": avg_hours}
+            )
+    return workers
 
 
 def fetch_and_validate_issues(
