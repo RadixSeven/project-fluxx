@@ -163,6 +163,16 @@ class MainWindow(QMainWindow):
         run_simulation_action.triggered.connect(self._on_run_simulation)
         simulation_menu.addAction(run_simulation_action)
 
+        # Jira menu
+        jira_menu = menubar.addMenu("&Jira")
+        assert jira_menu is not None  # addMenu() always returns a menu
+
+        # Import from Jira
+        import_from_jira_action = QAction("&Import from Jira...", self)
+        import_from_jira_action.setShortcut("Ctrl+I")
+        import_from_jira_action.triggered.connect(self._on_import_from_jira)
+        jira_menu.addAction(import_from_jira_action)
+
     def _create_panels(self) -> None:
         """Create two-panel layout with splitter."""
         # Create panels
@@ -567,3 +577,38 @@ class MainWindow(QMainWindow):
         self.controller.select_node(None)
         # Show worker editor in the editor panel
         self.editor_panel.show_worker_editor()
+
+    def _on_import_from_jira(self) -> None:
+        """Handle Import from Jira menu action."""
+        from fluxx.gui.jira.import_dialog import JiraImportDialog
+        from fluxx.jira.importer import ImportResult
+
+        # Create and show import dialog
+        dialog = JiraImportDialog(self.controller.get_project(), self)
+
+        # Connect to results signal
+        def on_import_completed(result: ImportResult) -> None:
+            # Replace current project with imported one
+            self.controller._project = result.project
+            self.controller._modified = True
+            self.controller.project_changed.emit(result.project)
+            self.controller.modified_changed.emit(True)
+
+            # Show warnings if any
+            if result.warnings:
+                warning_text = "\n".join(
+                    f"- {w.issue_key}: {w.message}" for w in result.warnings
+                )
+                QMessageBox.warning(
+                    self,
+                    "Import Warnings",
+                    f"Import completed with warnings:\n\n{warning_text}",
+                )
+
+        dialog.import_completed.connect(on_import_completed)
+
+        # Show dialog (modal)
+        try:
+            dialog.exec()
+        except Exception as e:
+            self._show_error("Import Error", f"Failed to import from Jira: {e}")

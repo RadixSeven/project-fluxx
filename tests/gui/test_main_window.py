@@ -1041,3 +1041,248 @@ def test_on_add_sibling_exception(
 # TODO: Fix and re-add these tests:
 # - test_on_run_simulation_exception
 # - test_on_simulation_completed
+
+
+def test_jira_menu_exists(window: MainWindow) -> None:
+    """Test that Jira menu exists with expected actions."""
+    from PySide6.QtWidgets import QMenu
+
+    menubar = window.menuBar()
+    assert menubar is not None
+
+    # Find menu action texts
+    menu_texts = [action.text() for action in menubar.actions()]
+    assert "&Jira" in menu_texts
+
+    # Find the Jira menu and check its children
+    import_action = None
+    for action in menubar.actions():
+        if action.text() == "&Jira":
+            menu = action.menu()
+            if isinstance(menu, QMenu):
+                for sub_action in menu.actions():
+                    if sub_action.text() == "&Import from Jira...":
+                        import_action = sub_action
+                        break
+
+    assert import_action is not None
+    assert import_action.shortcut().toString() == "Ctrl+I"
+
+
+def test_on_import_from_jira_opens_dialog(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that Import from Jira opens the import dialog."""
+    # Mock the dialog to prevent actual UI interaction
+    mock_dialog_instance = MagicMock()
+    mock_dialog_instance.exec = MagicMock(return_value=0)
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr(
+        "fluxx.gui.jira.import_dialog.JiraImportDialog", mock_dialog_class
+    )
+
+    # Trigger import action
+    window._on_import_from_jira()
+
+    # Verify dialog was created with correct arguments
+    mock_dialog_class.assert_called_once()
+    assert mock_dialog_class.call_args[0][0] == window.controller.get_project()
+    assert mock_dialog_class.call_args[0][1] == window
+
+    # Verify exec was called
+    mock_dialog_instance.exec.assert_called_once()
+
+
+def test_on_import_from_jira_handles_exception(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that Import from Jira handles exceptions gracefully."""
+    # Mock the dialog to raise an exception
+    mock_dialog_instance = MagicMock()
+    mock_dialog_instance.exec = MagicMock(side_effect=Exception("Dialog failed"))
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr(
+        "fluxx.gui.jira.import_dialog.JiraImportDialog", mock_dialog_class
+    )
+
+    # Mock _show_error to capture error
+    mock_show_error = MagicMock()
+    monkeypatch.setattr(window, "_show_error", mock_show_error)
+
+    # Trigger import action - should not raise
+    window._on_import_from_jira()
+
+    # Should have shown error
+    mock_show_error.assert_called_once()
+    assert "Import Error" in mock_show_error.call_args[0][0]
+    assert "Dialog failed" in mock_show_error.call_args[0][1]
+
+
+def test_on_import_from_jira_updates_project_on_success(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that successful import updates the controller's project."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import (
+        DAG,
+        DAGId,
+        DAGVersionId,
+        PersistentObjectId,
+        PersistentTask,
+        Project,
+        ProjectMetadata,
+        Task,
+        TaskId,
+    )
+    from fluxx.jira.importer import ImportResult
+
+    # Create a mock imported project
+    task = Task(
+        id=TaskId("imported_t1"),
+        title="Imported Task",
+        description="From Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    version_id = DAGVersionId("v_imported")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt_imported"),
+        versions={version_id: task},
+    )
+    imported_project = Project(
+        metadata=ProjectMetadata(
+            name="Imported Project",
+            created=datetime(2024, 1, 1, tzinfo=UTC),
+            last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        dag=DAG(
+            id=DAGId("imported_dag"),
+            current_version_id=version_id,
+            node_map={TaskId("imported_t1"): PersistentObjectId("pt_imported")},
+        ),
+        persistent_tasks={PersistentObjectId("pt_imported"): persistent_task},
+        workers=[],
+    )
+
+    mock_result = ImportResult(
+        project=imported_project,
+        warnings=[],
+        history_entries=[],
+    )
+
+    # Create a mock dialog that emits the import_completed signal
+    mock_dialog_instance = MagicMock()
+
+    # Capture the connected signal handler
+    signal_handler: MagicMock | None = None
+
+    def capture_connect(handler: MagicMock) -> None:
+        nonlocal signal_handler
+        signal_handler = handler
+
+    mock_dialog_instance.import_completed.connect = capture_connect
+    mock_dialog_instance.exec = MagicMock(return_value=1)
+
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr(
+        "fluxx.gui.jira.import_dialog.JiraImportDialog", mock_dialog_class
+    )
+
+    # Trigger import action
+    window._on_import_from_jira()
+
+    # Simulate successful import
+    assert signal_handler is not None
+    signal_handler(mock_result)
+
+    # Verify project was updated
+    assert window.controller._project == imported_project
+    assert window.controller._modified is True
+
+
+def test_on_import_from_jira_shows_warnings(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that import warnings are shown to user."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import (
+        DAG,
+        DAGId,
+        DAGVersionId,
+        PersistentObjectId,
+        PersistentTask,
+        Project,
+        ProjectMetadata,
+        Task,
+        TaskId,
+    )
+    from fluxx.jira.importer import ImportResult, ImportWarningFluxx
+
+    # Create a mock imported project with warnings
+    task = Task(
+        id=TaskId("imported_t1"),
+        title="Imported Task",
+        description="From Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    version_id = DAGVersionId("v_imported")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt_imported"),
+        versions={version_id: task},
+    )
+    imported_project = Project(
+        metadata=ProjectMetadata(
+            name="Imported Project",
+            created=datetime(2024, 1, 1, tzinfo=UTC),
+            last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        dag=DAG(
+            id=DAGId("imported_dag"),
+            current_version_id=version_id,
+            node_map={TaskId("imported_t1"): PersistentObjectId("pt_imported")},
+        ),
+        persistent_tasks={PersistentObjectId("pt_imported"): persistent_task},
+        workers=[],
+    )
+
+    mock_result = ImportResult(
+        project=imported_project,
+        warnings=[
+            ImportWarningFluxx(issue_key="FHIR-123", message="Sub-epic detected"),
+        ],
+        history_entries=[],
+    )
+
+    # Create a mock dialog
+    mock_dialog_instance = MagicMock()
+    signal_handler: MagicMock | None = None
+
+    def capture_connect(handler: MagicMock) -> None:
+        nonlocal signal_handler
+        signal_handler = handler
+
+    mock_dialog_instance.import_completed.connect = capture_connect
+    mock_dialog_instance.exec = MagicMock(return_value=1)
+
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr(
+        "fluxx.gui.jira.import_dialog.JiraImportDialog", mock_dialog_class
+    )
+
+    # Mock QMessageBox.warning
+    mock_warning = MagicMock()
+    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox.warning", mock_warning)
+
+    # Trigger import action
+    window._on_import_from_jira()
+
+    # Simulate successful import with warnings
+    assert signal_handler is not None
+    signal_handler(mock_result)
+
+    # Verify warning was shown
+    mock_warning.assert_called_once()
+    warning_text = mock_warning.call_args[0][2]
+    assert "FHIR-123" in warning_text
+    assert "Sub-epic detected" in warning_text
