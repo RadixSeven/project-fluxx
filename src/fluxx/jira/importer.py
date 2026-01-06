@@ -352,6 +352,35 @@ def _build_project(
     return project, warnings
 
 
+def generate_progress_updater(
+    progress_callback: Callable[[ImportProgress], None] | None = None,
+) -> Callable[[str, int, int], None]:
+    """Return a progress updater closure that calls ``progress_callback``
+
+    The signature of the updater is:
+
+    def update_progress(phase: str, processed, total) -> None
+
+    Args:
+        progress_callback: Progress callback
+
+    Returns:
+         a progress updater closure that calls ``progress_callback``
+    """
+
+    def update_progress(phase: str, processed: int, total: int) -> None:
+        if progress_callback:
+            progress_callback(
+                ImportProgress(
+                    total_issues=total,
+                    processed_issues=processed,
+                    current_phase=phase,
+                )
+            )
+
+    return update_progress
+
+
 def import_from_jira(
     client: JiraClient,
     jql: str,
@@ -373,18 +402,9 @@ def import_from_jira(
     Returns:
         ImportResult with the created project and any warnings
     """
+    update_progress = generate_progress_updater(progress_callback)
 
-    def update_progress(phase: str, processed: int = 0, total: int = 0) -> None:
-        if progress_callback:
-            progress_callback(
-                ImportProgress(
-                    total_issues=total,
-                    processed_issues=processed,
-                    current_phase=phase,
-                )
-            )
-
-    update_progress("fetching_issues")
+    update_progress("fetching_issues", 0, 0)
 
     # Fetch all issues
     issues: list[JiraIssueResponse] = []
@@ -426,7 +446,7 @@ def import_from_jira(
         # so total_logged_time_seconds is always positive here. The check
         # satisfies mypy's type narrowing.
         if entry.total_logged_time_seconds is None:
-            continue  # pragma: no cover - unreachable, type narrowing only
+            continue
         actual_hours = entry.total_logged_time_seconds / 3600.0
         actual_times.append(actual_hours)
 
