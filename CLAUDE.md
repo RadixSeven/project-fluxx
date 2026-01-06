@@ -108,7 +108,7 @@ The codebase is organized into three main packages:
 
 ### Static Analysis (and policy exceptions)
 
-We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
+We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`, `noqa`,
 `cast`, and `Any` must be justified and undergo human review. This is enforced by listing
 all reviewed uses in `approved_exceptions_to_static_analysis_policy.txt`. You may
 not modify `approved_exceptions_to_static_analysis_policy.txt`. 

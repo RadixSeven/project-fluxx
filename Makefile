@@ -87,7 +87,7 @@ verify-coverage:
 			exit 1; \
 		fi; \
 		echo "  Coverage thresholds: OK"; \
-		CURRENT_POLICY_EXCEPTIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
+		CURRENT_POLICY_EXCEPTIONS=$$(find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) -type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" -exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b\|#[[:space:]]*noqa" {} + 2>/dev/null | sed 's|^\./||' | sort -t: -k1,1 -k2,2n | sed 's/^\([^:]*\):[0-9]*:/\1:/'); \
 		DIFF_OUTPUT=$$(diff <(echo "$$CURRENT_POLICY_EXCEPTIONS") approved_exceptions_to_static_analysis_policy.txt 2>&1) || true; \
 		if [ -n "$$DIFF_OUTPUT" ]; then \
 			NEW_POLICY_EXCEPTIONS=$$(echo "$$DIFF_OUTPUT" | grep "^<" || true); \
@@ -158,7 +158,7 @@ regenerate-policy-exceptions:
 	@echo "==> Regenerating approved_exceptions_to_static_analysis_policy.txt..."
 	@find . \( -name "*.md" -o -name "*.py" -o -name "Makefile*" -o -name "*.toml" -o -name "*.yaml" -o -name "*.json" \) \
 		-type f ! -path "./.git/*" ! -path "./venv/*" ! -path "./.mypy_cache/*" \
-		-exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b" {} + 2>/dev/null \
+		-exec grep -Hn "cast(\|type: ignore\|pragma: no cover\|[\[(:,t][[:space:]]*Any\b\|#[[:space:]]*noqa" {} + 2>/dev/null \
 		| sed 's|^\./||' \
 		| sort -t: -k1,1 -k2,2n \
 		| sed 's/^\([^:]*\):[0-9]*:/\1:/' \
