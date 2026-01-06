@@ -757,3 +757,280 @@ class TestExtractRawEstimateData:
         result = extract_raw_estimate_data(entries)
 
         assert result == [(None, 0.5), (1.0, None)]
+
+
+class TestEndToEndImport:
+    """End-to-end integration tests for Jira import."""
+
+    def test_e2e_import_epic_with_hierarchy(self) -> None:
+        """Full E2E test: import epic with stories and verify hierarchy."""
+        mock_client = MagicMock()
+
+        # Create a realistic epic hierarchy:
+        # EPIC-1 (Epic)
+        # ├── STORY-1 (Story under epic)
+        # │   └── SUB-1 (Subtask under story)
+        # └── STORY-2 (Story under epic with worklogs)
+        epic = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Main Epic",
+                "description": "The main epic for testing",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "In Progress"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        story1 = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "First Story",
+                "description": "Story under the epic",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "To Do"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": {"originalEstimateSeconds": 28800},  # 8 hours
+            },
+        }
+
+        subtask1 = {
+            "id": "10003",
+            "key": "SUB-1",
+            "fields": {
+                "summary": "Subtask under Story",
+                "description": "Subtask for first story",
+                "issuetype": {"id": "10002", "name": "Sub-task"},
+                "status": {"id": "1", "name": "To Do"},
+                "assignee": None,
+                "parent": {"id": "10002", "key": "STORY-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": {"originalEstimateSeconds": 14400},  # 4 hours
+            },
+        }
+
+        story2 = {
+            "id": "10004",
+            "key": "STORY-2",
+            "fields": {
+                "summary": "Second Story with Worklogs",
+                "description": "Completed story",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "3", "name": "Done"},
+                "assignee": {
+                    "accountId": "user-alice",
+                    "displayName": "Alice Developer",
+                    "active": True,
+                },
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": "2024-06-15T12:00:00.000+0000",
+                "worklog": {
+                    "startAt": 0,
+                    "maxResults": 2,
+                    "total": 2,
+                    "worklogs": [
+                        {
+                            "id": "wl-1",
+                            "author": {
+                                "accountId": "user-alice",
+                                "displayName": "Alice Developer",
+                                "active": True,
+                            },
+                            "started": "2024-06-14T09:00:00.000+0000",
+                            "timeSpent": "4h",
+                            "timeSpentSeconds": 14400,
+                        },
+                        {
+                            "id": "wl-2",
+                            "author": {
+                                "accountId": "user-alice",
+                                "displayName": "Alice Developer",
+                                "active": True,
+                            },
+                            "started": "2024-06-15T09:00:00.000+0000",
+                            "timeSpent": "2h",
+                            "timeSpentSeconds": 7200,
+                        },
+                    ],
+                },
+                "timetracking": {"originalEstimateSeconds": 21600},  # 6 hours
+            },
+        }
+
+        mock_client.search.return_value = iter([epic, story1, subtask1, story2])
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        result = import_from_jira(
+            client=mock_client,
+            jql="project = TEST",
+            config=config,
+            project_name="E2E Test Project",
+        )
+
+        # Verify result structure
+        assert isinstance(result, ImportResult)
+        assert result.project.metadata.name == "E2E Test Project"
+
+        # Verify all 4 tasks created
+        assert len(result.project.dag.node_map) == 4
+
+        # Verify workers extracted from worklogs
+        assert len(result.project.workers) == 1
+        worker = result.project.workers[0]
+        assert worker.name == "Alice Developer"
+        assert worker.jira_account_id == "user-alice"
+
+        # Note: jira_config is not set by the importer - it uses the config passed in
+        # but doesn't copy it to the project (this could be improved in the future)
+
+        # Verify history entries for completed story
+        assert len(result.history_entries) == 1
+        history = result.history_entries[0]
+        assert history.issue_key.project_key == "STORY"
+        assert history.issue_key.issue_number == 2
+
+        # Verify hierarchy by checking parent-child relationships
+        tasks = {}
+        for _node_id, persistent_id in result.project.dag.node_map.items():
+            if persistent_id in result.project.persistent_tasks:
+                ptask = result.project.persistent_tasks[persistent_id]
+                task = ptask.versions[result.project.dag.current_version_id]
+                if task.jira_reference is not None:
+                    tasks[str(task.jira_reference.issue_key)] = task
+
+        # Epic should have no parent
+        assert tasks["EPIC-1"].parent_id is None
+
+        # Stories should have epic as parent
+        assert tasks["STORY-1"].parent_id is not None
+        assert tasks["STORY-2"].parent_id is not None
+
+        # Subtask should have story as parent
+        assert tasks["SUB-1"].parent_id is not None
+
+        # Verify Jira references
+        for task in tasks.values():
+            assert task.jira_reference is not None
+            assert task.jira_reference.server_url == "https://jira.example.com"
+
+        # Verify issue types
+        assert tasks["EPIC-1"].jira_issue_type == "Epic"
+        assert tasks["STORY-1"].jira_issue_type == "Story"
+        assert tasks["SUB-1"].jira_issue_type == "Sub-task"
+        assert tasks["STORY-2"].jira_issue_type == "Story"
+
+    def test_e2e_import_generates_progress_callbacks(self) -> None:
+        """E2E test verifies progress callbacks are called with phases."""
+        mock_client = MagicMock()
+        mock_client.search.return_value = iter(
+            [
+                {
+                    "id": "10001",
+                    "key": "TEST-1",
+                    "fields": {
+                        "summary": "Test Issue",
+                        "description": "Test",
+                        "issuetype": {"id": "10001", "name": "Story"},
+                        "status": {"id": "1", "name": "Open"},
+                        "assignee": None,
+                        "parent": None,
+                        "issuelinks": [],
+                        "resolutiondate": None,
+                        "worklog": None,
+                        "timetracking": None,
+                    },
+                }
+            ]
+        )
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        progress_updates: list[ImportProgress] = []
+
+        result = import_from_jira(
+            client=mock_client,
+            jql="project = TEST",
+            config=config,
+            project_name="Progress Test",
+            progress_callback=lambda p: progress_updates.append(p),
+        )
+
+        assert isinstance(result, ImportResult)
+
+        # Verify all expected phases were reported
+        phases = [p.current_phase for p in progress_updates]
+        assert "fetching_issues" in phases
+        assert "building_project" in phases
+
+    def test_e2e_fetch_and_validate_collects_warnings(self) -> None:
+        """E2E test verifies fetch_and_validate_issues collects validation warnings."""
+        mock_client = MagicMock()
+
+        # Valid issue
+        valid_issue = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Valid Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        # Invalid issue (missing required fields)
+        invalid_issue = {
+            "id": "10002",
+            "key": "TEST-2",
+            "fields": {
+                # Missing issuetype and status
+                "summary": "Invalid Issue",
+            },
+        }
+
+        mock_client.search.return_value = iter([valid_issue, invalid_issue])
+
+        # Use fetch_and_validate_issues which handles validation errors gracefully
+        issues, warnings = fetch_and_validate_issues(mock_client, "project = TEST")
+
+        # Only valid issue should be returned
+        assert len(issues) == 1
+        assert issues[0].key == "TEST-1"
+
+        # Should have a warning about the invalid issue
+        assert len(warnings) >= 1
+        warning_keys = [w.issue_key for w in warnings]
+        assert "TEST-2" in warning_keys
