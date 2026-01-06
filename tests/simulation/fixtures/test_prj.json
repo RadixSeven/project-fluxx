@@ -1,0 +1,418 @@
+{
+  "version": "1.1",
+  "metadata": {
+    "name": "Untitled",
+    "created": "2025-12-31T00:34:37.583642Z",
+    "last_modified": "2026-01-04T03:26:14.803287Z"
+  },
+  "workers": [
+    {
+      "id": "worker_20260103042200_a6fb81ad",
+      "name": "Eric",
+      "worker_id": null,
+      "description": null,
+      "hours_per_workday": 2.0
+    },
+    {
+      "id": "worker_20260103042215_54a6556f",
+      "name": "Jeff",
+      "worker_id": null,
+      "description": null,
+      "hours_per_workday": 6.0
+    },
+    {
+      "id": "worker_20260103042223_0e8fc1dd",
+      "name": "Naijia",
+      "worker_id": null,
+      "description": null,
+      "hours_per_workday": 7.0
+    }
+  ],
+  "dag": {
+    "id": "dag_1767141277.583642",
+    "current_version_id": "v_20260104032614_7a6884cf_clean",
+    "node_map": {
+      "task_20251231003445_29aa157b": "pobj_20251231003445_7c60fd6d",
+      "task_20251231003448_1c3c6697": "pobj_20251231003448_5f379c06",
+      "task_20251231003459_d20783e7": "pobj_20251231003459_01cfb613",
+      "task_20251231003547_cd531e03": "pobj_20251231003547_be25a708",
+      "task_20251231003556_07a633a7": "pobj_20251231003556_7ca1213d",
+      "task_20251231003559_32f253e3": "pobj_20251231003559_549802fc",
+      "branch_20260101131332_fee0d446": "pobj_20260101131332_8d3a272d",
+      "task_20260101131439_9f44c926": "pobj_20260101131439_770b901c",
+      "task_20260101131527_d929e9dc": "pobj_20260101131527_62302a69",
+      "branch_20260101152146_cb55c1d9": "pobj_20260101152146_c48eaad9"
+    }
+  },
+  "persistent_tasks": {
+    "pobj_20251231003445_7c60fd6d": {
+      "id": "pobj_20251231003445_7c60fd6d",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20251231003445_29aa157b",
+          "title": "A",
+          "description": "",
+          "node_type": "task",
+          "parent_id": null,
+          "children": [
+            "task_20260101131439_9f44c926",
+            "task_20260101131527_d929e9dc"
+          ],
+          "duration_distribution": null,
+          "dependencies": [
+            {
+              "source_endpoint": "end",
+              "target_node_id": "task_20260101131439_9f44c926",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "end",
+              "target_node_id": "task_20260101131527_d929e9dc",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": null,
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    },
+    "pobj_20251231003448_5f379c06": {
+      "id": "pobj_20251231003448_5f379c06",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20251231003448_1c3c6697",
+          "title": "B",
+          "description": "",
+          "node_type": "task",
+          "parent_id": null,
+          "children": [
+            "task_20251231003547_cd531e03",
+            "task_20251231003556_07a633a7",
+            "task_20251231003559_32f253e3"
+          ],
+          "duration_distribution": null,
+          "dependencies": [
+            {
+              "source_endpoint": "end",
+              "target_node_id": "task_20251231003547_cd531e03",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "end",
+              "target_node_id": "task_20251231003556_07a633a7",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "end",
+              "target_node_id": "task_20251231003559_32f253e3",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": null,
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    },
+    "pobj_20251231003459_01cfb613": {
+      "id": "pobj_20251231003459_01cfb613",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20251231003459_d20783e7",
+          "title": "C",
+          "description": "",
+          "node_type": "task",
+          "parent_id": null,
+          "children": [],
+          "duration_distribution": {
+            "min": 1.0,
+            "mode": 2.0,
+            "max": 3.0
+          },
+          "dependencies": [
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003448_1c3c6697",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": null,
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    },
+    "pobj_20251231003547_be25a708": {
+      "id": "pobj_20251231003547_be25a708",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20251231003547_cd531e03",
+          "title": "B.1",
+          "description": "",
+          "node_type": "task",
+          "parent_id": "task_20251231003448_1c3c6697",
+          "children": [],
+          "duration_distribution": {
+            "min": 1.0,
+            "mode": 2.0,
+            "max": 3.0
+          },
+          "dependencies": [
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003448_1c3c6697",
+              "target_endpoint": "start",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": null,
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "started",
+            "assignee": "worker_20260103042200_a6fb81ad",
+            "start_time": "2025-01-04T03:25:32Z",
+            "hours_logged": 0.1
+          }
+        }
+      }
+    },
+    "pobj_20251231003556_7ca1213d": {
+      "id": "pobj_20251231003556_7ca1213d",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20251231003556_07a633a7",
+          "title": "B.2",
+          "description": "",
+          "node_type": "task",
+          "parent_id": "task_20251231003448_1c3c6697",
+          "children": [],
+          "duration_distribution": {
+            "min": 0.25,
+            "mode": 6.0,
+            "percentile_95": 24.0
+          },
+          "dependencies": [
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003448_1c3c6697",
+              "target_endpoint": "start",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": null,
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    },
+    "pobj_20251231003559_549802fc": {
+      "id": "pobj_20251231003559_549802fc",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20251231003559_32f253e3",
+          "title": "B.3",
+          "description": "",
+          "node_type": "task",
+          "parent_id": "task_20251231003448_1c3c6697",
+          "children": [],
+          "duration_distribution": {
+            "min": 0.25,
+            "mode": 6.0,
+            "percentile_95": 24.0
+          },
+          "dependencies": [
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003448_1c3c6697",
+              "target_endpoint": "start",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003547_cd531e03",
+              "target_endpoint": "end",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": [
+            "worker_20260103042200_a6fb81ad"
+          ],
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    },
+    "pobj_20260101131439_770b901c": {
+      "id": "pobj_20260101131439_770b901c",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20260101131439_9f44c926",
+          "title": "A.1",
+          "description": "",
+          "node_type": "task",
+          "parent_id": "task_20251231003445_29aa157b",
+          "children": [],
+          "duration_distribution": {
+            "min": 1.0,
+            "mode": 10.0,
+            "max": 30.0
+          },
+          "dependencies": [
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003445_29aa157b",
+              "target_endpoint": "start",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "start",
+              "target_node_id": "branch_20260101131332_fee0d446:pw_20260101131420_7d2248df",
+              "target_endpoint": "occurrence_point",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "start",
+              "target_node_id": "branch_20260101152146_cb55c1d9:pw_20260101152159_b6125565",
+              "target_endpoint": "occurrence_point",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": [
+            "worker_20260103042215_54a6556f",
+            "worker_20260103042223_0e8fc1dd"
+          ],
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    },
+    "pobj_20260101131527_62302a69": {
+      "id": "pobj_20260101131527_62302a69",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "task_20260101131527_d929e9dc",
+          "title": "A.2",
+          "description": "The task for A's second possible world\n\nNew paragraph",
+          "node_type": "task",
+          "parent_id": "task_20251231003445_29aa157b",
+          "children": [],
+          "duration_distribution": {
+            "min": 0.25,
+            "mode": 6.0,
+            "percentile_95": 24.0
+          },
+          "dependencies": [
+            {
+              "source_endpoint": "start",
+              "target_node_id": "task_20251231003445_29aa157b",
+              "target_endpoint": "start",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "start",
+              "target_node_id": "branch_20260101131332_fee0d446:pw_20260101131420_4cfa286a",
+              "target_endpoint": "occurrence_point",
+              "constraint_type": ">="
+            },
+            {
+              "source_endpoint": "start",
+              "target_node_id": "branch_20260101152146_cb55c1d9:pw_20260101152159_b6125565",
+              "target_endpoint": "occurrence_point",
+              "constraint_type": ">="
+            }
+          ],
+          "allowed_workers": null,
+          "excluded_worker_tasks": [],
+          "completion": {
+            "status": "not_started"
+          }
+        }
+      }
+    }
+  },
+  "persistent_branches": {
+    "pobj_20260101131332_8d3a272d": {
+      "id": "pobj_20260101131332_8d3a272d",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "branch_20260101131332_fee0d446",
+          "title": "A.1 or 2",
+          "description": "",
+          "node_type": "branch",
+          "possible_worlds": [
+            {
+              "id": "pw_20260101131420_7d2248df",
+              "title": "Do A1",
+              "description": "",
+              "weight": 1.0
+            },
+            {
+              "id": "pw_20260101131420_4cfa286a",
+              "title": "Do A2",
+              "description": "",
+              "weight": 1.0
+            }
+          ],
+          "dependencies": [
+            {
+              "source_endpoint": "occurrence_point",
+              "target_node_id": "branch_20260101152146_cb55c1d9:pw_20260101152159_fd981a56",
+              "target_endpoint": "occurrence_point",
+              "constraint_type": ">="
+            }
+          ],
+          "chosen_world_id": null
+        }
+      }
+    },
+    "pobj_20260101152146_c48eaad9": {
+      "id": "pobj_20260101152146_c48eaad9",
+      "versions": {
+        "v_20260104032614_7a6884cf_clean": {
+          "id": "branch_20260101152146_cb55c1d9",
+          "title": "X factor",
+          "description": "",
+          "node_type": "branch",
+          "possible_worlds": [
+            {
+              "id": "pw_20260101152159_fd981a56",
+              "title": "X1",
+              "description": "",
+              "weight": 1.0
+            },
+            {
+              "id": "pw_20260101152159_b6125565",
+              "title": "X2",
+              "description": "",
+              "weight": 1.0
+            }
+          ],
+          "dependencies": [],
+          "chosen_world_id": "pw_20260101152159_fd981a56"
+        }
+      }
+    }
+  },
+  "history_events": [],
+  "current_event_id": null,
+  "simulations": []
+}

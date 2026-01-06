@@ -512,18 +512,12 @@ def test_gantt_chart_with_test_prj_structure() -> None:
 
 def test_gantt_chart_with_loaded_test_prj_json() -> None:
     """Test Gantt chart with actual test_prj.json file."""
+    import importlib.resources
     import json
-    from pathlib import Path
 
-    # Load test_prj.json
-    test_prj_path = Path(__file__).parent.parent.parent / "test_prj.json"
-    if not test_prj_path.exists():
-        import pytest
-
-        pytest.skip(f"test_prj.json not found at {test_prj_path}")
-
-    with open(test_prj_path) as f:
-        project_data = json.load(f)
+    # Load test_prj.json from fixtures
+    files = importlib.resources.files("tests.simulation.fixtures")
+    project_data = json.loads(files.joinpath("test_prj.json").read_text())
 
     # Deserialize to Project
     project = Project.model_validate(project_data)
