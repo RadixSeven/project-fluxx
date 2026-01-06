@@ -39,6 +39,8 @@ from fluxx.jira.distributions import (
     fit_fallback_distribution,
 )
 from fluxx.jira.extraction import (
+    CHILD_OF_LINK_TYPES,
+    PARENT_OF_LINK_TYPES,
     build_hierarchy,
     calculate_hours_per_workday,
     extract_completion,
@@ -92,6 +94,163 @@ REQUIRED_FIELDS = [
     "timetracking",
     "customfield_10016",  # Story points (common custom field ID)
 ]
+
+
+def get_children_from_links(
+    issues: list[JiraIssueResponse],
+    already_fetched: set[str],
+) -> set[str]:
+    """Extract child issue keys from "parent of"/"child of" links.
+
+    Args:
+        issues: List of Jira issues to examine
+        already_fetched: Set of issue keys already fetched (to exclude)
+
+    Returns:
+        Set of issue keys that are children according to links but not yet fetched
+    """
+    child_keys: set[str] = set()
+
+    for issue in issues:
+        if not issue.fields.issuelinks:
+            continue
+
+        for link in issue.fields.issuelinks:
+            # "parent of" outward link: linked issue is a child of this issue
+            if link.link_type.name in PARENT_OF_LINK_TYPES and link.outward_issue:
+                child_key = link.outward_issue.key
+                if child_key not in already_fetched:
+                    child_keys.add(child_key)
+
+            # "child of" inward link: linked issue is also a child
+            # (the inward issue claims to be a child of something,
+            # but we see it from the parent's perspective)
+            # Actually, "child of" inward means: the inward_issue is saying
+            # "I am child of this issue" - so inward_issue is a child
+            if link.link_type.name in CHILD_OF_LINK_TYPES and link.inward_issue:
+                child_key = link.inward_issue.key
+                if child_key not in already_fetched:
+                    child_keys.add(child_key)
+
+    return child_keys
+
+
+def build_children_jql(parent_keys: list[str]) -> str:
+    """Build JQL to fetch children of the given parent issues.
+
+    Args:
+        parent_keys: List of parent issue keys
+
+    Returns:
+        JQL query string to fetch all children via Epic Link or parent field
+    """
+    # Quote keys in case they have special characters
+    quoted_keys = [f'"{key}"' for key in parent_keys]
+    keys_list = ", ".join(quoted_keys)
+
+    # Use both Epic Link and parent fields to catch all children
+    return f'"Epic Link" in ({keys_list}) OR parent in ({keys_list})'
+
+
+def fetch_all_issues_with_children(
+    client: JiraClient,
+    initial_jql: str,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> list[JiraIssueResponse]:
+    """Fetch issues matching JQL and all their descendants.
+
+    Uses a queue-based iterative approach to fetch all children:
+    1. Fetch initial issues from JQL
+    2. For each batch of issues, fetch their children via Epic Link/parent
+    3. Check links for "parent of"/"child of" references
+    4. Repeat until no new issues found
+
+    Args:
+        client: Jira client
+        initial_jql: Initial JQL query
+        progress_callback: Optional callback(phase, processed, total)
+
+    Returns:
+        List of all fetched issues (deduplicated by key)
+    """
+    if progress_callback:
+        progress_callback("fetching_issues", 0, 0)
+
+    # Track all fetched issues by key (for deduplication)
+    issues_by_key: dict[str, JiraIssueResponse] = {}
+
+    # Track which issues we've already fetched children for
+    children_fetched_for: set[str] = set()
+
+    # Fetch initial issues
+    for issue_dict in client.search(initial_jql, REQUIRED_FIELDS, expand=["changelog"]):
+        issue = JiraIssueResponse.model_validate(issue_dict)
+        issues_by_key[issue.key] = issue
+
+    if progress_callback:
+        progress_callback("fetching_children", 0, len(issues_by_key))
+
+    # Iteratively fetch children until no new issues found
+    iteration = 0
+    max_iterations = 100  # Safety limit to prevent infinite loops
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        # Find issues that need their children fetched
+        need_children = [
+            key for key in issues_by_key if key not in children_fetched_for
+        ]
+
+        if not need_children:
+            break
+
+        # Mark these as "children fetched" before querying
+        # (to avoid re-fetching if the same keys appear again)
+        for key in need_children:
+            children_fetched_for.add(key)
+
+        # Build JQL to fetch children of all pending issues
+        children_jql = build_children_jql(need_children)
+
+        # Fetch children
+        new_issues_count = 0
+        for issue_dict in client.search(
+            children_jql, REQUIRED_FIELDS, expand=["changelog"]
+        ):
+            issue = JiraIssueResponse.model_validate(issue_dict)
+            if issue.key not in issues_by_key:
+                issues_by_key[issue.key] = issue
+                new_issues_count += 1
+
+        if progress_callback:
+            progress_callback(
+                "fetching_children", len(issues_by_key), len(issues_by_key)
+            )
+
+        # Check for children referenced in links but not yet fetched
+        link_children = get_children_from_links(
+            list(issues_by_key.values()), set(issues_by_key.keys())
+        )
+
+        # Fetch any link-referenced children individually
+        for child_key in link_children:
+            if child_key not in issues_by_key:
+                try:
+                    issue_dict = client.get_issue(
+                        child_key, REQUIRED_FIELDS, expand=["changelog"]
+                    )
+                    issue = JiraIssueResponse.model_validate(issue_dict)
+                    issues_by_key[issue.key] = issue
+                except Exception:
+                    # Issue might not exist or not accessible - skip it
+                    pass
+
+        # If no new issues were added (from JQL or links), we're done
+        if new_issues_count == 0 and len(link_children) == 0:
+            break
+
+    return list(issues_by_key.values())
 
 
 def _collect_all_worklogs(issues: list[JiraIssueResponse]) -> list[JiraWorklogEntry]:
@@ -409,12 +568,8 @@ def import_from_jira(
     """
     update_progress = generate_progress_updater(progress_callback)
 
-    update_progress("fetching_issues", 0, 0)
-
-    # Fetch all issues
-    issues: list[JiraIssueResponse] = []
-    for issue_dict in client.search(jql, REQUIRED_FIELDS, expand=["changelog"]):
-        issues.append(JiraIssueResponse.model_validate(issue_dict))
+    # Fetch all issues including children recursively
+    issues = fetch_all_issues_with_children(client, jql, update_progress)
 
     update_progress("extracting_workers", 0, len(issues))
 

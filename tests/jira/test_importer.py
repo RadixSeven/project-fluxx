@@ -36,8 +36,11 @@ from fluxx.jira.importer import (
     _build_project,
     _collect_all_worklogs,
     _create_history_entries,
+    build_children_jql,
     extract_raw_estimate_data,
+    fetch_all_issues_with_children,
     fetch_and_validate_issues,
+    get_children_from_links,
     import_from_jira,
 )
 from fluxx.jira.models import (
@@ -1034,3 +1037,517 @@ class TestEndToEndImport:
         assert len(warnings) >= 1
         warning_keys = [w.issue_key for w in warnings]
         assert "TEST-2" in warning_keys
+
+
+class TestGetChildrenFromLinks:
+    """Tests for get_children_from_links function."""
+
+    def test_empty_issues(self) -> None:
+        """Empty issue list returns empty set."""
+        result = get_children_from_links([], set())
+        assert result == set()
+
+    def test_no_links(self) -> None:
+        """Issues without links return empty set."""
+        issue = make_issue(key="TEST-1")
+        result = get_children_from_links([issue], set())
+        assert result == set()
+
+    def test_parent_of_outward_link(self) -> None:
+        """'Parent of' outward link identifies child."""
+        parent_of_link = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(name="Parent of"),
+            outward_issue=JiraLinkedIssue(id="22222", key="TEST-2"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[parent_of_link])
+
+        result = get_children_from_links([issue], set())
+
+        assert result == {"TEST-2"}
+
+    def test_child_of_inward_link(self) -> None:
+        """'Child of' inward link identifies child."""
+        child_of_link = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(name="Child of"),
+            inward_issue=JiraLinkedIssue(id="33333", key="TEST-3"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[child_of_link])
+
+        result = get_children_from_links([issue], set())
+
+        assert result == {"TEST-3"}
+
+    def test_excludes_already_fetched(self) -> None:
+        """Already fetched issues are excluded."""
+        parent_of_link = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(name="Parent of"),
+            outward_issue=JiraLinkedIssue(id="22222", key="TEST-2"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[parent_of_link])
+
+        result = get_children_from_links([issue], {"TEST-2"})
+
+        assert result == set()
+
+    def test_multiple_children_from_multiple_issues(self) -> None:
+        """Multiple children from multiple issues are collected."""
+        link1 = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(name="Parent of"),
+            outward_issue=JiraLinkedIssue(id="22222", key="CHILD-1"),
+        )
+        link2 = JiraIssueLink(
+            id="1002",
+            link_type=JiraIssueLinkType(name="Parent of"),
+            outward_issue=JiraLinkedIssue(id="33333", key="CHILD-2"),
+        )
+        issue1 = make_issue(key="PARENT-1", issuelinks=[link1])
+        issue2 = make_issue(key="PARENT-2", issuelinks=[link2])
+
+        result = get_children_from_links([issue1, issue2], set())
+
+        assert result == {"CHILD-1", "CHILD-2"}
+
+
+class TestBuildChildrenJql:
+    """Tests for build_children_jql function."""
+
+    def test_single_key(self) -> None:
+        """JQL for single parent key."""
+        result = build_children_jql(["EPIC-1"])
+        assert result == '"Epic Link" in ("EPIC-1") OR parent in ("EPIC-1")'
+
+    def test_multiple_keys(self) -> None:
+        """JQL for multiple parent keys."""
+        result = build_children_jql(["EPIC-1", "STORY-2", "TASK-3"])
+        expected = (
+            '"Epic Link" in ("EPIC-1", "STORY-2", "TASK-3") OR '
+            'parent in ("EPIC-1", "STORY-2", "TASK-3")'
+        )
+        assert result == expected
+
+
+class TestFetchAllIssuesWithChildren:
+    """Tests for fetch_all_issues_with_children function."""
+
+    def test_no_children(self) -> None:
+        """Issues without children are returned directly."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "12345",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Epic without children",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        # First search returns the epic, second search (for children) returns empty
+        mock_client.search.side_effect = [
+            iter([issue_dict]),  # Initial query
+            iter([]),  # Children query
+        ]
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "EPIC-1"')
+
+        assert len(result) == 1
+        assert result[0].key == "EPIC-1"
+
+    def test_fetches_direct_children(self) -> None:
+        """Fetches children via Epic Link and parent fields."""
+        mock_client = MagicMock()
+
+        epic_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        child_dict = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Story under epic",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        # Sequence of search calls
+        mock_client.search.side_effect = [
+            iter([epic_dict]),  # Initial query
+            iter([child_dict]),  # Children of epic
+            iter([]),  # Children of story (none)
+        ]
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "EPIC-1"')
+
+        assert len(result) == 2
+        keys = {issue.key for issue in result}
+        assert keys == {"EPIC-1", "STORY-1"}
+
+    def test_fetches_nested_children(self) -> None:
+        """Fetches multiple levels of children."""
+        mock_client = MagicMock()
+
+        epic_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        story_dict = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Story",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        subtask_dict = {
+            "id": "10003",
+            "key": "SUB-1",
+            "fields": {
+                "summary": "Subtask",
+                "description": "Test",
+                "issuetype": {"id": "10002", "name": "Sub-task", "subtask": True},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10002", "key": "STORY-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([epic_dict]),  # Initial query
+            iter([story_dict]),  # Children of epic
+            iter([subtask_dict]),  # Children of story
+            iter([]),  # Children of subtask (none)
+        ]
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "EPIC-1"')
+
+        assert len(result) == 3
+        keys = {issue.key for issue in result}
+        assert keys == {"EPIC-1", "STORY-1", "SUB-1"}
+
+    def test_deduplicates_issues(self) -> None:
+        """Duplicate issues from different queries are deduplicated."""
+        mock_client = MagicMock()
+
+        epic_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        story_dict = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Story",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        # Simulate story appearing in both initial and children query
+        mock_client.search.side_effect = [
+            iter([epic_dict, story_dict]),  # Initial query returns both
+            iter([story_dict]),  # Children query also returns story (duplicate)
+            iter([]),  # Children of story (none)
+        ]
+
+        result = fetch_all_issues_with_children(mock_client, "project = TEST")
+
+        assert len(result) == 2  # Deduplicated
+        keys = {issue.key for issue in result}
+        assert keys == {"EPIC-1", "STORY-1"}
+
+    def test_fetches_children_from_links(self) -> None:
+        """Fetches children referenced via 'parent of' links."""
+        mock_client = MagicMock()
+
+        parent_of_link_dict = {
+            "id": "1001",
+            "type": {"name": "Parent of"},
+            "outwardIssue": {"id": "10002", "key": "CHILD-1"},
+        }
+
+        parent_dict = {
+            "id": "10001",
+            "key": "PARENT-1",
+            "fields": {
+                "summary": "Parent with link",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [parent_of_link_dict],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        child_dict = {
+            "id": "10002",
+            "key": "CHILD-1",
+            "fields": {
+                "summary": "Child via link",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        # Search returns parent, then children query returns empty,
+        # but get_issue is called to fetch the linked child
+        mock_client.search.side_effect = [
+            iter([parent_dict]),  # Initial query
+            iter([]),  # Children via Epic Link/parent (none)
+            iter([]),  # Children of linked child (none)
+        ]
+        mock_client.get_issue.return_value = child_dict
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "PARENT-1"')
+
+        assert len(result) == 2
+        keys = {issue.key for issue in result}
+        assert keys == {"PARENT-1", "CHILD-1"}
+
+    def test_handles_get_issue_failure_gracefully(self) -> None:
+        """get_issue failure for linked child is handled gracefully."""
+        mock_client = MagicMock()
+
+        parent_of_link_dict = {
+            "id": "1001",
+            "type": {"name": "Parent of"},
+            "outwardIssue": {"id": "10002", "key": "INACCESSIBLE-1"},
+        }
+
+        parent_dict = {
+            "id": "10001",
+            "key": "PARENT-1",
+            "fields": {
+                "summary": "Parent with link to inaccessible child",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [parent_of_link_dict],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([parent_dict]),  # Initial query
+            iter([]),  # Children via Epic Link/parent (none)
+        ]
+        # get_issue fails (issue doesn't exist or not accessible)
+        mock_client.get_issue.side_effect = Exception("Issue not found")
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "PARENT-1"')
+
+        # Only parent should be returned, inaccessible child is skipped
+        assert len(result) == 1
+        assert result[0].key == "PARENT-1"
+
+    def test_progress_callback_called(self) -> None:
+        """Progress callback is called during fetching."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "12345",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        progress_calls: list[tuple[str, int, int]] = []
+
+        def progress_callback(phase: str, processed: int, total: int) -> None:
+            progress_calls.append((phase, processed, total))
+
+        fetch_all_issues_with_children(mock_client, "project = TEST", progress_callback)
+
+        assert len(progress_calls) > 0
+        phases = [call[0] for call in progress_calls]
+        assert "fetching_issues" in phases
+        assert "fetching_children" in phases
+
+
+class TestImportWithChildFetching:
+    """Tests for import_from_jira with child fetching."""
+
+    def test_import_fetches_children(self) -> None:
+        """Import from JQL fetches children of matched issues."""
+        mock_client = MagicMock()
+
+        epic_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        story_dict = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Story under epic",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([epic_dict]),  # Initial query returns only epic
+            iter([story_dict]),  # Children query returns story
+            iter([]),  # No more children
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        result = import_from_jira(
+            client=mock_client,
+            jql='key = "EPIC-1"',  # Only matches epic, but children should be fetched
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Both epic and story should be imported
+        assert len(result.project.dag.node_map) == 2
+
+        # Verify hierarchy
+        tasks = {}
+        for _node_id, persistent_id in result.project.dag.node_map.items():
+            if persistent_id in result.project.persistent_tasks:
+                ptask = result.project.persistent_tasks[persistent_id]
+                task = ptask.versions[result.project.dag.current_version_id]
+                if task.jira_reference is not None:
+                    tasks[str(task.jira_reference.issue_key)] = task
+
+        assert "EPIC-1" in tasks
+        assert "STORY-1" in tasks
+        assert tasks["EPIC-1"].parent_id is None
+        assert tasks["STORY-1"].parent_id is not None

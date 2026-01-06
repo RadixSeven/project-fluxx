@@ -1,0 +1,20 @@
+{
+  "version": "1.2",
+  "metadata": {
+    "name": "Untitled",
+    "created": "2026-01-06T12:57:40.088821Z",
+    "last_modified": "2026-01-06T12:57:40.088821Z"
+  },
+  "workers": [],
+  "dag": {
+    "id": "dag_1767704260.088821",
+    "current_version_id": "v_1767704260.088821",
+    "node_map": {}
+  },
+  "persistent_tasks": {},
+  "persistent_branches": {},
+  "history_events": [],
+  "current_event_id": null,
+  "simulations": [],
+  "jira_config": null
+}
