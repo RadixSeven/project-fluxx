@@ -54,15 +54,15 @@ def _make_issue(
     assignee = None
     if assignee_id:
         assignee = JiraUser(
-            accountId=assignee_id,
-            displayName=assignee_name or assignee_id,
+            account_id=assignee_id,
+            display_name=assignee_name or assignee_id,
         )
 
     worklog = None
     if worklogs is not None:
         worklog = JiraWorklog(
-            startAt=0,
-            maxResults=len(worklogs),
+            start_at=0,
+            max_results=len(worklogs),
             total=len(worklogs),
             worklogs=worklogs,
         )
@@ -74,7 +74,7 @@ def _make_issue(
     timetracking = None
     if original_estimate_seconds is not None:
         timetracking = JiraTimeTracking(
-            originalEstimateSeconds=original_estimate_seconds,
+            original_estimate_seconds=original_estimate_seconds,
         )
 
     fields = JiraIssueFields(
@@ -88,7 +88,7 @@ def _make_issue(
         parent=parent,
         issuelinks=links,
         timetracking=timetracking,
-        customfield_10473=story_points,
+        story_points=story_points,
     )
 
     return JiraIssueResponse(
@@ -108,12 +108,12 @@ def _make_worklog(
     return JiraWorklogEntry(
         id="wl-1",
         author=JiraUser(
-            accountId=author_id,
-            displayName=author_name or author_id,
+            account_id=author_id,
+            display_name=author_name or author_id,
         ),
         started=started,
-        timeSpent="1h",
-        timeSpentSeconds=time_spent_seconds,
+        time_spent="1h",
+        time_spent_seconds=time_spent_seconds,
     )
 
 
@@ -125,11 +125,13 @@ def _make_link(
     """Helper to create issue links."""
     return JiraIssueLink(
         id="link-1",
-        type=JiraIssueLinkType(name=link_type_name),
-        outwardIssue=JiraLinkedIssue(id="out-id", key=outward_key)
+        link_type=JiraIssueLinkType(name=link_type_name),
+        outward_issue=JiraLinkedIssue(id="out-id", key=outward_key)
         if outward_key
         else None,
-        inwardIssue=JiraLinkedIssue(id="in-id", key=inward_key) if inward_key else None,
+        inward_issue=JiraLinkedIssue(id="in-id", key=inward_key)
+        if inward_key
+        else None,
     )
 
 
@@ -587,9 +589,9 @@ class TestExtractDependenciesEdgeCases:
         # Create link with no target
         link = JiraIssueLink(
             id="link-1",
-            type=JiraIssueLinkType(name="Depends"),
-            outwardIssue=None,
-            inwardIssue=None,
+            link_type=JiraIssueLinkType(name="Depends"),
+            outward_issue=None,
+            inward_issue=None,
         )
         issue = _make_issue(key="FHIR-100", links=[link])
         task_map = {"FHIR-200": "task-200-id"}
@@ -607,9 +609,9 @@ class TestBuildHierarchyEdgeCases:
         # Create child-of link
         link = JiraIssueLink(
             id="link-1",
-            type=JiraIssueLinkType(name="Child of"),
-            inwardIssue=JiraLinkedIssue(id="parent-id", key="EPIC-1"),
-            outwardIssue=None,
+            link_type=JiraIssueLinkType(name="Child of"),
+            inward_issue=JiraLinkedIssue(id="parent-id", key="EPIC-1"),
+            outward_issue=None,
         )
         issues = [
             _make_issue(key="EPIC-1"),

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from fluxx.data.models import (
     BranchId,
+    DAGId,
     DAGVersionId,
     EventId,
     PersistentObjectId,
@@ -56,6 +57,17 @@ def generate_persistent_object_id() -> PersistentObjectId:
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     random_suffix = secrets.token_hex(4)
     return PersistentObjectId(f"pobj_{timestamp}_{random_suffix}")
+
+
+def generate_dag_id() -> DAGId:
+    """Generate a unique DAG ID.
+
+    Returns:
+        A unique DAGId
+    """
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+    random_suffix = secrets.token_hex(4)
+    return DAGId(f"dag_{timestamp}_{random_suffix}")
 
 
 def generate_dag_version_id() -> DAGVersionId:

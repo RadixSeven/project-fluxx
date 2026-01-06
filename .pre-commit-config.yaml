@@ -38,6 +38,8 @@ repos:
           - PySide6-stubs
           - pytest
           - pytest-qt
+          - scipy
+          - scipy-stubs
           - types-networkx
           - rapidfuzz
           - numpy

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class JiraUser(BaseModel):
     """Represents a Jira user."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     account_id: str = Field(alias="accountId")
     display_name: str = Field(alias="displayName")
@@ -40,7 +40,7 @@ class JiraStatus(BaseModel):
 class JiraTimeTracking(BaseModel):
     """Represents Jira time tracking fields."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     original_estimate: str | None = Field(default=None, alias="originalEstimate")
     remaining_estimate: str | None = Field(default=None, alias="remainingEstimate")
@@ -86,7 +86,7 @@ class JiraLinkedIssue(BaseModel):
 class JiraIssueLink(BaseModel):
     """Represents a link between issues."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     id: str
     link_type: JiraIssueLinkType = Field(alias="type")
@@ -97,22 +97,22 @@ class JiraIssueLink(BaseModel):
 class JiraWorklogEntry(BaseModel):
     """Represents a single worklog entry."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    id: str
+    id: str = Field(default="worklog-1")
     author: JiraUser
     comment: str | None = None
     started: str
-    time_spent: str = Field(alias="timeSpent")
+    time_spent: str = Field(default="1h", alias="timeSpent")
     time_spent_seconds: int = Field(alias="timeSpentSeconds")
 
 
 class JiraWorklog(BaseModel):
     """Represents a worklog container with entries."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    start_at: int = Field(alias="startAt")
+    start_at: int = Field(default=0, alias="startAt")
     max_results: int = Field(alias="maxResults")
     total: int
     worklogs: list[JiraWorklogEntry]
@@ -121,7 +121,7 @@ class JiraWorklog(BaseModel):
 class JiraIssueFields(BaseModel):
     """Represents the fields object of a Jira issue."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
     summary: str
     description: str | None = None
