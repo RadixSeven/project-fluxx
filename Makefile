@@ -80,7 +80,7 @@ verify-coverage:
 	@echo "==> Verifying coverage thresholds and policy exception list..."
 	@if [ -f dont_commit_waiting_for_review ]; then \
 		echo "  [BYPASS] dont_commit_waiting_for_review exists - skipping verification"; \
-		echo "  WARNING: Remove this file and update approved_exceptions_to_static_analysis_policy.txt before committing"; \
+		echo "  WARNING: A human should remove this file and update approved_exceptions_to_static_analysis_policy.txt before committing"; \
 	else \
 		if ! $(PYTHON) -c "$$COVERAGE_CHECK_SCRIPT"; then \
 			echo "Coverage thresholds not met!"; \
@@ -104,10 +104,9 @@ verify-coverage:
 				echo "  To add new policy exceptions or documentation mentioning policy exceptions:"; \
 				echo "    1. Create file: touch dont_commit_waiting_for_review"; \
 				echo "    2. Run checks (will pass with bypass)"; \
-				echo "    3. Have a human review the changes"; \
-				echo "    4. Have a human update the policy exception list:"; \
+				echo "    3. Have a human review the changes, update the exception list, remove the bypass, and commit the updated list. The human may type:"; \
 				echo "       make regenerate-policy-exceptions"; \
-				echo "    5. Have the human remove the bypass and commit the updated list:"; \
+				echo "       git diff approved_exceptions_to_static_analysis_policy.txt"; \
 				echo "       rm dont_commit_waiting_for_review"; \
 				echo "       git add approved_exceptions_to_static_analysis_policy.txt"; \
 				echo "       git commit"; \

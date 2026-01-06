@@ -110,7 +110,8 @@ The codebase is organized into three main packages:
 
 We want to ensure type safety, so all uses of `type: ignore`, `pragma: no cover`,
 `cast`, and `Any` must be justified and undergo human review. This is enforced by listing
-all reviewed uses in `approved_exceptions_to_static_analysis_policy.txt`. 
+all reviewed uses in `approved_exceptions_to_static_analysis_policy.txt`. You may
+not modify `approved_exceptions_to_static_analysis_policy.txt`. 
 `make all_checks` checks it to ensure no new exceptions are added without human review.
 
 This is an aid, helping us avoid introducing new violations. It depends on our

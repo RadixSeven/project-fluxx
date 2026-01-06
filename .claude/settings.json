@@ -10,6 +10,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/deny_check_bypassing_strings.py\"",
+            "timeout": 600
+          }
+        ]
+      }
     ]
   },
   "files": {
