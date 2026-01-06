@@ -84,6 +84,18 @@ The codebase is organized into three main packages:
 **`fluxx.visualization`** - Chart generation
 - `gantt.py`: Gantt chart generation using linear programming optimization (pyomo)
 
+**`fluxx.jira`** - Jira integration
+- `auth.py`: Token management (read tokens from `~/.fluxx/jira_tokens/`)
+- `client.py`: HTTP client with rate limiting and retry logic
+- `api_types.py`: Pydantic models for Jira API responses
+- `models.py`: Fluxx-side Jira models (`JiraReference`, `JiraIssueKey`, `JiraConfig`)
+- `extraction.py`: Extract Fluxx data (workers, tasks) from Jira responses
+- `distributions.py`: Bin-based duration distribution fitting from historical data
+- `importer.py`: Epic import orchestration
+
+**`fluxx.gui.jira`** - Jira GUI components
+- `import_dialog.py`: Dialog for importing projects from Jira
+
 ### Key Architectural Patterns
 
 **Endpoint-Based Dependencies**: Dependencies connect specific endpoints (start/end for tasks, occurrence_point for branches, possible world IDs for branch outcomes). This enables precise temporal constraints and cycle detection in the dependency graph.
