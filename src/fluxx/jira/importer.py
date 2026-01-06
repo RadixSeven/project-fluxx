@@ -60,8 +60,11 @@ class ImportProgress:
 
 
 @dataclass
-class ImportWarning:
-    """Warning generated during import."""
+class ImportWarningFluxx:
+    """Warning generated during import.
+
+    The Fluxx suffix distinguishes it from the builtin ImportWarning
+    """
 
     issue_key: str
     message: str
@@ -72,7 +75,7 @@ class ImportResult:
     """Result of a Jira import operation."""
 
     project: Project
-    warnings: list[ImportWarning] = field(default_factory=list)
+    warnings: list[ImportWarningFluxx] = field(default_factory=list)
     history_entries: list[JiraDurationHistoryEntry] = field(default_factory=list)
 
 
@@ -221,7 +224,7 @@ def _build_project(
     bins: list[EstimateBin],
     fallback: ShiftedLognormal | None,
     project_name: str,
-) -> tuple[Project, list[ImportWarning]]:
+) -> tuple[Project, list[ImportWarningFluxx]]:
     """Build a Project from extracted Jira data.
 
     Args:
@@ -235,12 +238,12 @@ def _build_project(
     Returns:
         Tuple of (Project, list of warnings)
     """
-    warnings: list[ImportWarning] = []
+    warnings: list[ImportWarningFluxx] = []
 
     # Build hierarchy
     hierarchy, hierarchy_warnings = build_hierarchy(issues)
     for hw in hierarchy_warnings:
-        warnings.append(ImportWarning(issue_key=hw.issue_key, message=hw.message))
+        warnings.append(ImportWarningFluxx(issue_key=hw.issue_key, message=hw.message))
 
     # Create mapping from Jira account ID to WorkerId
     workers_by_jira_id: dict[str, WorkerId] = {}
@@ -487,7 +490,7 @@ def import_from_jira(
 def fetch_and_validate_issues(
     client: JiraClient,
     jql: str,
-) -> tuple[list[JiraIssueResponse], list[ImportWarning]]:
+) -> tuple[list[JiraIssueResponse], list[ImportWarningFluxx]]:
     """Fetch issues from Jira and validate them.
 
     This is a lower-level function for fetching issues without
@@ -500,7 +503,7 @@ def fetch_and_validate_issues(
     Returns:
         Tuple of (issues, warnings)
     """
-    warnings: list[ImportWarning] = []
+    warnings: list[ImportWarningFluxx] = []
     issues: list[JiraIssueResponse] = []
 
     for issue_dict in client.search(jql, REQUIRED_FIELDS, expand=["changelog"]):
@@ -511,11 +514,13 @@ def fetch_and_validate_issues(
             key = issue_dict.get("key", "unknown")
             if isinstance(key, str):
                 warnings.append(
-                    ImportWarning(issue_key=key, message=f"Validation error: {e}")
+                    ImportWarningFluxx(issue_key=key, message=f"Validation error: {e}")
                 )
             else:
                 warnings.append(
-                    ImportWarning(issue_key="unknown", message=f"Validation error: {e}")
+                    ImportWarningFluxx(
+                        issue_key="unknown", message=f"Validation error: {e}"
+                    )
                 )
 
     return issues, warnings

@@ -31,7 +31,7 @@ from fluxx.jira.distributions import EstimateBin
 from fluxx.jira.importer import (
     ImportProgress,
     ImportResult,
-    ImportWarning,
+    ImportWarningFluxx,
     _build_duration_distribution,
     _build_project,
     _collect_all_worklogs,
@@ -445,7 +445,7 @@ class TestImportWarning:
 
     def test_creation(self) -> None:
         """ImportWarning can be created."""
-        warning = ImportWarning(issue_key="TEST-1", message="Test warning")
+        warning = ImportWarningFluxx(issue_key="TEST-1", message="Test warning")
         assert warning.issue_key == "TEST-1"
         assert warning.message == "Test warning"
 
