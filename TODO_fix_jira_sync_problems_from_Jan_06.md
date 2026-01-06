@@ -1,32 +1,47 @@
 # TODO: Fix Jira Sync Problems (January 6, 2026)
 
-## Status: Planning
+## Status: In Progress
 
 ## Main Tasks
 
 ### Task 1: Fix Import Bug - Import Child Issues
-- [ ] Investigate why `jql='key=FHIR-3323'` doesn't import child issues
-- [ ] Modify import to fetch and include all children of imported issues
-- [ ] Handle "child of" links in addition to direct parent/child relationships
+- [ ] Create `fetch_children_for_issues()` function that fetches children via:
+  - "Epic Link" = {key} OR parent = {key} queries
+  - "parent of"/"child of" links
+- [ ] Implement queue-based iterative fetching (not recursive)
+- [ ] Track fetched issue keys to avoid duplicate fetches
+- [ ] Track which issues have had their children fetched
+- [ ] Deduplicate results
+- [ ] Modify `import_from_jira()` to use child fetching after initial query
 - [ ] Add tests for child import functionality
+- [ ] Commit after Task 1 complete
 
 ### Task 2: Implement Sync Functionality
-- [ ] Review Phase 5.2 from TODO_mvp_jira_sync.md
-- [ ] Implement sync logic for updating existing tasks from Jira
-- [ ] Handle new children, deleted children, and changed parent relationships
-- [ ] Update links during sync
-- [ ] Add GUI integration (Phase 6)
+- [ ] Implement sync logic in importer.py:
+  - Update existing tasks (match by server_url, issue_key)
+  - Delete tasks removed from Jira
+  - Handle parent-child relationship changes
+  - Use same child-fetching logic as import
+- [ ] Implement rollback on sync failure (save project state before sync)
+- [ ] Add GUI: "Update from Jira..." menu item
+  - Syncs all Jira-linked tasks in current project
+  - Shows progress dialog
 - [ ] Add tests for sync functionality
+- [ ] Commit after Task 2 complete
 
 ### Task 3: Audit TODO_mvp_jira_sync.md for Missing Implementations
 - [ ] Review all phases for missing logic
 - [ ] Verify GUI is connected to all implemented logic
 - [ ] Document any gaps found
 - [ ] Implement missing pieces
+- [ ] Commit after Task 3 complete
 
 ## Progress Log
 
-(Will be updated as work progresses)
+### January 6, 2026
+- Created TODO file with clarifying questions
+- Received user responses to Q1.1-Q1.5
+- Beginning implementation
 
 ---
 
@@ -74,7 +89,39 @@ a) Sync all Jira-linked tasks in the current project?
 b) Ask the user which epic/issues to sync?
 c) Something else?
 
-(Awaiting responses)
+### Responses Set 1 (January 6, 2026)
+
+#### A1.1: Child Issue Fetching Strategy
+Don't automatically expand the query. Do multiple queries iteratively:
+1. Get the issues in the initial query
+2. Then get their children
+3. Then get any remaining children of issues you've fetched
+4. Repeat until you've covered all child issues
+
+Include children established by "parent of"/"child of" links in recursive search. Use queue-based approach (iterative) rather than explicit recursion for maintainability.
+
+#### A1.2: Recursive Child Fetching
+Yes, get all descendants recursively. No maximum depth. Handle potential cycles due to weak link checking:
+- Avoid fetching issues multiple times when possible
+- Deduplicate fetched tickets to handle when an issue is retrieved multiple times
+- Track when you've retrieved all children of an issue to avoid doing it again
+
+#### A1.3: Sync Functionality - Scope
+a) Sync should DELETE tasks that were removed from Jira
+b) Sync should HANDLE parent-child relationship changes
+c) Sync should USE THE SAME child-fetching logic as import (recursively get all children)
+
+#### A1.4: Tracking Synced Issues
+Not necessary to store synced issue keys separately. All issues with `jira_reference` set were synchronized.
+
+Important clarifications:
+- If sync fails (e.g., server goes down or user aborts), Project Fluxx should ROLL BACK to the version before sync started
+- When doing a new import, Project Fluxx should also UPDATE all existing Jira-linked tasks
+- Sync ("Update from Jira..." or spawned implicitly by import) updates ALL jira-linked issues regardless of server
+- Batch retrievals for efficiency
+
+#### A1.5: GUI for Sync
+Option a) - "Update from Jira..." should sync all Jira-linked tasks in the current project
 
 ---
 
