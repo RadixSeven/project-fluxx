@@ -36,10 +36,16 @@ from fluxx.jira.importer import (
     _build_project,
     _collect_all_worklogs,
     _create_history_entries,
+    extract_raw_estimate_data,
     fetch_and_validate_issues,
     import_from_jira,
 )
-from fluxx.jira.models import JiraConfig, JiraSyncMetadata
+from fluxx.jira.models import (
+    JiraConfig,
+    JiraDurationHistoryEntry,
+    JiraIssueKey,
+    JiraSyncMetadata,
+)
 
 
 def make_issue(
@@ -707,3 +713,47 @@ class TestBuildProjectWithHierarchyWarning:
         assert len(warnings) == 1
         assert "Sub-epic" in warnings[0].message
         assert "EPIC-2" in warnings[0].issue_key
+
+
+class TestExtractRawEstimateData:
+    """Tests for extract_raw_estimate_data."""
+
+    def test_extracts_estimate_and_actual_hours(self) -> None:
+        """Converts estimate to hours and preserves actual seconds."""
+        entry = JiraDurationHistoryEntry(
+            server_url="https://jira.example.com",
+            issue_key=JiraIssueKey.from_string("TEST-1"),
+            original_estimate_seconds=7200,
+            total_logged_time_seconds=3600,
+            worker_jira_id="user1",
+            issue_type="Story",
+        )
+
+        result = extract_raw_estimate_data([entry])
+
+        assert result == [(2.0, 1.0)]
+
+    def test_handles_missing_estimate_or_actual(self) -> None:
+        """Retains None when estimate or actual is missing."""
+        entries = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("TEST-2"),
+                original_estimate_seconds=None,
+                total_logged_time_seconds=1800,
+                worker_jira_id=None,
+                issue_type="Bug",
+            ),
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("TEST-3"),
+                original_estimate_seconds=3600,
+                total_logged_time_seconds=None,
+                worker_jira_id=None,
+                issue_type="Task",
+            ),
+        ]
+
+        result = extract_raw_estimate_data(entries)
+
+        assert result == [(None, 0.5), (1.0, None)]

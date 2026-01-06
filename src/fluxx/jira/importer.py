@@ -491,7 +491,7 @@ def extract_raw_estimate_data(
 
     for entry in history_entries:
         if entry.total_logged_time_seconds is not None:
-            actual_hours = entry.total_logged_time_seconds
+            actual_hours = entry.total_logged_time_seconds / 3600.0
         else:
             actual_hours = None
 
