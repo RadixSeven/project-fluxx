@@ -10,14 +10,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
+from fluxx.data.id_generation import (
+    generate_dag_id,
+    generate_dag_version_id,
+    generate_event_id,
+)
 from fluxx.data.models import (
     DAG,
     BranchId,
     ConstraintType,
+    DAGEvent,
+    DAGVersionId,
     Dependency,
     DoneCompletion,
     Endpoint,
+    EventType,
     JiraDurationDistribution,
     PersistentBranch,
     PersistentObjectId,
@@ -41,6 +48,7 @@ from fluxx.jira.distributions import (
 from fluxx.jira.extraction import (
     CHILD_OF_LINK_TYPES,
     PARENT_OF_LINK_TYPES,
+    HierarchyEntry,
     build_hierarchy,
     calculate_hours_per_workday,
     extract_completion,
@@ -48,7 +56,11 @@ from fluxx.jira.extraction import (
     extract_task,
     extract_workers_with_no_hours,
 )
-from fluxx.jira.models import JiraConfig, JiraDurationHistoryEntry, JiraIssueKey
+from fluxx.jira.models import (
+    JiraConfig,
+    JiraDurationHistoryEntry,
+    JiraIssueKey,
+)
 
 
 @dataclass
@@ -78,6 +90,17 @@ class ImportResult:
     project: Project
     warnings: list[ImportWarningFluxx] = field(default_factory=list)
     history_entries: list[JiraDurationHistoryEntry] = field(default_factory=list)
+
+
+@dataclass
+class SyncResult:
+    """Result of a Jira sync operation."""
+
+    project: Project
+    updated_count: int = 0
+    created_count: int = 0
+    deleted_keys: list[str] = field(default_factory=list)
+    warnings: list[ImportWarningFluxx] = field(default_factory=list)
 
 
 # Required fields for Jira API requests
@@ -717,3 +740,428 @@ def fetch_and_validate_issues(
                 )
 
     return issues, warnings
+
+
+def collect_jira_referenced_tasks(
+    project: Project,
+) -> dict[str, dict[str, tuple[TaskId, Task]]]:
+    """Collect all tasks with Jira references, grouped by server URL.
+
+    Args:
+        project: The project to scan
+
+    Returns:
+        Dict mapping server_url -> issue_key -> (task_id, task)
+    """
+    result: dict[str, dict[str, tuple[TaskId, Task]]] = defaultdict(dict)
+    dag_version = project.dag.current_version_id
+
+    for node_id, persistent_id in project.dag.node_map.items():
+        if persistent_id not in project.persistent_tasks:
+            continue
+
+        ptask = project.persistent_tasks[persistent_id]
+        task = ptask.versions.get(dag_version)
+        if task is None:
+            continue
+
+        if task.jira_reference is None:
+            continue
+
+        server_url = task.jira_reference.server_url
+        issue_key = str(task.jira_reference.issue_key)
+        # node_id is actually TaskId since we checked it's in persistent_tasks
+        task_id = TaskId(str(node_id))
+        result[server_url][issue_key] = (task_id, task)
+
+    return dict(result)
+
+
+def build_sync_jql(issue_keys: list[str]) -> str:
+    """Build JQL to fetch specific issues by key.
+
+    Args:
+        issue_keys: List of issue keys to fetch
+
+    Returns:
+        JQL query string
+    """
+    quoted_keys = [f'"{key}"' for key in issue_keys]
+    return f"key in ({', '.join(quoted_keys)})"
+
+
+def _update_parent_relationships(
+    issues: list[JiraIssueResponse],
+    hierarchy: dict[str, HierarchyEntry],
+    task_id_by_key: dict[str, TaskId],
+    new_node_map: dict[TaskId | BranchId, PersistentObjectId],
+    new_persistent_tasks: dict[PersistentObjectId, PersistentTask],
+    new_version_id: DAGVersionId,
+) -> None:
+    """Update parent relationships for tasks based on Jira hierarchy.
+
+    This is extracted as a separate function to enable direct testing of
+    edge cases where data structures may be inconsistent.
+
+    Args:
+        issues: List of Jira issues to process
+        hierarchy: Map of issue_key -> HierarchyEntry with parent info
+        task_id_by_key: Map of issue_key -> TaskId
+        new_node_map: Map of NodeId -> PersistentObjectId (may contain branches)
+        new_persistent_tasks: Map of PersistentObjectId -> PersistentTask
+        new_version_id: The new DAG version ID for updated tasks
+    """
+    for issue in issues:
+        issue_key = issue.key
+        entry = hierarchy.get(issue_key)
+        if entry is None:
+            continue
+
+        maybe_task_id = task_id_by_key.get(issue_key)
+        if maybe_task_id is None:
+            continue
+        tid = maybe_task_id
+
+        parent_task_id: TaskId | None = None
+        if entry.parent_key and entry.parent_key in task_id_by_key:
+            parent_task_id = task_id_by_key[entry.parent_key]
+
+        # Get the persistent task and update parent_id
+        maybe_persistent_id = new_node_map.get(tid)
+        if maybe_persistent_id is None:
+            continue
+        pid = maybe_persistent_id
+
+        maybe_ptask = new_persistent_tasks.get(pid)
+        if maybe_ptask is None:
+            continue
+        ptask = maybe_ptask
+
+        task = ptask.versions.get(new_version_id)
+        if task is None:
+            continue
+
+        if task.parent_id != parent_task_id:
+            updated_task = task.model_copy(update={"parent_id": parent_task_id})
+            new_versions = dict(ptask.versions)
+            new_versions[new_version_id] = updated_task
+            new_persistent_tasks[pid] = ptask.model_copy(
+                update={"versions": new_versions}
+            )
+
+
+def _sync_update_project(
+    project: Project,
+    issues: list[JiraIssueResponse],
+    existing_tasks: dict[str, tuple[TaskId, Task]],
+    server_url: str,
+    server_timezone: str,
+) -> tuple[Project, int, int, list[str], list[ImportWarningFluxx]]:
+    """Update project with synced Jira data.
+
+    Args:
+        project: The project to update
+        issues: Fresh Jira issues
+        existing_tasks: Map of issue_key -> (task_id, task) for existing tasks
+        server_url: Jira server URL
+        server_timezone: Server timezone for datetime parsing
+
+    Returns:
+        Tuple of (updated_project, updated_count, created_count,
+                  deleted_keys, warnings)
+    """
+    warnings: list[ImportWarningFluxx] = []
+    updated_count = 0
+    created_count = 0
+
+    # Build a set of issue keys we received from Jira
+    fetched_keys = {issue.key for issue in issues}
+
+    # Find keys that were in the project but no longer in Jira
+    deleted_keys = [key for key in existing_tasks if key not in fetched_keys]
+
+    # Extract workers from all issues (needed for completion extraction)
+    workers_by_jira_id: dict[str, WorkerId] = {}
+    for worker in project.workers:
+        if worker.jira_account_id:
+            workers_by_jira_id[worker.jira_account_id] = worker.id
+
+    # Also extract any new workers from the issues
+    new_workers_from_issues = extract_workers_with_no_hours(issues)
+    for jira_id, worker in new_workers_from_issues.items():
+        if jira_id not in workers_by_jira_id:
+            workers_by_jira_id[jira_id] = worker.id
+
+    # Build hierarchy from fetched issues
+    hierarchy, hierarchy_warnings = build_hierarchy(issues)
+    for hw in hierarchy_warnings:
+        warnings.append(ImportWarningFluxx(issue_key=hw.issue_key, message=hw.message))
+
+    # Create new DAG version for all changes
+    new_version_id = generate_dag_version_id()
+    event_id = generate_event_id()
+
+    # Copy persistent tasks and update/create as needed
+    new_persistent_tasks = dict(project.persistent_tasks)
+    new_node_map = dict(project.dag.node_map)
+
+    # Track task_id by issue_key for parent resolution
+    task_id_by_key: dict[str, TaskId] = {}
+
+    # Process each fetched issue
+    for issue in issues:
+        issue_key = issue.key
+        existing = existing_tasks.get(issue_key)
+
+        if existing is not None:
+            # Update existing task
+            task_id, old_task = existing
+            task_id_by_key[issue_key] = task_id
+
+            # Extract new completion and other data
+            completion_result = extract_completion(
+                issue, workers_by_jira_id, server_timezone
+            )
+
+            # Get duration distribution
+            original_estimate = None
+            remaining_estimate = None
+            if issue.fields.timetracking:
+                original_estimate = issue.fields.timetracking.original_estimate_seconds
+                remaining_estimate = (
+                    issue.fields.timetracking.remaining_estimate_seconds
+                )
+
+            new_dist = JiraDurationDistribution(
+                original_estimate_seconds=original_estimate,
+                story_points=issue.fields.story_points,
+                remaining_estimate_seconds=remaining_estimate,
+            )
+
+            # Update the task
+            updated_task = old_task.model_copy(
+                update={
+                    "title": issue.fields.summary,
+                    "description": issue.fields.description or "",
+                    "completion": completion_result.completion,
+                    "duration_distribution": new_dist,
+                    "jira_issue_type": issue.fields.issuetype.name,
+                    # parent_id updated in second pass
+                }
+            )
+
+            # Update persistent task with new version
+            persistent_id = project.dag.node_map[task_id]
+            ptask = new_persistent_tasks[persistent_id]
+            new_versions = dict(ptask.versions)
+            new_versions[new_version_id] = updated_task
+            new_persistent_tasks[persistent_id] = ptask.model_copy(
+                update={"versions": new_versions}
+            )
+
+            updated_count += 1
+        else:
+            # Create new task
+            new_task = extract_task(
+                issue=issue,
+                workers=workers_by_jira_id,
+                server_url=server_url,
+                parent_id=None,  # Set in second pass
+                server_timezone=server_timezone,
+            )
+            task_id_by_key[issue_key] = new_task.id
+
+            # Create persistent task
+            persistent_id = PersistentObjectId(str(new_task.id))
+            new_persistent_tasks[persistent_id] = PersistentTask(
+                id=persistent_id,
+                versions={new_version_id: new_task},
+            )
+            new_node_map[new_task.id] = persistent_id
+
+            created_count += 1
+
+    # Second pass: update parent relationships
+    _update_parent_relationships(
+        issues=issues,
+        hierarchy=hierarchy,
+        task_id_by_key=task_id_by_key,
+        new_node_map=new_node_map,
+        new_persistent_tasks=new_persistent_tasks,
+        new_version_id=new_version_id,
+    )
+
+    # Copy versions for tasks not touched in this sync
+    for persistent_id, ptask in project.persistent_tasks.items():
+        if persistent_id in new_persistent_tasks:
+            # Check if we've already added new_version_id
+            existing_ptask = new_persistent_tasks[persistent_id]
+            if new_version_id not in existing_ptask.versions:
+                # Copy the current version to new version
+                current_version = ptask.versions.get(project.dag.current_version_id)
+                if current_version is not None:
+                    new_versions = dict(existing_ptask.versions)
+                    new_versions[new_version_id] = current_version
+                    new_persistent_tasks[persistent_id] = existing_ptask.model_copy(
+                        update={"versions": new_versions}
+                    )
+
+    # Copy persistent branches to new version
+    new_persistent_branches: dict[PersistentObjectId, PersistentBranch] = {}
+    for branch_persistent_id, pbranch in project.persistent_branches.items():
+        branch_version = pbranch.versions.get(project.dag.current_version_id)
+        if branch_version is not None:
+            new_persistent_branches[branch_persistent_id] = pbranch.model_copy(
+                update={
+                    "versions": {
+                        **pbranch.versions,
+                        new_version_id: branch_version,
+                    }
+                }
+            )
+
+    # Handle deleted tasks - remove from node_map
+    for deleted_key in deleted_keys:
+        task_id, _task = existing_tasks[deleted_key]
+        if task_id in new_node_map:
+            del new_node_map[task_id]
+            warnings.append(
+                ImportWarningFluxx(
+                    issue_key=deleted_key,
+                    message="Task removed from Jira - deleted from project",
+                )
+            )
+
+    # Add new workers to project
+    existing_worker_jira_ids = {
+        w.jira_account_id for w in project.workers if w.jira_account_id
+    }
+    new_workers = list(project.workers)
+    for jira_id, worker in new_workers_from_issues.items():
+        if jira_id not in existing_worker_jira_ids:
+            new_workers.append(worker)
+
+    # Create new DAG
+    new_dag = DAG(
+        id=project.dag.id,
+        current_version_id=new_version_id,
+        node_map=new_node_map,
+    )
+
+    # Create history event
+    event = DAGEvent(
+        id=event_id,
+        timestamp=datetime.now().astimezone(),
+        parent_event_id=project.current_event_id,
+        event_type=EventType.NODE_MODIFIED,
+        affected_nodes=[],  # Could track updated task IDs here
+        resulting_dag_version=new_version_id,
+    )
+
+    # Build updated project
+    new_history = list(project.history_events) + [event]
+    updated_project = project.model_copy(
+        update={
+            "dag": new_dag,
+            "persistent_tasks": new_persistent_tasks,
+            "persistent_branches": new_persistent_branches,
+            "history_events": new_history,
+            "current_event_id": event_id,
+            "workers": new_workers,
+            "metadata": project.metadata.model_copy(
+                update={"last_modified": datetime.now().astimezone()}
+            ),
+        }
+    )
+
+    return updated_project, updated_count, created_count, deleted_keys, warnings
+
+
+def sync_from_jira(
+    project: Project,
+    client: JiraClient,
+    config: JiraConfig,
+    progress_callback: Callable[[ImportProgress], None] | None = None,
+) -> SyncResult:
+    """Sync all Jira-linked tasks in the project with Jira.
+
+    This function:
+    1. Collects all tasks with jira_reference in the project
+    2. Fetches fresh data from Jira (including children)
+    3. Updates existing tasks with new data
+    4. Creates new tasks for new issues
+    5. Deletes tasks that were removed from Jira
+
+    Args:
+        project: The project to sync
+        client: Configured Jira client for the server
+        config: Jira configuration
+        progress_callback: Optional callback for progress updates
+
+    Returns:
+        SyncResult with the updated project and sync statistics
+    """
+    update_progress = generate_progress_updater(progress_callback)
+    warnings: list[ImportWarningFluxx] = []
+    total_updated = 0
+    total_created = 0
+    all_deleted_keys: list[str] = []
+
+    # Collect all Jira-referenced tasks grouped by server
+    tasks_by_server = collect_jira_referenced_tasks(project)
+
+    # Only sync tasks for the provided server
+    server_url = config.server_url.rstrip("/")
+    server_tasks = tasks_by_server.get(server_url, {})
+
+    if not server_tasks:
+        # No tasks to sync for this server
+        return SyncResult(
+            project=project,
+            updated_count=0,
+            created_count=0,
+            deleted_keys=[],
+            warnings=[],
+        )
+
+    update_progress("collecting_tasks", 0, len(server_tasks))
+
+    # Build JQL to fetch all the issues we need to sync
+    issue_keys = list(server_tasks.keys())
+    jql = build_sync_jql(issue_keys)
+
+    # Fetch issues including their children
+    update_progress("fetching_issues", 0, len(issue_keys))
+    issues = fetch_all_issues_with_children(client, jql, update_progress)
+
+    update_progress("updating_tasks", len(issues) // 2, len(issues))
+
+    # Update the project
+    (
+        updated_project,
+        updated_count,
+        created_count,
+        deleted_keys,
+        sync_warnings,
+    ) = _sync_update_project(
+        project=project,
+        issues=issues,
+        existing_tasks=server_tasks,
+        server_url=server_url,
+        server_timezone=config.server_timezone,
+    )
+
+    total_updated += updated_count
+    total_created += created_count
+    all_deleted_keys.extend(deleted_keys)
+    warnings.extend(sync_warnings)
+
+    update_progress("sync_complete", len(issues), len(issues))
+
+    return SyncResult(
+        project=updated_project,
+        updated_count=total_updated,
+        created_count=total_created,
+        deleted_keys=all_deleted_keys,
+        warnings=warnings,
+    )

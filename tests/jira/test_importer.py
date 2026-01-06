@@ -3,14 +3,28 @@
 from datetime import datetime
 from unittest.mock import MagicMock
 
-from fluxx.data.id_generation import generate_worker_id
+from fluxx.data.id_generation import (
+    generate_branch_id,
+    generate_dag_id,
+    generate_dag_version_id,
+    generate_persistent_object_id,
+    generate_task_id,
+    generate_worker_id,
+)
 from fluxx.data.json_types import JsonObject
 from fluxx.data.models import (
     DAG,
+    Branch,
+    BranchId,
     JiraDurationDistribution,
+    PersistentBranch,
+    PersistentObjectId,
+    PersistentTask,
     Project,
     ProjectMetadata,
     ShiftedLognormal,
+    Task,
+    TaskId,
     Worker,
 )
 from fluxx.jira.api_types import (
@@ -28,20 +42,26 @@ from fluxx.jira.api_types import (
     JiraWorklogEntry,
 )
 from fluxx.jira.distributions import EstimateBin
+from fluxx.jira.extraction import HierarchyEntry
 from fluxx.jira.importer import (
     ImportProgress,
     ImportResult,
     ImportWarningFluxx,
+    SyncResult,
     _build_duration_distribution,
     _build_project,
     _collect_all_worklogs,
     _create_history_entries,
+    _update_parent_relationships,
     build_children_jql,
+    build_sync_jql,
+    collect_jira_referenced_tasks,
     extract_raw_estimate_data,
     fetch_all_issues_with_children,
     fetch_and_validate_issues,
     get_children_from_links,
     import_from_jira,
+    sync_from_jira,
 )
 from fluxx.jira.models import (
     JiraConfig,
@@ -1551,3 +1571,1177 @@ class TestImportWithChildFetching:
         assert "STORY-1" in tasks
         assert tasks["EPIC-1"].parent_id is None
         assert tasks["STORY-1"].parent_id is not None
+
+
+class TestBuildSyncJql:
+    """Tests for build_sync_jql function."""
+
+    def test_single_key(self) -> None:
+        """JQL for single issue key."""
+        result = build_sync_jql(["TEST-1"])
+        assert result == 'key in ("TEST-1")'
+
+    def test_multiple_keys(self) -> None:
+        """JQL for multiple issue keys."""
+        result = build_sync_jql(["TEST-1", "TEST-2", "TEST-3"])
+        assert result == 'key in ("TEST-1", "TEST-2", "TEST-3")'
+
+
+class TestCollectJiraReferencedTasks:
+    """Tests for collect_jira_referenced_tasks function."""
+
+    def test_empty_project(self) -> None:
+        """Empty project returns empty dict."""
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=generate_dag_version_id(),
+            ),
+        )
+        result = collect_jira_referenced_tasks(project)
+        assert result == {}
+
+    def test_project_with_jira_tasks(self) -> None:
+        """Collects tasks with Jira references grouped by server."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        # Import a project with Jira-linked tasks
+        result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Collect Jira-referenced tasks
+        tasks_by_server = collect_jira_referenced_tasks(result.project)
+
+        assert "https://jira.example.com" in tasks_by_server
+        assert "TEST-1" in tasks_by_server["https://jira.example.com"]
+
+
+class TestSyncFromJira:
+    """Tests for sync_from_jira function."""
+
+    def test_sync_no_jira_tasks(self) -> None:
+        """Sync with no Jira tasks returns unchanged project."""
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=generate_dag_version_id(),
+            ),
+        )
+
+        mock_client = MagicMock()
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        result = sync_from_jira(project, mock_client, config)
+
+        assert isinstance(result, SyncResult)
+        assert result.updated_count == 0
+        assert result.created_count == 0
+        assert result.deleted_keys == []
+        assert result.project == project  # Unchanged
+
+    def test_sync_updates_existing_task(self) -> None:
+        """Sync updates existing Jira-linked tasks."""
+        mock_client = MagicMock()
+
+        # Initial import
+        issue_dict_v1 = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Original Title",
+                "description": "Original description",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict_v1]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Now sync with updated title
+        issue_dict_v2 = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Updated Title",
+                "description": "Updated description",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict_v2]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        assert sync_result.updated_count == 1
+        assert sync_result.created_count == 0
+
+        # Verify task was updated
+        for persistent_id in sync_result.project.persistent_tasks.values():
+            task = persistent_id.versions.get(
+                sync_result.project.dag.current_version_id
+            )
+            if task and task.jira_reference:
+                assert task.title == "Updated Title"
+
+    def test_sync_creates_new_child(self) -> None:
+        """Sync creates new tasks for new children from Jira."""
+        mock_client = MagicMock()
+
+        # Initial import with just parent
+        parent_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Parent Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([parent_dict]),
+            iter([]),  # No children initially
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = EPIC-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        assert len(import_result.project.dag.node_map) == 1
+
+        # Now sync - Jira now has a child
+        child_dict = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "New Child Story",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([parent_dict]),  # Initial fetch
+            iter([child_dict]),  # Children of parent
+            iter([]),  # Children of child
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        assert sync_result.updated_count == 1  # Parent updated
+        assert sync_result.created_count == 1  # Child created
+        assert len(sync_result.project.dag.node_map) == 2
+
+    def test_sync_deletes_removed_task(self) -> None:
+        """Sync removes tasks that no longer exist in Jira."""
+        mock_client = MagicMock()
+
+        # Initial import with parent and child
+        parent_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Parent Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        child_dict = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Child Story",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([parent_dict]),
+            iter([child_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = EPIC-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        assert len(import_result.project.dag.node_map) == 2
+
+        # Now sync - child was removed from Jira
+        mock_client.search.side_effect = [
+            iter([parent_dict]),  # Only parent returns
+            iter([]),  # No children
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # Child should be deleted
+        assert "STORY-1" in sync_result.deleted_keys
+        assert len(sync_result.project.dag.node_map) == 1
+
+    def test_sync_with_progress_callback(self) -> None:
+        """Progress callback is called during sync."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Reset mock for sync
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        progress_updates: list[ImportProgress] = []
+
+        sync_from_jira(
+            import_result.project,
+            mock_client,
+            config,
+            progress_callback=lambda p: progress_updates.append(p),
+        )
+
+        assert len(progress_updates) > 0
+        phases = [p.current_phase for p in progress_updates]
+        assert "collecting_tasks" in phases
+        assert "sync_complete" in phases
+
+    def test_sync_updates_parent_relationship(self) -> None:
+        """Sync handles parent relationship changes."""
+        mock_client = MagicMock()
+
+        # Initial import: STORY-1 is child of EPIC-1
+        epic_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        story_dict_v1 = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Story",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([epic_dict]),
+            iter([story_dict_v1]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = EPIC-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Verify story is child of epic
+        tasks = {}
+        for _node_id, persistent_id in import_result.project.dag.node_map.items():
+            if persistent_id in import_result.project.persistent_tasks:
+                ptask = import_result.project.persistent_tasks[persistent_id]
+                task = ptask.versions.get(import_result.project.dag.current_version_id)
+                if task and task.jira_reference:
+                    tasks[str(task.jira_reference.issue_key)] = task
+
+        assert tasks["STORY-1"].parent_id is not None
+
+        # Now sync - story is no longer a child
+        story_dict_v2 = {
+            "id": "10002",
+            "key": "STORY-1",
+            "fields": {
+                "summary": "Story",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,  # No parent now
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([epic_dict, story_dict_v2]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # Verify story no longer has parent
+        tasks = {}
+        for _node_id, persistent_id in sync_result.project.dag.node_map.items():
+            if persistent_id in sync_result.project.persistent_tasks:
+                ptask = sync_result.project.persistent_tasks[persistent_id]
+                task = ptask.versions.get(sync_result.project.dag.current_version_id)
+                if task and task.jira_reference:
+                    tasks[str(task.jira_reference.issue_key)] = task
+
+        assert tasks["STORY-1"].parent_id is None
+
+    def test_sync_with_timetracking(self) -> None:
+        """Sync handles issues with timetracking data."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": {
+                    "originalEstimateSeconds": 14400,
+                    "remainingEstimateSeconds": 7200,
+                },
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Sync with updated timetracking
+        issue_dict_v2 = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": {
+                    "originalEstimateSeconds": 28800,  # Updated
+                    "remainingEstimateSeconds": 14400,
+                },
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict_v2]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+        assert sync_result.updated_count == 1
+
+    def test_sync_adds_new_worker(self) -> None:
+        """Sync adds new workers discovered in issues."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        initial_worker_count = len(import_result.project.workers)
+
+        # Sync with new worker in worklog
+        issue_dict_v2 = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": {
+                    "accountId": "new-user-123",
+                    "displayName": "New Developer",
+                    "active": True,
+                },
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": {
+                    "startAt": 0,
+                    "maxResults": 1,
+                    "total": 1,
+                    "worklogs": [
+                        {
+                            "id": "wl-1",
+                            "author": {
+                                "accountId": "new-user-123",
+                                "displayName": "New Developer",
+                                "active": True,
+                            },
+                            "started": "2024-06-14T09:00:00.000+0000",
+                            "timeSpent": "4h",
+                            "timeSpentSeconds": 14400,
+                        }
+                    ],
+                },
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict_v2]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # New worker should be added
+        assert len(sync_result.project.workers) > initial_worker_count
+
+    def test_sync_with_existing_workers(self) -> None:
+        """Sync handles project with existing workers."""
+        mock_client = MagicMock()
+
+        # Initial import with worker
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": {
+                    "accountId": "existing-user",
+                    "displayName": "Existing Developer",
+                    "active": True,
+                },
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": {
+                    "startAt": 0,
+                    "maxResults": 1,
+                    "total": 1,
+                    "worklogs": [
+                        {
+                            "id": "wl-1",
+                            "author": {
+                                "accountId": "existing-user",
+                                "displayName": "Existing Developer",
+                                "active": True,
+                            },
+                            "started": "2024-06-14T09:00:00.000+0000",
+                            "timeSpent": "4h",
+                            "timeSpentSeconds": 14400,
+                        }
+                    ],
+                },
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        initial_worker_count = len(import_result.project.workers)
+
+        # Sync with same worker
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # Worker count should stay the same (no duplicates)
+        assert len(sync_result.project.workers) == initial_worker_count
+
+    def test_sync_with_sub_epic_warning(self) -> None:
+        """Sync generates hierarchy warning for sub-epics."""
+        mock_client = MagicMock()
+
+        # Initial import
+        epic_dict = {
+            "id": "10001",
+            "key": "EPIC-1",
+            "fields": {
+                "summary": "Parent Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([epic_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = EPIC-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Sync with sub-epic (epic under epic)
+        sub_epic_dict = {
+            "id": "10002",
+            "key": "EPIC-2",
+            "fields": {
+                "summary": "Sub Epic",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Epic"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": {"id": "10001", "key": "EPIC-1"},
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([epic_dict]),
+            iter([sub_epic_dict]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # Should have a warning about sub-epic
+        sub_epic_warnings = [w for w in sync_result.warnings if "Sub-epic" in w.message]
+        assert len(sub_epic_warnings) >= 1
+
+
+class TestCollectJiraReferencedTasksEdgeCases:
+    """Edge case tests for collect_jira_referenced_tasks."""
+
+    def test_project_with_branch_nodes(self) -> None:
+        """Branch nodes in node_map are skipped (line 759)."""
+        dag_version_id = generate_dag_version_id()
+
+        # Create a branch
+        branch_id = generate_branch_id()
+        branch = Branch(
+            id=branch_id,
+            title="Decision Branch",
+            description="A branch decision",
+        )
+        branch_persistent_id = generate_persistent_object_id()
+        persistent_branch = PersistentBranch(
+            id=branch_persistent_id,
+            versions={dag_version_id: branch},
+        )
+
+        # Create a project with only a branch in the node_map
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,
+                node_map={branch_id: branch_persistent_id},  # Branch in node_map
+            ),
+            persistent_branches={branch_persistent_id: persistent_branch},
+        )
+
+        # collect_jira_referenced_tasks should skip branches and return empty
+        result = collect_jira_referenced_tasks(project)
+        assert result == {}
+
+    def test_project_with_task_missing_version(self) -> None:
+        """Tasks missing version for current DAG version are skipped (line 764)."""
+        dag_version_id = generate_dag_version_id()
+        other_version_id = generate_dag_version_id()
+
+        # Create a task with a different version than the current DAG version
+        task_id = generate_task_id()
+        task = Task(
+            id=task_id,
+            title="Old Version Task",
+            description="Task with wrong version",
+        )
+        task_persistent_id = generate_persistent_object_id()
+        persistent_task = PersistentTask(
+            id=task_persistent_id,
+            versions={other_version_id: task},  # Different version
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,  # Different from task's version
+                node_map={task_id: task_persistent_id},
+            ),
+            persistent_tasks={task_persistent_id: persistent_task},
+        )
+
+        # collect_jira_referenced_tasks should skip tasks with no current version
+        result = collect_jira_referenced_tasks(project)
+        assert result == {}
+
+    def test_project_with_non_jira_tasks(self) -> None:
+        """Tasks without jira_reference are skipped (line 767)."""
+        dag_version_id = generate_dag_version_id()
+
+        # Create a task without Jira reference
+        task_id = generate_task_id()
+        task = Task(
+            id=task_id,
+            title="Local Task",
+            description="A task not from Jira",
+            jira_reference=None,  # No Jira reference
+        )
+        task_persistent_id = generate_persistent_object_id()
+        persistent_task = PersistentTask(
+            id=task_persistent_id,
+            versions={dag_version_id: task},
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,
+                node_map={task_id: task_persistent_id},
+            ),
+            persistent_tasks={task_persistent_id: persistent_task},
+        )
+
+        # collect_jira_referenced_tasks should skip non-Jira tasks
+        result = collect_jira_referenced_tasks(project)
+        assert result == {}
+
+
+class TestSyncWithBranches:
+    """Tests for sync with projects containing branches."""
+
+    def test_sync_copies_branches_to_new_version(self) -> None:
+        """Sync copies branch versions when creating new DAG version (lines 979-981)."""
+        mock_client = MagicMock()
+
+        # Initial import with just a task
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Manually add a branch to the project
+        branch_id = generate_branch_id()
+        branch = Branch(
+            id=branch_id,
+            title="Decision Branch",
+            description="A branch decision",
+        )
+        branch_persistent_id = generate_persistent_object_id()
+        persistent_branch = PersistentBranch(
+            id=branch_persistent_id,
+            versions={import_result.project.dag.current_version_id: branch},
+        )
+
+        # Update project with the branch
+        project_with_branch = import_result.project.model_copy(
+            update={
+                "dag": import_result.project.dag.model_copy(
+                    update={
+                        "node_map": {
+                            **import_result.project.dag.node_map,
+                            branch_id: branch_persistent_id,
+                        }
+                    }
+                ),
+                "persistent_branches": {branch_persistent_id: persistent_branch},
+            }
+        )
+
+        # Now sync
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+        ]
+
+        sync_result = sync_from_jira(project_with_branch, mock_client, config)
+
+        # Branch should be copied to new version
+        assert branch_persistent_id in sync_result.project.persistent_branches
+        new_pbranch = sync_result.project.persistent_branches[branch_persistent_id]
+        assert sync_result.project.dag.current_version_id in new_pbranch.versions
+
+
+class TestUpdateParentRelationships:
+    """Tests for _update_parent_relationships edge cases."""
+
+    def test_issue_not_in_hierarchy(self) -> None:
+        """Issue key not in hierarchy is skipped."""
+        issue = make_issue(key="TEST-1")
+        hierarchy: dict[str, HierarchyEntry] = {}  # Empty - no entry for TEST-1
+
+        _update_parent_relationships(
+            issues=[issue],
+            hierarchy=hierarchy,
+            task_id_by_key={},
+            new_node_map={},
+            new_persistent_tasks={},
+            new_version_id=generate_dag_version_id(),
+        )
+        # Should not raise - just skip
+
+    def test_issue_not_in_task_id_by_key(self) -> None:
+        """Issue key not in task_id_by_key is skipped."""
+        issue = make_issue(key="TEST-1")
+        hierarchy = {"TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None)}
+        task_id_by_key: dict[str, TaskId] = {}  # Empty - no entry for TEST-1
+
+        _update_parent_relationships(
+            issues=[issue],
+            hierarchy=hierarchy,
+            task_id_by_key=task_id_by_key,
+            new_node_map={},
+            new_persistent_tasks={},
+            new_version_id=generate_dag_version_id(),
+        )
+        # Should not raise - just skip
+
+    def test_task_id_not_in_node_map(self) -> None:
+        """Task ID not in new_node_map is skipped."""
+        issue = make_issue(key="TEST-1")
+        task_id = generate_task_id()
+        hierarchy = {"TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None)}
+        task_id_by_key = {"TEST-1": task_id}
+        new_node_map: dict[TaskId | BranchId, PersistentObjectId] = {}  # Empty
+
+        _update_parent_relationships(
+            issues=[issue],
+            hierarchy=hierarchy,
+            task_id_by_key=task_id_by_key,
+            new_node_map=new_node_map,
+            new_persistent_tasks={},
+            new_version_id=generate_dag_version_id(),
+        )
+        # Should not raise - just skip
+
+    def test_persistent_id_not_in_persistent_tasks(self) -> None:
+        """Persistent ID not in new_persistent_tasks is skipped."""
+        issue = make_issue(key="TEST-1")
+        task_id = generate_task_id()
+        persistent_id = generate_persistent_object_id()
+        hierarchy = {"TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None)}
+        task_id_by_key = {"TEST-1": task_id}
+        new_node_map: dict[TaskId | BranchId, PersistentObjectId] = {
+            task_id: persistent_id
+        }
+        new_persistent_tasks: dict[PersistentObjectId, PersistentTask] = {}  # Empty
+
+        _update_parent_relationships(
+            issues=[issue],
+            hierarchy=hierarchy,
+            task_id_by_key=task_id_by_key,
+            new_node_map=new_node_map,
+            new_persistent_tasks=new_persistent_tasks,
+            new_version_id=generate_dag_version_id(),
+        )
+        # Should not raise - just skip
+
+    def test_version_not_in_persistent_task(self) -> None:
+        """Version not in persistent task versions is skipped."""
+        issue = make_issue(key="TEST-1")
+        task_id = generate_task_id()
+        persistent_id = generate_persistent_object_id()
+        other_version = generate_dag_version_id()
+        new_version = generate_dag_version_id()
+
+        task = Task(id=task_id, title="Test", description="Test")
+        ptask = PersistentTask(
+            id=persistent_id,
+            versions={other_version: task},  # Different version
+        )
+
+        hierarchy = {"TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None)}
+        task_id_by_key = {"TEST-1": task_id}
+        new_node_map: dict[TaskId | BranchId, PersistentObjectId] = {
+            task_id: persistent_id
+        }
+        new_persistent_tasks = {persistent_id: ptask}
+
+        _update_parent_relationships(
+            issues=[issue],
+            hierarchy=hierarchy,
+            task_id_by_key=task_id_by_key,
+            new_node_map=new_node_map,
+            new_persistent_tasks=new_persistent_tasks,
+            new_version_id=new_version,  # Not in ptask.versions
+        )
+        # Should not raise - just skip
+
+    def test_updates_parent_when_all_data_present(self) -> None:
+        """Parent is updated when all data structures are consistent."""
+        child_issue = make_issue(key="CHILD-1")
+        parent_issue = make_issue(key="PARENT-1")
+
+        child_task_id = generate_task_id()
+        parent_task_id = generate_task_id()
+        child_persistent_id = generate_persistent_object_id()
+        new_version = generate_dag_version_id()
+
+        child_task = Task(
+            id=child_task_id,
+            title="Child",
+            description="Child task",
+            parent_id=None,  # Initially no parent
+        )
+        child_ptask = PersistentTask(
+            id=child_persistent_id,
+            versions={new_version: child_task},
+        )
+
+        hierarchy = {
+            "CHILD-1": HierarchyEntry(issue_key="CHILD-1", parent_key="PARENT-1"),
+            "PARENT-1": HierarchyEntry(issue_key="PARENT-1", parent_key=None),
+        }
+        task_id_by_key = {"CHILD-1": child_task_id, "PARENT-1": parent_task_id}
+        new_node_map: dict[TaskId | BranchId, PersistentObjectId] = {
+            child_task_id: child_persistent_id
+        }
+        new_persistent_tasks = {child_persistent_id: child_ptask}
+
+        _update_parent_relationships(
+            issues=[child_issue, parent_issue],
+            hierarchy=hierarchy,
+            task_id_by_key=task_id_by_key,
+            new_node_map=new_node_map,
+            new_persistent_tasks=new_persistent_tasks,
+            new_version_id=new_version,
+        )
+
+        # Check that parent was updated
+        updated_ptask = new_persistent_tasks[child_persistent_id]
+        updated_task = updated_ptask.versions[new_version]
+        assert updated_task.parent_id == parent_task_id
