@@ -44,7 +44,7 @@ from fluxx.jira.extraction import (
     extract_completion,
     extract_dependencies,
     extract_task,
-    extract_workers,
+    extract_workers_with_no_hours,
 )
 from fluxx.jira.models import JiraConfig, JiraDurationHistoryEntry, JiraIssueKey
 
@@ -403,6 +403,9 @@ def import_from_jira(
 
     Returns:
         ImportResult with the created project and any warnings
+
+    Raises:
+        InsufficientDataError if no worklog has logged time
     """
     update_progress = generate_progress_updater(progress_callback)
 
@@ -416,7 +419,7 @@ def import_from_jira(
     update_progress("extracting_workers", 0, len(issues))
 
     # Extract workers
-    workers = extract_workers(issues)
+    workers = extract_workers_with_no_hours(issues)
 
     # Calculate hours per workday for each worker
     all_worklogs = _collect_all_worklogs(issues)

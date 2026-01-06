@@ -28,7 +28,7 @@ from fluxx.jira.extraction import (
     extract_completion,
     extract_dependencies,
     extract_task,
-    extract_workers,
+    extract_workers_with_no_hours,
     get_earliest_worklog_time,
     get_latest_worklog_time,
     parse_jira_datetime,
@@ -365,7 +365,7 @@ class TestExtractWorkers:
         ]
         issues = [_make_issue(worklogs=worklogs)]
 
-        workers = extract_workers(issues)
+        workers = extract_workers_with_no_hours(issues)
 
         assert "user-1" in workers
         assert workers["user-1"].jira_account_id == "user-1"
@@ -377,7 +377,7 @@ class TestExtractWorkers:
             _make_issue(assignee_id="user-1", assignee_name="User One", worklogs=[])
         ]
 
-        workers = extract_workers(issues)
+        workers = extract_workers_with_no_hours(issues)
 
         assert "user-1" in workers
         assert workers["user-1"].name == "User One"
@@ -395,7 +395,7 @@ class TestExtractWorkers:
             _make_issue(key="FHIR-200", worklogs=worklogs2),
         ]
 
-        workers = extract_workers(issues)
+        workers = extract_workers_with_no_hours(issues)
 
         assert len([k for k in workers if k == "user-1"]) == 1
 

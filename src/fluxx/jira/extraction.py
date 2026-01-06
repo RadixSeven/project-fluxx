@@ -517,10 +517,11 @@ def build_hierarchy(
     return hierarchy, warnings
 
 
-def extract_workers(
+def extract_workers_with_no_hours(
     issues: list[JiraIssueResponse],
 ) -> dict[str, Worker]:
-    """Extract workers from issues (from worklogs and assignees).
+    """Extract workers from issues (from worklogs and assignees) with
+    no average hours statistic
 
     Args:
         issues: List of Jira issue responses
