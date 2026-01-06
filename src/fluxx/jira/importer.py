@@ -39,7 +39,6 @@ from fluxx.jira.distributions import (
     fit_fallback_distribution,
 )
 from fluxx.jira.extraction import (
-    EPSILON_HOURS,
     build_hierarchy,
     calculate_hours_per_workday,
     extract_completion,
@@ -112,7 +111,7 @@ def _create_history_entries(
 ) -> list[JiraDurationHistoryEntry]:
     """Create history entries from completed issues.
 
-    Only issues with DoneCompletion and actual logged work are included.
+    Only issues with DoneCompletion are included.
 
     Args:
         issues: All imported issues
@@ -134,10 +133,8 @@ def _create_history_entries(
 
         completion_result = extract_completion(issue, workers_by_id, server_timezone)
 
-        # Only include completed issues with actual work
+        # Only include completed issues
         if not isinstance(completion_result.completion, DoneCompletion):
-            continue
-        if completion_result.completion.hours_logged <= EPSILON_HOURS:
             continue
 
         # Get original estimate
@@ -147,7 +144,9 @@ def _create_history_entries(
 
         # Calculate total logged time
         worklogs = issue.fields.worklog.worklogs if issue.fields.worklog else []
-        total_seconds = sum(w.time_spent_seconds for w in worklogs)
+        total_seconds = (
+            sum(w.time_spent_seconds for w in worklogs) if len(worklogs) > 0 else None
+        )
 
         # Determine the primary worker (the one who logged most time)
         worker_jira_id: str | None = None

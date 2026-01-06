@@ -147,12 +147,6 @@ class TestCreateHistoryEntries:
         result = _create_history_entries([issue], {}, "https://jira.example.com", "UTC")
         assert result == []
 
-    def test_zero_work_issues_excluded(self) -> None:
-        """Done issues with no real work logged are excluded."""
-        issue = make_issue(resolution_date="2024-01-15T10:00:00.000+0000")
-        result = _create_history_entries([issue], {}, "https://jira.example.com", "UTC")
-        assert result == []
-
     def test_done_with_work_included(self) -> None:
         """Done issues with actual work logged are included."""
         worklog = make_worklog(time_seconds=7200)
