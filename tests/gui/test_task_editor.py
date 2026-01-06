@@ -2901,3 +2901,150 @@ def test_task_editor_jira_reference_shows_issue_type(
     label_text = task_editor.jira_reference_label.text()
     assert "EPIC-42" in label_text
     assert "(Epic)" in label_text
+
+
+def test_task_editor_allowed_workers_shows_inherited(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test allowed workers shows inherited message when ancestor has workers."""
+    # Add workers
+    worker1_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+    worker2_id = controller.add_worker(name="Bob", hours_per_workday=8.0)
+
+    # Create parent task with allowed_workers
+    parent_id = controller.create_task(
+        title="Parent Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Set allowed_workers on parent
+    controller.update_task(parent_id, allowed_workers=[worker1_id, worker2_id])
+
+    # Convert to parent (creates a child)
+    controller.convert_to_parent(parent_id, "Child Task")
+
+    # Find the child task
+    project = controller.get_project()
+    node_id = parent_id
+    persistent_id = project.dag.node_map[node_id]
+    parent_task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+    child_id = parent_task.children[0]
+
+    # Load the child task
+    task_editor.load_task(child_id)
+
+    # Child has no allowed_workers, should show inherited from parent
+    label_text = task_editor.allowed_workers_empty_label.text()
+    assert 'Inherited from "Parent Task"' in label_text
+    assert "Alice" in label_text
+    assert "Bob" in label_text
+    assert "Click to override" in label_text
+
+    # Verify empty label is visible and list is hidden
+    assert not task_editor.allowed_workers_empty_label.isHidden()
+    assert task_editor.allowed_workers_list.isHidden()
+
+
+def test_task_editor_allowed_workers_click_to_override_inheritance(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test clicking to override inherited allowed_workers."""
+    # Add workers
+    worker1_id = controller.add_worker(name="Alice", hours_per_workday=8.0)
+
+    # Create parent with allowed_workers
+    parent_id = controller.create_task(
+        title="Parent Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    controller.update_task(parent_id, allowed_workers=[worker1_id])
+
+    # Convert to parent
+    controller.convert_to_parent(parent_id, "Child Task")
+
+    # Find child
+    project = controller.get_project()
+    node_id = parent_id
+    persistent_id = project.dag.node_map[node_id]
+    parent_task = project.persistent_tasks[persistent_id].versions[
+        project.dag.current_version_id
+    ]
+    child_id = parent_task.children[0]
+
+    # Load child
+    task_editor.load_task(child_id)
+
+    # Verify inheritance shown
+    assert (
+        'Inherited from "Parent Task"' in task_editor.allowed_workers_empty_label.text()
+    )
+
+    # Click to override (simulated via link activation)
+    task_editor._on_restrict_workers_clicked("#")
+
+    # Should now show the list UI with empty list
+    assert not task_editor.allowed_workers_list.isHidden()
+    assert task_editor.allowed_workers_empty_label.isHidden()
+
+    # Pending changes should have empty allowed_workers
+    assert "allowed_workers" in task_editor.pending_changes
+    assert task_editor.pending_changes["allowed_workers"] == []
+
+
+def test_task_editor_allowed_workers_shows_all_for_root(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test root task without allowed_workers shows 'All workers allowed'."""
+    task_id = controller.create_task(
+        title="Root Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task_id)
+
+    # Root task has no parent, so should show "All workers allowed"
+    label_text = task_editor.allowed_workers_empty_label.text()
+    assert "All workers allowed" in label_text
+    assert "Click to restrict" in label_text
+
+
+def test_task_editor_get_worker_names_list(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _get_worker_names_list helper method."""
+    worker1_id = controller.add_worker(
+        name="Alice", hours_per_workday=8.0, worker_id="A1"
+    )
+    worker2_id = controller.add_worker(name="Bob", hours_per_workday=8.0)
+
+    # Create task to enable controller access
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    names = task_editor._get_worker_names_list([worker1_id, worker2_id])
+    assert len(names) == 2
+    assert "Alice (A1)" in names
+    assert "Bob" in names
+
+
+def test_task_editor_get_worker_names_list_unknown(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test _get_worker_names_list with unknown worker ID."""
+    from fluxx.data.models import WorkerId
+
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    unknown_id = WorkerId("unknown_worker")
+    names = task_editor._get_worker_names_list([unknown_id])
+    assert len(names) == 1
+    assert "Unknown (unknown_worker)" in names[0]

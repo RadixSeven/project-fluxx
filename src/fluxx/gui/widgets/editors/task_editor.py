@@ -446,8 +446,8 @@ class TaskEditor(QWidget):
         # Dependencies
         self._load_dependencies(task.dependencies)
 
-        # Allowed workers
-        self._load_allowed_workers(task.allowed_workers)
+        # Allowed workers (pass task for inheritance checking)
+        self._load_allowed_workers(task.allowed_workers, task)
 
         # Excluded assignees
         self._load_excluded_assignees(task.excluded_worker_tasks)
@@ -1114,16 +1114,111 @@ class TaskEditor(QWidget):
 
     # Allowed Workers methods
 
-    def _load_allowed_workers(self, allowed_workers: list[WorkerId] | None) -> None:
+    def _find_ancestor_with_allowed_workers(
+        self, task: Task
+    ) -> tuple[Task, list[WorkerId]] | None:
+        """Find the nearest ancestor with an allowed_workers list.
+
+        Args:
+            task: The current task to start searching from
+
+        Returns:
+            Tuple of (ancestor_task, allowed_workers) if found, None otherwise
+        """
+        if task.parent_id is None:
+            return None
+
+        project = self.controller.get_project()
+        current_version = project.dag.current_version_id
+
+        # Walk up the parent chain
+        parent_id: TaskId | None = task.parent_id
+        while parent_id is not None:
+            node_id = parent_id
+            if node_id not in project.dag.node_map:
+                break
+
+            persistent_id = project.dag.node_map[node_id]
+            if persistent_id not in project.persistent_tasks:
+                break
+
+            persistent_task = project.persistent_tasks[persistent_id]
+            if current_version not in persistent_task.versions:
+                break
+
+            parent_task = persistent_task.versions[current_version]
+
+            # Check if this ancestor has allowed_workers
+            if (
+                parent_task.allowed_workers is not None
+                and len(parent_task.allowed_workers) > 0
+            ):
+                return (parent_task, parent_task.allowed_workers)
+
+            # Move up to next ancestor
+            parent_id = parent_task.parent_id
+
+        return None
+
+    def _get_worker_names_list(self, worker_ids: list[WorkerId]) -> list[str]:
+        """Get display names for a list of worker IDs.
+
+        Args:
+            worker_ids: List of worker IDs
+
+        Returns:
+            List of worker display names
+        """
+        workers = self.controller.get_workers()
+        worker_map = {w.id: w for w in workers}
+
+        names = []
+        for worker_id in worker_ids:
+            if worker_id in worker_map:
+                worker = worker_map[worker_id]
+                display_name = worker.name
+                if worker.worker_id:
+                    display_name += f" ({worker.worker_id})"
+                names.append(display_name)
+            else:
+                names.append(f"Unknown ({worker_id})")
+
+        return names
+
+    def _load_allowed_workers(
+        self, allowed_workers: list[WorkerId] | None, task: Task | None = None
+    ) -> None:
         """Load allowed workers into the UI.
 
         Args:
             allowed_workers: List of allowed worker IDs, or None if all are allowed
+            task: Optional task for checking inheritance from ancestors
         """
         self.allowed_workers_list.clear()
 
         if allowed_workers is None or len(allowed_workers) == 0:
-            # Show empty state
+            # Check for inherited allowed_workers from ancestor
+            if task is not None:
+                ancestor_result = self._find_ancestor_with_allowed_workers(task)
+                if ancestor_result is not None:
+                    ancestor_task, inherited_workers = ancestor_result
+                    # Show inherited display with link to override
+                    worker_names = self._get_worker_names_list(inherited_workers)
+                    worker_list_str = ", ".join(worker_names) or "none"
+                    self.allowed_workers_empty_label.setText(
+                        f'Inherited from "{ancestor_task.title}": {worker_list_str}. '
+                        f'<a href="#">Click to override</a>'
+                    )
+                    self.allowed_workers_empty_label.setVisible(True)
+                    self.allowed_workers_list.setVisible(False)
+                    self.allowed_workers_button_container.setVisible(False)
+                    return
+
+            # Show empty state - all workers allowed
+            self.allowed_workers_empty_label.setText(
+                "All workers allowed. "
+                '<a href="#">Click to restrict to specific workers</a>'
+            )
             self.allowed_workers_empty_label.setVisible(True)
             self.allowed_workers_list.setVisible(False)
             self.allowed_workers_button_container.setVisible(False)
