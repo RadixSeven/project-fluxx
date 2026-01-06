@@ -2834,7 +2834,7 @@ def test_task_editor_completion_methods_wrong_state(
 def test_task_editor_jira_reference_hidden_when_none(
     task_editor: TaskEditor, controller: ProjectController
 ) -> None:
-    """Test Jira reference field is hidden when task has no Jira reference."""
+    """Test Jira reference label is hidden when task has no Jira reference."""
     task_id = controller.create_task(
         title="Task without Jira",
         duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
@@ -2842,9 +2842,11 @@ def test_task_editor_jira_reference_hidden_when_none(
 
     task_editor.load_task(task_id)
 
-    # Jira reference fields should be hidden
+    # Jira reference label should be hidden, input should be shown
     assert task_editor.jira_reference_label.isHidden()
-    assert task_editor.jira_reference_row_label.isHidden()
+    assert not task_editor.jira_key_input.isHidden()
+    assert not task_editor.jira_link_button.isHidden()
+    assert task_editor.jira_unlink_button.isHidden()
 
 
 def test_task_editor_jira_reference_shown_when_present(
@@ -2867,9 +2869,11 @@ def test_task_editor_jira_reference_shown_when_present(
 
     task_editor.load_task(task_id)
 
-    # Jira reference fields should be visible
+    # Jira reference label should be visible, input should be hidden
     assert not task_editor.jira_reference_label.isHidden()
-    assert not task_editor.jira_reference_row_label.isHidden()
+    assert not task_editor.jira_unlink_button.isHidden()
+    assert task_editor.jira_key_input.isHidden()
+    assert task_editor.jira_link_button.isHidden()
 
     # Label should contain a link to the Jira issue
     label_text = task_editor.jira_reference_label.text()
@@ -2901,6 +2905,328 @@ def test_task_editor_jira_reference_shows_issue_type(
     label_text = task_editor.jira_reference_label.text()
     assert "EPIC-42" in label_text
     assert "(Epic)" in label_text
+
+
+def test_task_editor_jira_link_empty_key_shows_error(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test linking with empty key shows error."""
+    task_id = controller.create_task(
+        title="Task to link",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Try to link with empty input
+    task_editor.jira_key_input.setText("")
+    task_editor._on_jira_link_clicked()
+
+    assert "Enter an issue key" in task_editor.jira_status_label.text()
+
+
+def test_task_editor_jira_link_no_config_shows_error(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test linking without Jira config shows error."""
+    task_id = controller.create_task(
+        title="Task to link",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Try to link without Jira config
+    task_editor.jira_key_input.setText("PROJ-123")
+    task_editor._on_jira_link_clicked()
+
+    assert "No Jira server configured" in task_editor.jira_status_label.text()
+
+
+def test_task_editor_jira_link_invalid_key_shows_error(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test linking with invalid key format shows error."""
+    from datetime import UTC, datetime
+
+    from fluxx.jira.models import JiraConfig, JiraSyncMetadata
+
+    task_id = controller.create_task(
+        title="Task to link",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add Jira config
+    project = controller.get_project()
+    project_with_config = project.model_copy(
+        update={
+            "jira_config": JiraConfig(
+                server_url="https://jira.example.com",
+                sync_metadata=JiraSyncMetadata(
+                    server_url="https://jira.example.com",
+                    last_history_sync=datetime.now(UTC),
+                    history_entries=[],
+                ),
+            )
+        }
+    )
+    controller._project = project_with_config
+
+    task_editor.load_task(task_id)
+
+    # Try to link with invalid key
+    task_editor.jira_key_input.setText("invalid")
+    task_editor._on_jira_link_clicked()
+
+    assert "Invalid" in task_editor.jira_status_label.text()
+
+
+def test_task_editor_jira_unlink_confirmed(
+    task_editor: TaskEditor,
+    controller: ProjectController,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test unlinking when user confirms."""
+    from unittest.mock import MagicMock
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from fluxx.jira.models import JiraIssueKey, JiraReference
+
+    task_id = controller.create_task(
+        title="Task with Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add Jira reference
+    jira_ref = JiraReference(
+        server_url="https://jira.example.com",
+        issue_key=JiraIssueKey.from_string("PROJ-123"),
+    )
+    controller.update_task(task_id, jira_reference=jira_ref)
+    task_editor.load_task(task_id)
+
+    # Mock QMessageBox to return Yes
+    mock_question = MagicMock(return_value=QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "question", mock_question)
+
+    # Unlink
+    task_editor._on_jira_unlink_clicked()
+
+    # Should have pending change to remove reference
+    assert "jira_reference" in task_editor.pending_changes
+    assert task_editor.pending_changes["jira_reference"] is None
+
+    # UI should show input field
+    assert task_editor.jira_reference_label.isHidden()
+    assert not task_editor.jira_key_input.isHidden()
+
+
+def test_task_editor_jira_unlink_cancelled(
+    task_editor: TaskEditor,
+    controller: ProjectController,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test unlinking when user cancels."""
+    from unittest.mock import MagicMock
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from fluxx.jira.models import JiraIssueKey, JiraReference
+
+    task_id = controller.create_task(
+        title="Task with Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add Jira reference
+    jira_ref = JiraReference(
+        server_url="https://jira.example.com",
+        issue_key=JiraIssueKey.from_string("PROJ-123"),
+    )
+    controller.update_task(task_id, jira_reference=jira_ref)
+    task_editor.load_task(task_id)
+
+    # Mock QMessageBox to return No
+    mock_question = MagicMock(return_value=QMessageBox.StandardButton.No)
+    monkeypatch.setattr(QMessageBox, "question", mock_question)
+
+    # Unlink (should be cancelled)
+    task_editor._on_jira_unlink_clicked()
+
+    # Should NOT have pending change
+    assert "jira_reference" not in task_editor.pending_changes
+
+    # UI should still show link
+    assert not task_editor.jira_reference_label.isHidden()
+    assert task_editor.jira_key_input.isHidden()
+
+
+def test_task_editor_jira_link_success(
+    task_editor: TaskEditor,
+    controller: ProjectController,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test successful Jira linking."""
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock, patch
+
+    from fluxx.jira.models import JiraConfig, JiraSyncMetadata
+
+    task_id = controller.create_task(
+        title="Task to link",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add Jira config
+    project = controller.get_project()
+    project_with_config = project.model_copy(
+        update={
+            "jira_config": JiraConfig(
+                server_url="https://jira.example.com",
+                sync_metadata=JiraSyncMetadata(
+                    server_url="https://jira.example.com",
+                    last_history_sync=datetime.now(UTC),
+                    history_entries=[],
+                ),
+            )
+        }
+    )
+    controller._project = project_with_config
+
+    task_editor.load_task(task_id)
+
+    # Mock auth and client using patch
+    mock_client = MagicMock()
+    mock_client.server_url = "https://jira.example.com"
+    mock_client.get_issue.return_value = {
+        "id": "12345",
+        "key": "PROJ-456",
+        "fields": {
+            "summary": "Test Issue",
+            "description": "Test description",
+            "issuetype": {"id": "1", "name": "Story", "subtask": False},
+            "status": {"id": "10000", "name": "Open"},
+        },
+    }
+
+    with (
+        patch("fluxx.jira.auth.get_token_path", return_value="/fake/path"),
+        patch("fluxx.jira.auth.read_token", return_value="fake-token"),
+        patch("fluxx.jira.client.JiraClient", return_value=mock_client),
+    ):
+        # Link
+        task_editor.jira_key_input.setText("PROJ-456")
+        task_editor._on_jira_link_clicked()
+
+    # Should have pending changes
+    assert "jira_reference" in task_editor.pending_changes
+    assert task_editor.pending_changes["jira_reference"] is not None
+    assert "jira_issue_type" in task_editor.pending_changes
+    assert task_editor.pending_changes["jira_issue_type"] == "Story"
+
+    # UI should show link
+    assert not task_editor.jira_reference_label.isHidden()
+    assert task_editor.jira_key_input.isHidden()
+    assert "PROJ-456" in task_editor.jira_reference_label.text()
+
+
+def test_task_editor_jira_link_token_not_found(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test linking when token not found."""
+    from datetime import UTC, datetime
+    from pathlib import Path
+    from unittest.mock import patch
+
+    from fluxx.jira.auth import TokenNotFoundError
+    from fluxx.jira.models import JiraConfig, JiraSyncMetadata
+
+    task_id = controller.create_task(
+        title="Task to link",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add Jira config
+    project = controller.get_project()
+    project_with_config = project.model_copy(
+        update={
+            "jira_config": JiraConfig(
+                server_url="https://jira.example.com",
+                sync_metadata=JiraSyncMetadata(
+                    server_url="https://jira.example.com",
+                    last_history_sync=datetime.now(UTC),
+                    history_entries=[],
+                ),
+            )
+        }
+    )
+    controller._project = project_with_config
+
+    task_editor.load_task(task_id)
+
+    # Mock auth to raise TokenNotFoundError
+    with (
+        patch("fluxx.jira.auth.get_token_path", return_value=Path("/fake/path")),
+        patch(
+            "fluxx.jira.auth.read_token",
+            side_effect=TokenNotFoundError(Path("/fake/path")),
+        ),
+    ):
+        # Try to link
+        task_editor.jira_key_input.setText("PROJ-123")
+        task_editor._on_jira_link_clicked()
+
+    assert "token not found" in task_editor.jira_status_label.text().lower()
+
+
+def test_task_editor_jira_link_issue_not_found(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test linking when issue not found."""
+    from datetime import UTC, datetime
+    from unittest.mock import MagicMock, patch
+
+    from fluxx.jira.linker import IssueNotFoundError
+    from fluxx.jira.models import JiraConfig, JiraSyncMetadata
+
+    task_id = controller.create_task(
+        title="Task to link",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Add Jira config
+    project = controller.get_project()
+    project_with_config = project.model_copy(
+        update={
+            "jira_config": JiraConfig(
+                server_url="https://jira.example.com",
+                sync_metadata=JiraSyncMetadata(
+                    server_url="https://jira.example.com",
+                    last_history_sync=datetime.now(UTC),
+                    history_entries=[],
+                ),
+            )
+        }
+    )
+    controller._project = project_with_config
+
+    task_editor.load_task(task_id)
+
+    # Mock linker to raise IssueNotFoundError
+    mock_linker = MagicMock()
+    mock_linker.link.side_effect = IssueNotFoundError("PROJ-999")
+
+    with (
+        patch("fluxx.jira.auth.get_token_path", return_value="/fake/path"),
+        patch("fluxx.jira.auth.read_token", return_value="fake-token"),
+        patch("fluxx.jira.client.JiraClient"),
+        patch("fluxx.jira.linker.TaskLinker", return_value=mock_linker),
+    ):
+        # Try to link
+        task_editor.jira_key_input.setText("PROJ-999")
+        task_editor._on_jira_link_clicked()
+
+    assert "not found" in task_editor.jira_status_label.text().lower()
+    assert "PROJ-999" in task_editor.jira_status_label.text()
 
 
 def test_task_editor_allowed_workers_shows_inherited(

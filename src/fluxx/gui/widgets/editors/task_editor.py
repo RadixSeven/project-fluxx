@@ -45,6 +45,7 @@ from fluxx.data.validation import (
 )
 from fluxx.gui.controller import ProjectController
 from fluxx.gui.widgets.editors.dependency_editor_widget import DependencyEditorWidget
+from fluxx.jira.models import JiraReference
 
 
 class PendingChanges(TypedDict, total=False):
@@ -60,6 +61,8 @@ class PendingChanges(TypedDict, total=False):
     allowed_workers: list[WorkerId] | None
     excluded_worker_tasks: list[TaskId]
     completion: TaskCompletion
+    jira_reference: JiraReference | None
+    jira_issue_type: str | None
 
 
 class TaskEditor(QWidget):
@@ -116,15 +119,42 @@ class TaskEditor(QWidget):
         self.description_field.textChanged.connect(self._on_description_changed)
         form_layout.addRow("Description:", self.description_field)
 
-        # Jira reference field (read-only, hidden when no reference)
+        # Jira reference field
+        self.jira_row_label = QLabel("Jira Issue:")
+        self.jira_container = QWidget()
+        jira_layout = QHBoxLayout()
+        jira_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Read-only label for linked issues
         self.jira_reference_label = QLabel()
         self.jira_reference_label.setOpenExternalLinks(True)
         self.jira_reference_label.setStyleSheet("color: #0052CC;")  # Jira blue
-        self.jira_reference_row_label = QLabel("Jira Issue:")
-        form_layout.addRow(self.jira_reference_row_label, self.jira_reference_label)
-        # Initially hide
-        self.jira_reference_row_label.hide()
-        self.jira_reference_label.hide()
+        jira_layout.addWidget(self.jira_reference_label)
+
+        # Input field for entering issue key
+        self.jira_key_input = QLineEdit()
+        self.jira_key_input.setPlaceholderText("Enter issue key (e.g., PROJ-123)")
+        self.jira_key_input.returnPressed.connect(self._on_jira_link_clicked)
+        jira_layout.addWidget(self.jira_key_input)
+
+        # Link button (shown when no reference)
+        self.jira_link_button = QPushButton("Link")
+        self.jira_link_button.clicked.connect(self._on_jira_link_clicked)
+        jira_layout.addWidget(self.jira_link_button)
+
+        # Unlink button (shown when reference exists)
+        self.jira_unlink_button = QPushButton("Unlink")
+        self.jira_unlink_button.clicked.connect(self._on_jira_unlink_clicked)
+        jira_layout.addWidget(self.jira_unlink_button)
+
+        # Status label for errors
+        self.jira_status_label = QLabel()
+        self.jira_status_label.setStyleSheet("color: red;")
+        jira_layout.addWidget(self.jira_status_label)
+
+        jira_layout.addStretch()
+        self.jira_container.setLayout(jira_layout)
+        form_layout.addRow(self.jira_row_label, self.jira_container)
 
         # Duration distribution section
         duration_label = QLabel("Duration Distribution:")
@@ -461,12 +491,16 @@ class TaskEditor(QWidget):
     def _load_jira_reference(self, task: Task) -> None:
         """Load Jira reference into UI.
 
-        Shows a clickable link to the Jira issue if present,
-        otherwise hides the field.
+        Shows a clickable link with unlink button when task has a reference,
+        otherwise shows input field with link button.
 
         Args:
             task: Task to load Jira reference from
         """
+        # Clear any previous status
+        self.jira_status_label.setText("")
+        self.jira_key_input.clear()
+
         if task.jira_reference is not None:
             # Build clickable link
             issue_key = str(task.jira_reference.issue_key)
@@ -478,12 +512,18 @@ class TaskEditor(QWidget):
             link_html = f'<a href="{issue_url}">{issue_key}</a>{type_text}'
 
             self.jira_reference_label.setText(link_html)
+            # Show link and unlink button, hide input and link button
             self.jira_reference_label.show()
-            self.jira_reference_row_label.show()
+            self.jira_unlink_button.show()
+            self.jira_key_input.hide()
+            self.jira_link_button.hide()
         else:
             self.jira_reference_label.setText("")
+            # Hide link and unlink button, show input and link button
             self.jira_reference_label.hide()
-            self.jira_reference_row_label.hide()
+            self.jira_unlink_button.hide()
+            self.jira_key_input.show()
+            self.jira_link_button.show()
 
     def _load_distribution(self, distribution: DurationDistribution | None) -> None:
         """Load duration distribution into UI.
@@ -1111,6 +1151,107 @@ class TaskEditor(QWidget):
         except Exception as e:
             # TODO: Show error dialog
             print(f"Error adding sibling: {e}")
+
+    # Jira linking methods
+
+    def _on_jira_link_clicked(self) -> None:
+        """Link the current task to a Jira issue."""
+        issue_key_str = self.jira_key_input.text().strip()
+        if not issue_key_str:
+            self.jira_status_label.setText("Enter an issue key")
+            return
+
+        # Get project to check for Jira config
+        project = self.controller.get_project()
+        if project.jira_config is None:
+            self.jira_status_label.setText("No Jira server configured")
+            return
+
+        # Try to link using TaskLinker
+        from fluxx.jira.auth import TokenNotFoundError, get_token_path, read_token
+        from fluxx.jira.client import JiraClient
+        from fluxx.jira.linker import IssueNotFoundError, TaskLinker
+        from fluxx.jira.models import JiraIssueKey
+
+        server_url = project.jira_config.server_url
+
+        # First validate the key format
+        try:
+            JiraIssueKey.from_string(issue_key_str.upper())
+        except ValueError as e:
+            self.jira_status_label.setText(str(e))
+            return
+
+        try:
+            # Read token
+            token_path = get_token_path(server_url)
+            token = read_token(token_path)
+
+            # Create client and linker
+            client = JiraClient(server_url=server_url, token=token)
+            linker = TaskLinker(client)
+
+            # Get current task
+            if self.current_task_id is None:
+                return
+
+            persistent_id = project.dag.node_map[self.current_task_id]
+            persistent_task = project.persistent_tasks[persistent_id]
+            task = persistent_task.versions[project.dag.current_version_id]
+
+            # Link
+            result = linker.link(issue_key_str, task)
+
+            # Update pending changes
+            self.pending_changes["jira_reference"] = result.task.jira_reference
+            self.pending_changes["jira_issue_type"] = result.task.jira_issue_type
+
+            # Update UI to show the link
+            self.jira_status_label.setText("")
+            self.jira_reference_label.setText(
+                f'<a href="{server_url}/browse/{result.issue_key}">'
+                f"{result.issue_key}</a> ({result.issue_type})"
+            )
+            self.jira_reference_label.show()
+            self.jira_unlink_button.show()
+            self.jira_key_input.hide()
+            self.jira_link_button.hide()
+            self._update_button_states()
+
+        except TokenNotFoundError:
+            self.jira_status_label.setText(
+                "Jira token not found. Run 'fluxx-jira-auth' first."
+            )
+        except IssueNotFoundError as e:
+            self.jira_status_label.setText(f"Issue not found: {e.issue_key}")
+        except Exception as e:
+            self.jira_status_label.setText(f"Error: {e}")
+
+    def _on_jira_unlink_clicked(self) -> None:
+        """Unlink the current task from its Jira issue."""
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Unlink Jira Issue",
+            "Are you sure you want to unlink this task from Jira?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Set pending changes to remove reference
+        self.pending_changes["jira_reference"] = None
+        self.pending_changes["jira_issue_type"] = None
+
+        # Update UI to show input field
+        self.jira_reference_label.hide()
+        self.jira_unlink_button.hide()
+        self.jira_key_input.show()
+        self.jira_link_button.show()
+        self.jira_key_input.clear()
+        self._update_button_states()
 
     # Allowed Workers methods
 
