@@ -260,9 +260,9 @@ class Worker(BaseModel):
     hours_per_workday: float = Field(description="Hours worker completes per workday")
 
     # Jira integration
-    jira_account_id: str | None = Field(
+    jira_user_id: str | None = Field(
         default=None,
-        description="Jira account ID for mapping worklogs to this worker",
+        description="Jira user identifier (name for Data Center, accountId for Cloud)",
     )
 
 
@@ -696,7 +696,7 @@ class ProjectMetadata(BaseModel):
 class Project(BaseModel):
     """Top-level project container."""
 
-    version: str = Field(default="1.2", description="File format version")
+    version: str = Field(default="1.3", description="File format version")
     metadata: ProjectMetadata = Field(description="Project metadata")
 
     # Core data

@@ -297,7 +297,7 @@ def _create_history_entries(
 
     Args:
         issues: All imported issues
-        workers: Worker map from Jira account ID to Worker
+        workers: Worker map from Jira user_id to Worker
         server_url: Jira server URL
         server_timezone: Server timezone for datetime parsing
 
@@ -310,7 +310,7 @@ def _create_history_entries(
         # Extract completion to determine if done
         workers_by_id: dict[str, WorkerId] = {}
         for jira_id, w in workers.items():
-            if w.jira_account_id:
+            if w.jira_user_id:
                 workers_by_id[jira_id] = w.id
 
         completion_result = extract_completion(issue, workers_by_id, server_timezone)
@@ -335,7 +335,7 @@ def _create_history_entries(
         if worklogs:
             logged_by_worker: dict[str, int] = defaultdict(int)
             for wlog in worklogs:
-                logged_by_worker[wlog.author.account_id] += wlog.time_spent_seconds
+                logged_by_worker[wlog.author.user_id] += wlog.time_spent_seconds
             worker_jira_id = max(logged_by_worker, key=lambda k: logged_by_worker[k])
 
         entries.append(
@@ -426,11 +426,11 @@ def _build_project(
     for hw in hierarchy_warnings:
         warnings.append(ImportWarningFluxx(issue_key=hw.issue_key, message=hw.message))
 
-    # Create mapping from Jira account ID to WorkerId
+    # Create mapping from Jira user_id to WorkerId
     workers_by_jira_id: dict[str, WorkerId] = {}
     for w in workers.values():
-        if w.jira_account_id:
-            workers_by_jira_id[w.jira_account_id] = w.id
+        if w.jira_user_id:
+            workers_by_jira_id[w.jira_user_id] = w.id
 
     # First pass: create tasks (without parent relationships or dependencies)
     task_by_key: dict[str, Task] = {}
@@ -518,7 +518,7 @@ def _build_project(
     # Build project
     now = datetime.now().astimezone()
     project = Project(
-        version="1.2",
+        version="1.3",
         metadata=ProjectMetadata(
             name=project_name,
             created=now,
@@ -883,8 +883,8 @@ def _sync_update_project(
     # Extract workers from all issues (needed for completion extraction)
     workers_by_jira_id: dict[str, WorkerId] = {}
     for worker in project.workers:
-        if worker.jira_account_id:
-            workers_by_jira_id[worker.jira_account_id] = worker.id
+        if worker.jira_user_id:
+            workers_by_jira_id[worker.jira_user_id] = worker.id
 
     # Also extract any new workers from the issues
     new_workers_from_issues = extract_workers_with_no_hours(issues)
@@ -1034,7 +1034,7 @@ def _sync_update_project(
 
     # Add new workers to project
     existing_worker_jira_ids = {
-        w.jira_account_id for w in project.workers if w.jira_account_id
+        w.jira_user_id for w in project.workers if w.jira_user_id
     }
     new_workers = list(project.workers)
     for jira_id, worker in new_workers_from_issues.items():

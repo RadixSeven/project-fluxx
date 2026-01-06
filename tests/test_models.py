@@ -516,7 +516,7 @@ def test_project_creation() -> None:
         metadata=metadata,
         dag=dag,
     )
-    assert project.version == "1.2"
+    assert project.version == "1.3"
     assert project.metadata.name == "Test Project"
     assert len(project.workers) == 0
     assert len(project.simulations) == 0
@@ -738,50 +738,50 @@ class TestTaskJiraFields:
 class TestWorkerJiraFields:
     """Tests for Jira-related fields on Worker model."""
 
-    def test_worker_with_jira_account_id(self) -> None:
-        """Test worker with jira_account_id."""
+    def test_worker_with_jira_user_id(self) -> None:
+        """Test worker with jira_user_id."""
         worker = Worker(
             id=WorkerId("w1"),
             name="Alice",
             worker_id="alice_1",
             hours_per_workday=8.0,
-            jira_account_id="alice123",
+            jira_user_id="alice123",
         )
-        assert worker.jira_account_id == "alice123"
+        assert worker.jira_user_id == "alice123"
 
-    def test_worker_jira_account_id_defaults_none(self) -> None:
-        """Test that jira_account_id defaults to None."""
+    def test_worker_jira_user_id_defaults_none(self) -> None:
+        """Test that jira_user_id defaults to None."""
         worker = Worker(
             id=WorkerId("w1"),
             name="Bob",
             worker_id="bob_1",
             hours_per_workday=8.0,
         )
-        assert worker.jira_account_id is None
+        assert worker.jira_user_id is None
 
-    def test_worker_jira_account_id_serialization(self) -> None:
-        """Test serialization of worker with jira_account_id."""
+    def test_worker_jira_user_id_serialization(self) -> None:
+        """Test serialization of worker with jira_user_id."""
         worker = Worker(
             id=WorkerId("w1"),
             name="Charlie",
             worker_id="charlie_1",
             hours_per_workday=6.0,
-            jira_account_id="charlie_jira",
+            jira_user_id="charlie_jira",
         )
         data = worker.model_dump()
-        assert data["jira_account_id"] == "charlie_jira"
+        assert data["jira_user_id"] == "charlie_jira"
 
-    def test_worker_jira_account_id_deserialization(self) -> None:
-        """Test deserialization of worker with jira_account_id."""
+    def test_worker_jira_user_id_deserialization(self) -> None:
+        """Test deserialization of worker with jira_user_id."""
         data = {
             "id": "w1",
             "name": "Diana",
             "worker_id": "diana_1",
             "hours_per_workday": 7.5,
-            "jira_account_id": "diana_jira_id",
+            "jira_user_id": "diana_jira_id",
         }
         worker = Worker.model_validate(data)
-        assert worker.jira_account_id == "diana_jira_id"
+        assert worker.jira_user_id == "diana_jira_id"
 
 
 class TestJiraDurationDistribution:

@@ -1248,9 +1248,11 @@ Task {
 ```
 Worker {
   ...
-  jira_account_id: optional string  # Jira user account ID - default to None when upgrading
+  jira_user_id: optional string  # Jira user identifier (name for Data Center, accountId for Cloud) - default to None when upgrading
 }
 ```
+
+**Note**: Jira Data Center uses `name` and `key` fields for user identification, while Jira Cloud uses `accountId`. The `jira_user_id` field stores the appropriate identifier based on the Jira platform: `name` for Data Center (preferred), `accountId` for Cloud, or `key` as fallback.
 
 #### 11.3.3 Jira Duration Distribution
 
@@ -1273,7 +1275,7 @@ JiraDurationHistoryEntry {
   server_url: string
   issue_key: JiraIssueKey  # For deduplication on update
   original_estimate_seconds: optional int
-  worker_jira_id: optional string
+  worker_jira_id: optional string  # Jira user identifier (name for Data Center, accountId for Cloud)
   issue_type: string
   total_logged_time_seconds: optional int
 }
@@ -1505,7 +1507,7 @@ We import all workers who have logged time or been assigned an issue in the proj
 
 If the worker logged no work, assign them the average of all daily logged hours for all workers. It's not a good estimate (they are clearly from a different distribution), but it gives us a number to stick in the box.
 
-**Deduplication**: Match workers by `jira_account_id`. Update existing worker's productivity on sync.
+**Deduplication**: Match workers by `jira_user_id`. Update existing worker's productivity on sync.
 
 ### 11.7 Task Completion Mapping
 

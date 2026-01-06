@@ -11,6 +11,7 @@ from fluxx.data.migration import (
     _migrate_task_completion,
     migrate_1_0_to_1_1,
     migrate_1_1_to_1_2,
+    migrate_1_2_to_1_3,
     migrate_project_data,
 )
 
@@ -323,3 +324,118 @@ class TestMigrateV11ToV12:
         task = versions["v1"]
         assert isinstance(task, dict)
         assert "completion" in task
+
+
+class TestMigrateV12ToV13:
+    """Tests for migrate_1_2_to_1_3 function."""
+
+    def test_updates_version(self) -> None:
+        """Migration updates version to 1.3."""
+        json_data: JsonObject = {
+            "version": "1.2",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_2_to_1_3(json_data)
+        assert result["version"] == "1.3"
+
+    def test_renames_worker_jira_account_id(self) -> None:
+        """Migration renames jira_account_id to jira_user_id in workers."""
+        json_data: JsonObject = {
+            "version": "1.2",
+            "workers": [
+                {
+                    "id": "w1",
+                    "name": "Alice",
+                    "hours_per_workday": 8.0,
+                    "jira_account_id": "alice_jira_id",
+                }
+            ],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_2_to_1_3(json_data)
+
+        workers = result["workers"]
+        assert isinstance(workers, list)
+        worker = workers[0]
+        assert isinstance(worker, dict)
+        assert "jira_account_id" not in worker
+        assert worker["jira_user_id"] == "alice_jira_id"
+
+    def test_preserves_workers_without_jira_id(self) -> None:
+        """Migration preserves workers without jira_account_id."""
+        json_data: JsonObject = {
+            "version": "1.2",
+            "workers": [
+                {
+                    "id": "w1",
+                    "name": "Bob",
+                    "hours_per_workday": 8.0,
+                }
+            ],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_2_to_1_3(json_data)
+
+        workers = result["workers"]
+        assert isinstance(workers, list)
+        worker = workers[0]
+        assert isinstance(worker, dict)
+        assert "jira_account_id" not in worker
+        assert "jira_user_id" not in worker
+
+    def test_migrate_from_1_2_to_current(self) -> None:
+        """Migrating from 1.2 should update to current version."""
+        json_data: JsonObject = {
+            "version": "1.2",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_project_data(json_data)
+        assert result["version"] == CURRENT_VERSION
+
+    def test_migrate_multiple_workers(self) -> None:
+        """Migration handles multiple workers correctly."""
+        json_data: JsonObject = {
+            "version": "1.2",
+            "workers": [
+                {
+                    "id": "w1",
+                    "name": "Alice",
+                    "hours_per_workday": 8.0,
+                    "jira_account_id": "alice_id",
+                },
+                {
+                    "id": "w2",
+                    "name": "Bob",
+                    "hours_per_workday": 6.0,
+                },
+                {
+                    "id": "w3",
+                    "name": "Charlie",
+                    "hours_per_workday": 8.0,
+                    "jira_account_id": "charlie_id",
+                },
+            ],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_2_to_1_3(json_data)
+
+        workers = result["workers"]
+        assert isinstance(workers, list)
+        assert len(workers) == 3
+
+        alice = workers[0]
+        assert isinstance(alice, dict)
+        assert alice["jira_user_id"] == "alice_id"
+        assert "jira_account_id" not in alice
+
+        bob = workers[1]
+        assert isinstance(bob, dict)
+        assert "jira_user_id" not in bob
+        assert "jira_account_id" not in bob
+
+        charlie = workers[2]
+        assert isinstance(charlie, dict)
+        assert charlie["jira_user_id"] == "charlie_id"
+        assert "jira_account_id" not in charlie

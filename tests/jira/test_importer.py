@@ -244,7 +244,7 @@ class TestBuildProject:
         worker = Worker(
             id=generate_worker_id(),
             name="User One",
-            jira_account_id="user1",
+            jira_user_id="user1",
             hours_per_workday=8.0,
         )
         workers = {"user1": worker}
@@ -277,7 +277,7 @@ class TestBuildProject:
         worker = Worker(
             id=generate_worker_id(),
             name="User One",
-            jira_account_id="user1",
+            jira_user_id="user1",
             hours_per_workday=8.0,
         )
         workers = {"user1": worker}
@@ -504,7 +504,7 @@ class TestBuildProjectWithDependencies:
         worker = Worker(
             id=generate_worker_id(),
             name="User One",
-            jira_account_id="user1",
+            jira_user_id="user1",
             hours_per_workday=8.0,
         )
         workers = {"user1": worker}
@@ -643,11 +643,11 @@ class TestCreateHistoryEntriesWithWorkers:
     """Tests for _create_history_entries with workers mapping."""
 
     def test_with_workers_mapping(self) -> None:
-        """History entries work with workers that have jira_account_id."""
+        """History entries work with workers that have jira_user_id."""
         worker = Worker(
             id=generate_worker_id(),
             name="User One",
-            jira_account_id="user1",
+            jira_user_id="user1",
             hours_per_workday=8.0,
         )
         workers = {"user1": worker}
@@ -693,7 +693,7 @@ class TestBuildProjectWithHierarchyWarning:
         worker = Worker(
             id=generate_worker_id(),
             name="User One",
-            jira_account_id="user1",
+            jira_user_id="user1",
             hours_per_workday=8.0,
         )
         workers = {"user1": worker}
@@ -922,7 +922,7 @@ class TestEndToEndImport:
         assert len(result.project.workers) == 1
         worker = result.project.workers[0]
         assert worker.name == "Alice Developer"
-        assert worker.jira_account_id == "user-alice"
+        assert worker.jira_user_id == "user-alice"
 
         # Note: jira_config is not set by the importer - it uses the config passed in
         # but doesn't copy it to the project (this could be improved in the future)

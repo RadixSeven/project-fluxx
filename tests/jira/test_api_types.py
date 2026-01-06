@@ -1,6 +1,8 @@
 """Tests for Jira API response types."""
 
-from fluxx.jira.api_types import JiraIssueResponse
+import pytest
+
+from fluxx.jira.api_types import JiraIssueResponse, JiraUser
 from tests.jira.conftest import load_fixture
 
 
@@ -200,3 +202,69 @@ class TestJiraIssueResponseExtraFields:
         # Should not raise
         issue = JiraIssueResponse.model_validate(raw)
         assert issue.key == "TEST-1"
+
+
+class TestJiraUserIdentifier:
+    """Tests for JiraUser.user_id property supporting Cloud and Data Center."""
+
+    def test_user_id_prefers_name_for_data_center(self) -> None:
+        """user_id should prefer 'name' (Data Center primary identifier)."""
+        user = JiraUser(
+            name="alice.smith",
+            account_id="cloud-id-123",
+            key="asmith",
+            display_name="Alice Smith",
+        )
+        assert user.user_id == "alice.smith"
+
+    def test_user_id_uses_account_id_when_no_name(self) -> None:
+        """user_id should use accountId when name is not present."""
+        user = JiraUser(
+            account_id="cloud-id-123",
+            display_name="Alice Smith",
+        )
+        assert user.user_id == "cloud-id-123"
+
+    def test_user_id_uses_key_as_fallback(self) -> None:
+        """user_id should use key when name and accountId are missing."""
+        user = JiraUser(
+            key="asmith",
+            display_name="Alice Smith",
+        )
+        assert user.user_id == "asmith"
+
+    def test_user_id_raises_when_no_identifier(self) -> None:
+        """user_id should raise ValueError when no identifier is available."""
+        user = JiraUser(display_name="Unknown User")
+        with pytest.raises(ValueError, match="no valid identifier"):
+            _ = user.user_id
+
+    def test_data_center_user_without_account_id(self) -> None:
+        """Data Center users typically have name and key but no accountId."""
+        user = JiraUser(
+            name="john.doe",
+            key="jdoe",
+            display_name="John Doe",
+        )
+        assert user.user_id == "john.doe"
+        assert user.account_id is None
+
+    def test_cloud_user_without_name_or_key(self) -> None:
+        """Cloud users typically have accountId but no name/key."""
+        user = JiraUser(
+            account_id="5f1234567890abcdef123456",
+            display_name="Jane Smith",
+        )
+        assert user.user_id == "5f1234567890abcdef123456"
+        assert user.name is None
+        assert user.key is None
+
+    def test_user_with_empty_name_uses_account_id(self) -> None:
+        """Empty string name should fall through to accountId."""
+        user = JiraUser(
+            name="",
+            account_id="cloud-id-123",
+            display_name="Test User",
+        )
+        # Empty string is falsy, so should use accountId
+        assert user.user_id == "cloud-id-123"

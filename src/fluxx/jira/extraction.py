@@ -129,10 +129,10 @@ def _get_total_logged_seconds(worklogs: list[JiraWorklogEntry]) -> int:
 def _get_worker_logged_seconds(
     worklogs: list[JiraWorklogEntry],
 ) -> dict[str, int]:
-    """Get total seconds logged per worker (by account_id)."""
+    """Get total seconds logged per worker (by user_id)."""
     result: dict[str, int] = defaultdict(int)
     for w in worklogs:
-        result[w.author.account_id] += w.time_spent_seconds
+        result[w.author.user_id] += w.time_spent_seconds
     return dict(result)
 
 
@@ -193,14 +193,14 @@ def _get_assignee_worker_id(
     Args:
         issue: The Jira issue
         worklogs: List of worklog entries (may be empty)
-        workers: Mapping from Jira account_id to WorkerId
+        workers: Mapping from Jira user_id to WorkerId
 
     Returns:
         WorkerId for the assigned worker
     """
     # Try assignee first
     if issue.fields.assignee:
-        assignee_id = issue.fields.assignee.account_id
+        assignee_id = issue.fields.assignee.user_id
         if assignee_id in workers:
             return workers[assignee_id]
 
@@ -220,9 +220,7 @@ def _extract_not_started(
     workers: dict[str, WorkerId],
 ) -> ExtractedCompletion:
     """Extract NotStartedCompletion for an issue with no worklogs and no resolution."""
-    assignee_jira_id = (
-        issue.fields.assignee.account_id if issue.fields.assignee else None
-    )
+    assignee_jira_id = issue.fields.assignee.user_id if issue.fields.assignee else None
     allowed_workers = (
         [workers[assignee_jira_id]]
         if assignee_jira_id and assignee_jira_id in workers
@@ -245,7 +243,7 @@ def _extract_started(
     Args:
         issue: The Jira issue
         worklogs: Non-empty list of worklog entries
-        workers: Mapping from Jira account_id to WorkerId
+        workers: Mapping from Jira user_id to WorkerId
         server_timezone: Fallback timezone for datetime parsing
 
     Returns:
@@ -277,7 +275,7 @@ def _extract_done_with_worklogs(
     Args:
         issue: The Jira issue (must have resolution date)
         worklogs: Non-empty list of worklog entries
-        workers: Mapping from Jira account_id to WorkerId
+        workers: Mapping from Jira user_id to WorkerId
         server_timezone: Fallback timezone for datetime parsing
 
     Returns:
@@ -342,7 +340,7 @@ def extract_completion(
 
     Args:
         issue: The Jira issue response
-        workers: Mapping from Jira account_id to WorkerId
+        workers: Mapping from Jira user_id to WorkerId
         server_timezone: IANA timezone name for parsing datetimes without
             timezone info (e.g., 'America/New_York'). Defaults to 'UTC'.
 
@@ -527,31 +525,31 @@ def extract_workers_with_no_hours(
         issues: List of Jira issue responses
 
     Returns:
-        Dict mapping Jira account_id to Worker objects
+        Dict mapping Jira user_id to Worker objects
     """
     workers: dict[str, Worker] = {}
 
     for issue in issues:
         # Extract from assignee
         if issue.fields.assignee:
-            account_id = issue.fields.assignee.account_id
-            if account_id not in workers:
-                workers[account_id] = Worker(
+            user_id = issue.fields.assignee.user_id
+            if user_id not in workers:
+                workers[user_id] = Worker(
                     id=generate_worker_id(),
                     name=issue.fields.assignee.display_name,
-                    jira_account_id=account_id,
+                    jira_user_id=user_id,
                     hours_per_workday=8.0,  # Default, will be calculated later
                 )
 
         # Extract from worklogs
         if issue.fields.worklog:
             for worklog in issue.fields.worklog.worklogs:
-                account_id = worklog.author.account_id
-                if account_id not in workers:
-                    workers[account_id] = Worker(
+                user_id = worklog.author.user_id
+                if user_id not in workers:
+                    workers[user_id] = Worker(
                         id=generate_worker_id(),
                         name=worklog.author.display_name,
-                        jira_account_id=account_id,
+                        jira_user_id=user_id,
                         hours_per_workday=8.0,  # Default
                     )
 
@@ -559,20 +557,21 @@ def extract_workers_with_no_hours(
 
 
 def calculate_hours_per_workday(
-    jira_account_id: str,
+    jira_user_id: str,
     worklogs: list[JiraWorklogEntry],
 ) -> float | None:
     """Calculate average hours per workday for a worker.
 
     Args:
-        jira_account_id: The Jira account ID
+        jira_user_id: The Jira user identifier (name for Data Center,
+            accountId for Cloud)
         worklogs: All worklogs to analyze
 
     Returns:
         Average hours per workday, or None if no worklogs for this user
     """
     # Filter worklogs for this user
-    user_worklogs = [w for w in worklogs if w.author.account_id == jira_account_id]
+    user_worklogs = [w for w in worklogs if w.author.user_id == jira_user_id]
     if not user_worklogs:
         return None
 

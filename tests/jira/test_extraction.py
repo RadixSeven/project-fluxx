@@ -368,7 +368,7 @@ class TestExtractWorkers:
         workers = extract_workers_with_no_hours(issues)
 
         assert "user-1" in workers
-        assert workers["user-1"].jira_account_id == "user-1"
+        assert workers["user-1"].jira_user_id == "user-1"
         assert workers["user-1"].name == "User One"
 
     def test_extract_workers_from_assignees(self) -> None:

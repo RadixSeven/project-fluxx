@@ -9,13 +9,47 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class JiraUser(BaseModel):
-    """Represents a Jira user."""
+    """Represents a Jira user.
+
+    Supports both Jira Cloud (uses accountId) and Jira Data Center (uses name/key).
+    Use the `user_id` property to get the appropriate identifier for the platform.
+    """
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
-    account_id: str = Field(alias="accountId")
+    # Jira Cloud uses accountId
+    account_id: str | None = Field(default=None, alias="accountId")
+    # Jira Data Center uses name (primary) and key (alternate)
+    name: str | None = Field(default=None)
+    key: str | None = Field(default=None)
     display_name: str = Field(alias="displayName")
     active: bool = True
+
+    @property
+    def user_id(self) -> str:
+        """Get the user identifier, preferring Data Center format.
+
+        Resolution priority:
+        1. name (Jira Data Center primary identifier)
+        2. accountId (Jira Cloud identifier)
+        3. key (Jira Data Center alternate identifier)
+
+        Returns:
+            The user identifier string
+
+        Raises:
+            ValueError: If no valid identifier is available
+        """
+        if self.name:
+            return self.name
+        if self.account_id:
+            return self.account_id
+        if self.key:
+            return self.key
+        raise ValueError(
+            f"JiraUser has no valid identifier (name, accountId, or key): "
+            f"display_name={self.display_name}"
+        )
 
 
 class JiraIssueType(BaseModel):

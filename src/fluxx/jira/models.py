@@ -115,7 +115,7 @@ class JiraDurationHistoryEntry(BaseModel):
         server_url: Base URL of the Jira server
         issue_key: The issue key this entry is for
         original_estimate_seconds: Original time estimate in seconds (if set)
-        worker_jira_id: Jira account ID of the worker who completed the issue
+        worker_jira_id: Jira user identifier (name for Data Center, accountId for Cloud)
         issue_type: Jira issue type (e.g., 'Story', 'Bug', 'Task')
         total_logged_time_seconds: Total time logged on the issue in seconds
     """
@@ -126,7 +126,8 @@ class JiraDurationHistoryEntry(BaseModel):
         default=None, description="Original time estimate in seconds"
     )
     worker_jira_id: str | None = Field(
-        default=None, description="Jira account ID of the worker"
+        default=None,
+        description="Jira user identifier (name for Data Center, accountId for Cloud)",
     )
     issue_type: str = Field(description="Jira issue type (e.g., 'Story', 'Bug')")
     total_logged_time_seconds: int | None = Field(

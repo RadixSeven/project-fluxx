@@ -8,10 +8,10 @@ from datetime import UTC, datetime, timedelta
 from fluxx.data.json_types import JsonObject
 
 # Current version of the file format
-CURRENT_VERSION = "1.2"
+CURRENT_VERSION = "1.3"
 
 # Versions we can migrate from
-SUPPORTED_VERSIONS = ["1.0", "1.1", "1.2"]
+SUPPORTED_VERSIONS = ["1.0", "1.1", "1.2", "1.3"]
 
 
 class MigrationError(Exception):
@@ -47,6 +47,10 @@ def migrate_project_data(json_data: JsonObject) -> JsonObject:
 
     if version == "1.1":
         json_data = migrate_1_1_to_1_2(json_data)
+        version = "1.2"
+
+    if version == "1.2":
+        json_data = migrate_1_2_to_1_3(json_data)
 
     return json_data
 
@@ -184,5 +188,31 @@ def migrate_1_1_to_1_2(json_data: JsonObject) -> JsonObject:
     """
     # Update version
     json_data["version"] = "1.2"
+
+    return json_data
+
+
+def migrate_1_2_to_1_3(json_data: JsonObject) -> JsonObject:
+    """Migrate from version 1.2 to 1.3.
+
+    Changes:
+    - Renames Worker.jira_account_id to Worker.jira_user_id to support
+      Jira Data Center (which uses name/key) in addition to Jira Cloud (accountId)
+
+    Args:
+        json_data: Project data in version 1.2 format
+
+    Returns:
+        Project data in version 1.3 format
+    """
+    # Migrate workers
+    workers_list = json_data.get("workers", [])
+    if isinstance(workers_list, list):
+        for worker in workers_list:
+            if isinstance(worker, dict) and "jira_account_id" in worker:
+                worker["jira_user_id"] = worker.pop("jira_account_id")
+
+    # Update version
+    json_data["version"] = "1.3"
 
     return json_data
