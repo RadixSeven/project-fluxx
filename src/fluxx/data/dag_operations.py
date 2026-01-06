@@ -33,6 +33,7 @@ from fluxx.data.models import (
     WorkerId,
 )
 from fluxx.data.validation import validate_dag, validate_dependency
+from fluxx.jira.models import JiraReference
 
 
 class DAGOperationError(Exception):
@@ -453,6 +454,8 @@ def update_task(
     allowed_workers: list[WorkerId] | None = None,
     excluded_worker_tasks: list[TaskId] | None = None,
     completion: TaskCompletion | None = None,
+    jira_reference: JiraReference | None = None,
+    jira_issue_type: str | None = None,
 ) -> Project:
     """Update an existing task's properties.
 
@@ -468,6 +471,8 @@ def update_task(
         allowed_workers: New allowed workers list (if provided)
         excluded_worker_tasks: New excluded worker tasks (if provided)
         completion: New completion state (if provided)
+        jira_reference: New Jira reference (if provided)
+        jira_issue_type: New Jira issue type (if provided)
 
     Returns:
         Updated project
@@ -502,6 +507,10 @@ def update_task(
         update_dict["excluded_worker_tasks"] = excluded_worker_tasks
     if completion is not None:
         update_dict["completion"] = completion
+    if jira_reference is not None:
+        update_dict["jira_reference"] = jira_reference
+    if jira_issue_type is not None:
+        update_dict["jira_issue_type"] = jira_issue_type
 
     # If nothing to update, return unchanged project
     if not update_dict:

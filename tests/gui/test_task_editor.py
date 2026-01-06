@@ -2829,3 +2829,75 @@ def test_task_editor_completion_methods_wrong_state(
     ]
 
     assert isinstance(task.completion, NotStartedCompletion)
+
+
+def test_task_editor_jira_reference_hidden_when_none(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test Jira reference field is hidden when task has no Jira reference."""
+    task_id = controller.create_task(
+        title="Task without Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task_editor.load_task(task_id)
+
+    # Jira reference fields should be hidden
+    assert task_editor.jira_reference_label.isHidden()
+    assert task_editor.jira_reference_row_label.isHidden()
+
+
+def test_task_editor_jira_reference_shown_when_present(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test Jira reference field shows link when task has Jira reference."""
+    from fluxx.jira.models import JiraIssueKey, JiraReference
+
+    task_id = controller.create_task(
+        title="Task with Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update task with Jira reference
+    jira_ref = JiraReference(
+        server_url="https://jira.example.com",
+        issue_key=JiraIssueKey.from_string("PROJ-123"),
+    )
+    controller.update_task(task_id, jira_reference=jira_ref)
+
+    task_editor.load_task(task_id)
+
+    # Jira reference fields should be visible
+    assert not task_editor.jira_reference_label.isHidden()
+    assert not task_editor.jira_reference_row_label.isHidden()
+
+    # Label should contain a link to the Jira issue
+    label_text = task_editor.jira_reference_label.text()
+    assert "PROJ-123" in label_text
+    assert 'href="https://jira.example.com/browse/PROJ-123"' in label_text
+
+
+def test_task_editor_jira_reference_shows_issue_type(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test Jira reference field shows issue type when present."""
+    from fluxx.jira.models import JiraIssueKey, JiraReference
+
+    task_id = controller.create_task(
+        title="Task with Jira Epic",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update task with Jira reference and issue type
+    jira_ref = JiraReference(
+        server_url="https://jira.example.com",
+        issue_key=JiraIssueKey.from_string("EPIC-42"),
+    )
+    controller.update_task(task_id, jira_reference=jira_ref, jira_issue_type="Epic")
+
+    task_editor.load_task(task_id)
+
+    # Label should contain the issue type in parentheses
+    label_text = task_editor.jira_reference_label.text()
+    assert "EPIC-42" in label_text
+    assert "(Epic)" in label_text

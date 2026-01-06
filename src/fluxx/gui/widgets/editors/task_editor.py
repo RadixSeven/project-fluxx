@@ -116,6 +116,16 @@ class TaskEditor(QWidget):
         self.description_field.textChanged.connect(self._on_description_changed)
         form_layout.addRow("Description:", self.description_field)
 
+        # Jira reference field (read-only, hidden when no reference)
+        self.jira_reference_label = QLabel()
+        self.jira_reference_label.setOpenExternalLinks(True)
+        self.jira_reference_label.setStyleSheet("color: #0052CC;")  # Jira blue
+        self.jira_reference_row_label = QLabel("Jira Issue:")
+        form_layout.addRow(self.jira_reference_row_label, self.jira_reference_label)
+        # Initially hide
+        self.jira_reference_row_label.hide()
+        self.jira_reference_label.hide()
+
         # Duration distribution section
         duration_label = QLabel("Duration Distribution:")
         duration_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
@@ -427,6 +437,9 @@ class TaskEditor(QWidget):
         self.description_field.setPlainText(task.description)
         self.description_field.blockSignals(False)
 
+        # Jira reference (read-only display)
+        self._load_jira_reference(task)
+
         # Distribution
         self._load_distribution(task.duration_distribution)
 
@@ -444,6 +457,33 @@ class TaskEditor(QWidget):
 
         # Update button states
         self._update_button_states()
+
+    def _load_jira_reference(self, task: Task) -> None:
+        """Load Jira reference into UI.
+
+        Shows a clickable link to the Jira issue if present,
+        otherwise hides the field.
+
+        Args:
+            task: Task to load Jira reference from
+        """
+        if task.jira_reference is not None:
+            # Build clickable link
+            issue_key = str(task.jira_reference.issue_key)
+            server_url = task.jira_reference.server_url.rstrip("/")
+            issue_url = f"{server_url}/browse/{issue_key}"
+
+            # Show issue type if available
+            type_text = f" ({task.jira_issue_type})" if task.jira_issue_type else ""
+            link_html = f'<a href="{issue_url}">{issue_key}</a>{type_text}'
+
+            self.jira_reference_label.setText(link_html)
+            self.jira_reference_label.show()
+            self.jira_reference_row_label.show()
+        else:
+            self.jira_reference_label.setText("")
+            self.jira_reference_label.hide()
+            self.jira_reference_row_label.hide()
 
     def _load_distribution(self, distribution: DurationDistribution | None) -> None:
         """Load duration distribution into UI.
