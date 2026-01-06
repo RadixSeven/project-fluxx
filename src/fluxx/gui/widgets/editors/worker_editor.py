@@ -1,7 +1,5 @@
 """Worker editor widget for managing project workers."""
 
-from typing import TYPE_CHECKING
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -13,10 +11,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from fluxx.data.models import Project
 from fluxx.gui.controller import ProjectController
-
-if TYPE_CHECKING:
-    from fluxx.data.models import Project
 
 
 class WorkerEditor(QWidget):
@@ -87,11 +83,11 @@ class WorkerEditor(QWidget):
 
         self.setLayout(layout)
 
-    def _on_project_changed(self, project: "Project") -> None:  # noqa: F821
+    def _on_project_changed(self, _project: Project) -> None:
         """Handle project changes by reloading workers.
 
         Args:
-            project: Updated project instance
+            _project: Updated project instance
         """
         self._load_workers()
 
