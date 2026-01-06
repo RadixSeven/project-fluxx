@@ -173,6 +173,12 @@ class MainWindow(QMainWindow):
         import_from_jira_action.triggered.connect(self._on_import_from_jira)
         jira_menu.addAction(import_from_jira_action)
 
+        # Update from Jira
+        update_from_jira_action = QAction("&Update from Jira...", self)
+        update_from_jira_action.setShortcut("Ctrl+U")
+        update_from_jira_action.triggered.connect(self._on_update_from_jira)
+        jira_menu.addAction(update_from_jira_action)
+
     def _create_panels(self) -> None:
         """Create two-panel layout with splitter."""
         # Create panels
@@ -612,3 +618,38 @@ class MainWindow(QMainWindow):
             dialog.exec()
         except Exception as e:
             self._show_error("Import Error", f"Failed to import from Jira: {e}")
+
+    def _on_update_from_jira(self) -> None:
+        """Handle Update from Jira menu action."""
+        from fluxx.gui.jira.sync_dialog import JiraSyncDialog
+        from fluxx.jira.importer import SyncResult
+
+        # Create and show sync dialog
+        dialog = JiraSyncDialog(self.controller.get_project(), self)
+
+        # Connect to results signal
+        def on_sync_completed(result: SyncResult) -> None:
+            # Update current project with synced one
+            self.controller._project = result.project
+            self.controller._modified = True
+            self.controller.project_changed.emit(result.project)
+            self.controller.modified_changed.emit(True)
+
+            # Show warnings if any
+            if result.warnings:
+                warning_text = "\n".join(
+                    f"- {w.issue_key}: {w.message}" for w in result.warnings
+                )
+                QMessageBox.warning(
+                    self,
+                    "Sync Warnings",
+                    f"Sync completed with warnings:\n\n{warning_text}",
+                )
+
+        dialog.sync_completed.connect(on_sync_completed)
+
+        # Show dialog (modal)
+        try:
+            dialog.exec()
+        except Exception as e:
+            self._show_error("Sync Error", f"Failed to sync from Jira: {e}")

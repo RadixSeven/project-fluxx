@@ -1286,3 +1286,244 @@ def test_on_import_from_jira_shows_warnings(
     warning_text = mock_warning.call_args[0][2]
     assert "FHIR-123" in warning_text
     assert "Sub-epic detected" in warning_text
+
+
+def test_jira_menu_has_update_action(window: MainWindow) -> None:
+    """Test that Jira menu has Update from Jira action."""
+    from PySide6.QtWidgets import QMenu
+
+    menubar = window.menuBar()
+    assert menubar is not None
+
+    # Find the Jira menu and check for Update action
+    update_action = None
+    for action in menubar.actions():
+        if action.text() == "&Jira":
+            menu = action.menu()
+            if isinstance(menu, QMenu):
+                for sub_action in menu.actions():
+                    if sub_action.text() == "&Update from Jira...":
+                        update_action = sub_action
+                        break
+
+    assert update_action is not None
+    assert update_action.shortcut().toString() == "Ctrl+U"
+
+
+def test_on_update_from_jira_opens_dialog(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that Update from Jira opens the sync dialog."""
+    # Mock the dialog to prevent actual UI interaction
+    mock_dialog_instance = MagicMock()
+    mock_dialog_instance.exec = MagicMock(return_value=0)
+    mock_dialog_instance.sync_completed = MagicMock()
+    mock_dialog_instance.sync_completed.connect = MagicMock()
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr("fluxx.gui.jira.sync_dialog.JiraSyncDialog", mock_dialog_class)
+
+    # Trigger update action
+    window._on_update_from_jira()
+
+    # Verify dialog was created with correct arguments
+    mock_dialog_class.assert_called_once()
+    assert mock_dialog_class.call_args[0][0] == window.controller.get_project()
+    assert mock_dialog_class.call_args[0][1] == window
+
+    # Verify exec was called
+    mock_dialog_instance.exec.assert_called_once()
+
+
+def test_on_update_from_jira_handles_exception(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that Update from Jira handles exceptions gracefully."""
+    # Mock the dialog to raise an exception
+    mock_dialog_instance = MagicMock()
+    mock_dialog_instance.sync_completed = MagicMock()
+    mock_dialog_instance.sync_completed.connect = MagicMock()
+    mock_dialog_instance.exec = MagicMock(side_effect=Exception("Dialog failed"))
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr("fluxx.gui.jira.sync_dialog.JiraSyncDialog", mock_dialog_class)
+
+    # Mock _show_error to capture error
+    mock_show_error = MagicMock()
+    monkeypatch.setattr(window, "_show_error", mock_show_error)
+
+    # Trigger update action - should not raise
+    window._on_update_from_jira()
+
+    # Should have shown error
+    mock_show_error.assert_called_once()
+    assert "Sync Error" in mock_show_error.call_args[0][0]
+    assert "Dialog failed" in mock_show_error.call_args[0][1]
+
+
+def test_on_update_from_jira_updates_project_on_success(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that successful sync updates the controller's project."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import (
+        DAG,
+        DAGId,
+        DAGVersionId,
+        PersistentObjectId,
+        PersistentTask,
+        Project,
+        ProjectMetadata,
+        Task,
+        TaskId,
+    )
+    from fluxx.jira.importer import SyncResult
+
+    # Create a mock synced project
+    task = Task(
+        id=TaskId("synced_t1"),
+        title="Synced Task",
+        description="From Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    version_id = DAGVersionId("v_synced")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt_synced"),
+        versions={version_id: task},
+    )
+    synced_project = Project(
+        metadata=ProjectMetadata(
+            name="Synced Project",
+            created=datetime(2024, 1, 1, tzinfo=UTC),
+            last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        dag=DAG(
+            id=DAGId("synced_dag"),
+            current_version_id=version_id,
+            node_map={TaskId("synced_t1"): PersistentObjectId("pt_synced")},
+        ),
+        persistent_tasks={PersistentObjectId("pt_synced"): persistent_task},
+        workers=[],
+    )
+
+    mock_result = SyncResult(
+        project=synced_project,
+        warnings=[],
+        updated_count=1,
+        created_count=0,
+        deleted_keys=[],
+    )
+
+    # Create a mock dialog that allows capturing the signal handler
+    mock_dialog_instance = MagicMock()
+    signal_handler: MagicMock | None = None
+
+    def capture_connect(handler: MagicMock) -> None:
+        nonlocal signal_handler
+        signal_handler = handler
+
+    mock_dialog_instance.sync_completed = MagicMock()
+    mock_dialog_instance.sync_completed.connect = capture_connect
+    mock_dialog_instance.exec = MagicMock(return_value=1)
+
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr("fluxx.gui.jira.sync_dialog.JiraSyncDialog", mock_dialog_class)
+
+    # Trigger update action
+    window._on_update_from_jira()
+
+    # Simulate successful sync
+    assert signal_handler is not None
+    signal_handler(mock_result)
+
+    # Verify project was updated
+    assert window.controller._project == synced_project
+    assert window.controller._modified is True
+
+
+def test_on_update_from_jira_shows_warnings(
+    window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that sync warnings are shown to user."""
+    from datetime import UTC, datetime
+
+    from fluxx.data.models import (
+        DAG,
+        DAGId,
+        DAGVersionId,
+        PersistentObjectId,
+        PersistentTask,
+        Project,
+        ProjectMetadata,
+        Task,
+        TaskId,
+    )
+    from fluxx.jira.importer import ImportWarningFluxx, SyncResult
+
+    # Create a mock synced project with warnings
+    task = Task(
+        id=TaskId("synced_t1"),
+        title="Synced Task",
+        description="From Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    version_id = DAGVersionId("v_synced")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt_synced"),
+        versions={version_id: task},
+    )
+    synced_project = Project(
+        metadata=ProjectMetadata(
+            name="Synced Project",
+            created=datetime(2024, 1, 1, tzinfo=UTC),
+            last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        dag=DAG(
+            id=DAGId("synced_dag"),
+            current_version_id=version_id,
+            node_map={TaskId("synced_t1"): PersistentObjectId("pt_synced")},
+        ),
+        persistent_tasks={PersistentObjectId("pt_synced"): persistent_task},
+        workers=[],
+    )
+
+    mock_result = SyncResult(
+        project=synced_project,
+        warnings=[
+            ImportWarningFluxx(issue_key="TEST-456", message="Status changed"),
+        ],
+        updated_count=1,
+        created_count=0,
+        deleted_keys=[],
+    )
+
+    # Create a mock dialog
+    mock_dialog_instance = MagicMock()
+    signal_handler: MagicMock | None = None
+
+    def capture_connect(handler: MagicMock) -> None:
+        nonlocal signal_handler
+        signal_handler = handler
+
+    mock_dialog_instance.sync_completed = MagicMock()
+    mock_dialog_instance.sync_completed.connect = capture_connect
+    mock_dialog_instance.exec = MagicMock(return_value=1)
+
+    mock_dialog_class = MagicMock(return_value=mock_dialog_instance)
+    monkeypatch.setattr("fluxx.gui.jira.sync_dialog.JiraSyncDialog", mock_dialog_class)
+
+    # Mock QMessageBox.warning
+    mock_warning = MagicMock()
+    monkeypatch.setattr("PySide6.QtWidgets.QMessageBox.warning", mock_warning)
+
+    # Trigger update action
+    window._on_update_from_jira()
+
+    # Simulate successful sync with warnings
+    assert signal_handler is not None
+    signal_handler(mock_result)
+
+    # Verify warning was shown
+    mock_warning.assert_called_once()
+    warning_text = mock_warning.call_args[0][2]
+    assert "TEST-456" in warning_text
+    assert "Status changed" in warning_text
