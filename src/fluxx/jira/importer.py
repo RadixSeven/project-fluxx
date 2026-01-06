@@ -427,28 +427,19 @@ def import_from_jira(
         issues, workers, config.server_url, config.server_timezone
     )
 
-    # Build duration distributions from history
-    bins: list[EstimateBin] = []
-
     # Prepare data for distribution fitting
     # (estimate_hours, actual_hours) tuples
-    estimate_data: list[tuple[float, float]] = []
-    actual_times: list[float] = []
+    raw_estimate_data = extract_raw_estimate_data(history_entries)
 
-    for entry in history_entries:
-        # History entries are only created with positive logged time (>EPSILON_HOURS),
-        # so total_logged_time_seconds is always positive here. The check
-        # satisfies mypy's type narrowing.
-        if entry.total_logged_time_seconds is None:
-            continue
-        actual_hours = entry.total_logged_time_seconds / 3600.0
-        actual_times.append(actual_hours)
-
-        if entry.original_estimate_seconds:
-            estimate_hours = entry.original_estimate_seconds / 3600.0
-            estimate_data.append((estimate_hours, actual_hours))
+    # Filter out the None values to accomodate our simple estimation methods
+    actual_times: list[float] = [h for _, h in raw_estimate_data if h is not None]
+    estimate_data: list[tuple[float, float]] = [
+        (e, a) for e, a in raw_estimate_data if e is not None and a is not None
+    ]
 
     update_progress("fitting_distributions", len(issues) * 3 // 4, len(issues))
+
+    # Build duration distributions from history
 
     # Fit distributions
     # actual_times is always non-empty when we call fit_fallback_distribution
@@ -457,6 +448,7 @@ def import_from_jira(
     if actual_times:
         fallback = fit_fallback_distribution(actual_times)
 
+    bins: list[EstimateBin] = []
     if estimate_data and len(estimate_data) >= min_samples_for_bins:
         bins = create_estimate_bins(estimate_data, min_samples=min_samples_for_bins)
 
@@ -477,6 +469,38 @@ def import_from_jira(
         warnings=warnings,
         history_entries=history_entries,
     )
+
+
+def extract_raw_estimate_data(
+    history_entries: list[JiraDurationHistoryEntry],
+) -> list[tuple[float | None, float | None]]:
+    """Return the (estimated, actual) hours pairs from history entries.
+
+    Since history entries can lack both total_logged_time_seconds (actual)
+    and original_estimate_seconds (estimated), this estimate data has None
+    values. Some fragile estimators cannot handle that and need more processing,
+    thus this is "raw" estimate data.
+
+    Args:
+        history_entries: History entries
+
+    Returns:
+        the (estimated, actual) hours pairs
+    """
+    raw_estimate_data: list[tuple[float | None, float | None]] = []
+
+    for entry in history_entries:
+        if entry.total_logged_time_seconds is not None:
+            actual_hours = entry.total_logged_time_seconds
+        else:
+            actual_hours = None
+
+        if entry.original_estimate_seconds:
+            estimate_hours = entry.original_estimate_seconds / 3600.0
+        else:
+            estimate_hours = None
+        raw_estimate_data.append((estimate_hours, actual_hours))
+    return raw_estimate_data
 
 
 def extract_workers(issues: list[JiraIssueResponse]) -> dict[str, Worker]:
