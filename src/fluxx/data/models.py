@@ -197,9 +197,9 @@ class ShiftedLognormal(DurationDistribution):
     @model_validator(mode="after")
     def validate_parameters(self) -> "ShiftedLognormal":
         """Validate that mode and percentile_95 are greater than min."""
-        if self.mode <= self.min:
+        if self.mode < self.min:
             raise ValueError("mode must be greater than min")
-        if self.percentile_95 <= self.min:
+        if self.percentile_95 < self.min:
             raise ValueError("percentile_95 must be greater than min")
         return self
 
