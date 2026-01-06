@@ -436,7 +436,6 @@ def import_from_jira(
 
     # Build duration distributions from history
     bins: list[EstimateBin] = []
-    fallback: ShiftedLognormal | None = None
 
     # Prepare data for distribution fitting
     # (estimate_hours, actual_hours) tuples
@@ -461,6 +460,7 @@ def import_from_jira(
     # Fit distributions
     # actual_times is always non-empty when we call fit_fallback_distribution
     # because history_entries only includes completed issues with logged time
+    fallback: ShiftedLognormal | None = None
     if actual_times:
         fallback = fit_fallback_distribution(actual_times)
 
