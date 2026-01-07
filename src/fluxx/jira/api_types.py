@@ -170,9 +170,9 @@ class JiraIssueFields(BaseModel):
     # Custom fields - story points (customfield_10473 is common but configurable)
     story_points: float | None = Field(default=None, alias="customfield_10473")
 
-    # Epic Link field (customfield_10014 is common but configurable)
+    # Epic Link field (customfield_12202 for this Jira instance)
     # Stories/tasks linked to epics have the epic key in this field
-    epic_link: str | None = Field(default=None, alias="customfield_10014")
+    epic_link: str | None = Field(default=None, alias="customfield_12202")
 
     # Timestamps
     created: str | None = None
