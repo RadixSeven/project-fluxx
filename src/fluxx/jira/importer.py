@@ -60,6 +60,7 @@ from fluxx.jira.models import (
     JiraConfig,
     JiraDurationHistoryEntry,
     JiraIssueKey,
+    JiraSyncMetadata,
 )
 
 
@@ -588,6 +589,7 @@ def _build_project(
         history_events=[],
         current_event_id=None,
         simulations=[],
+        jira_config=config,
     )
 
     return project, warnings
@@ -632,6 +634,13 @@ def import_from_jira(
 ) -> ImportResult:
     """Import issues from Jira and create a Fluxx project.
 
+    This function:
+    1. Fetches issues matching the JQL query (and their children)
+    2. Extracts workers from worklogs
+    3. Fetches project-wide history for ALL completed issues in referenced projects
+    4. Fits duration distributions using the project-wide history
+    5. Creates the Fluxx project with jira_config containing history entries
+
     Args:
         client: Configured Jira client
         jql: JQL query to select issues to import
@@ -657,12 +666,26 @@ def import_from_jira(
 
     update_progress("building_history", len(issues) // 2, len(issues))
 
-    # Create history entries for distribution fitting
-    history_entries = _create_history_entries(
-        issues, workers, config.server_url, config.server_timezone
-    )
+    # Extract project keys from imported issues to determine which projects
+    # we need to fetch history for
+    project_keys: set[str] = set()
+    for issue in issues:
+        key = JiraIssueKey.from_string(issue.key)
+        project_keys.add(key.project_key)
 
-    # Prepare data for distribution fitting
+    # Fetch project-wide history for ALL completed issues in referenced projects
+    # This is the full history used for distribution fitting (per spec section 11.5.1)
+    history_entries: list[JiraDurationHistoryEntry] = []
+    if project_keys:
+        history_entries = fetch_history_entries(
+            client=client,
+            project_keys=project_keys,
+            last_sync=None,  # First import - fetch all history
+            server_url=config.server_url,
+            server_timezone=config.server_timezone,
+        )
+
+    # Prepare data for distribution fitting using project-wide history
     # (estimate_hours, actual_hours) tuples
     raw_estimate_data = extract_raw_estimate_data(history_entries)
 
@@ -689,11 +712,23 @@ def import_from_jira(
 
     update_progress("building_project", len(issues), len(issues))
 
+    # Create updated config with history entries
+    now = datetime.now().astimezone()
+    updated_config = JiraConfig(
+        server_url=config.server_url,
+        server_timezone=config.server_timezone,
+        sync_metadata=JiraSyncMetadata(
+            server_url=config.server_url,
+            last_history_sync=now,
+            history_entries=history_entries,
+        ),
+    )
+
     # Build the project
     project, warnings = _build_project(
         issues=issues,
         workers=workers,
-        config=config,
+        config=updated_config,
         bins=bins,
         fallback=fallback,
         project_name=project_name,

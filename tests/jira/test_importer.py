@@ -440,7 +440,15 @@ class TestImportFromJira:
                 "timetracking": None,
             },
         }
-        mock_client.search.return_value = iter([issue_dict])
+        # Provide iterators for:
+        # 1. Initial JQL query
+        # 2. Children fetch (empty)
+        # 3. History entries fetch (empty - no completed issues)
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+            iter([]),
+        ]
 
         config = JiraConfig(
             server_url="https://jira.example.com",
@@ -460,6 +468,9 @@ class TestImportFromJira:
         assert isinstance(result, ImportResult)
         assert result.project.metadata.name == "Test Project"
         assert len(result.project.dag.node_map) == 1
+        # Verify jira_config is set on the project
+        assert result.project.jira_config is not None
+        assert result.project.jira_config.server_url == "https://jira.example.com"
 
     def test_import_with_progress_callback(self) -> None:
         """Progress callback is called during import."""
@@ -712,7 +723,15 @@ class TestImportWithCompletedIssues:
             }
             issues.append(issue_dict)
 
-        mock_client.search.return_value = iter(issues)
+        # Provide iterators for:
+        # 1. Initial JQL query
+        # 2. Children fetch (empty - no child links)
+        # 3. History entries fetch (same issues, they're all completed)
+        mock_client.search.side_effect = [
+            iter(issues),
+            iter([]),
+            iter(issues),  # History fetch returns the same completed issues
+        ]
 
         config = JiraConfig(
             server_url="https://jira.example.com",
@@ -735,6 +754,9 @@ class TestImportWithCompletedIssues:
         assert len(result.history_entries) == 5
         # Workers should have updated hours_per_workday
         assert len(result.project.workers) == 1
+        # Verify history is stored in jira_config
+        assert result.project.jira_config is not None
+        assert len(result.project.jira_config.sync_metadata.history_entries) == 5
 
 
 class TestCreateHistoryEntriesWithWorkers:
@@ -992,7 +1014,15 @@ class TestEndToEndImport:
             },
         }
 
-        mock_client.search.return_value = iter([epic, story1, subtask1, story2])
+        # Provide iterators for:
+        # 1. Initial JQL query
+        # 2. Children fetch (empty - children are already included via parent field)
+        # 3. History entries fetch (only STORY-2 is completed)
+        mock_client.search.side_effect = [
+            iter([epic, story1, subtask1, story2]),
+            iter([]),
+            iter([story2]),  # Only completed issues in history
+        ]
 
         config = JiraConfig(
             server_url="https://jira.example.com",
@@ -1022,8 +1052,10 @@ class TestEndToEndImport:
         assert worker.name == "Alice Developer"
         assert worker.jira_user_id == "user-alice"
 
-        # Note: jira_config is not set by the importer - it uses the config passed in
-        # but doesn't copy it to the project (this could be improved in the future)
+        # Verify jira_config is set on the project with history entries
+        assert result.project.jira_config is not None
+        assert result.project.jira_config.server_url == "https://jira.example.com"
+        assert len(result.project.jira_config.sync_metadata.history_entries) == 1
 
         # Verify history entries for completed story
         assert len(result.history_entries) == 1
@@ -1636,6 +1668,7 @@ class TestImportWithChildFetching:
             iter([epic_dict]),  # Initial query returns only epic
             iter([story_dict]),  # Children query returns story
             iter([]),  # No more children
+            iter([]),  # History entries query (empty - no completed issues)
         ]
 
         config = JiraConfig(
@@ -1669,6 +1702,9 @@ class TestImportWithChildFetching:
         assert "STORY-1" in tasks
         assert tasks["EPIC-1"].parent_id is None
         assert tasks["STORY-1"].parent_id is not None
+
+        # Verify jira_config is set
+        assert result.project.jira_config is not None
 
 
 class TestBuildSyncJql:
@@ -1728,6 +1764,7 @@ class TestCollectJiraReferencedTasks:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -1812,6 +1849,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict_v1]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -1890,6 +1928,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([parent_dict]),
             iter([]),  # No children initially
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -1982,6 +2021,7 @@ class TestSyncFromJira:
             iter([parent_dict]),
             iter([child_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2037,6 +2077,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2117,6 +2158,7 @@ class TestSyncFromJira:
             iter([epic_dict]),
             iter([story_dict_v1]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2208,6 +2250,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2278,6 +2321,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2392,6 +2436,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2447,6 +2492,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([epic_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
@@ -2635,6 +2681,7 @@ class TestSyncWithBranches:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         config = JiraConfig(
