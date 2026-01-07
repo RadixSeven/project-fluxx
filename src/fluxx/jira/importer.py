@@ -115,7 +115,8 @@ REQUIRED_FIELDS = [
     "resolutiondate",
     "worklog",
     "timetracking",
-    "customfield_10016",  # Story points (common custom field ID)
+    "customfield_10473",  # Story points
+    "customfield_12202",  # Epic Link field
 ]
 
 
