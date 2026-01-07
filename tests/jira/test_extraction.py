@@ -632,6 +632,85 @@ class TestBuildHierarchyEdgeCases:
 
         assert hierarchy["FHIR-100"].parent_key is None
 
+    def test_build_hierarchy_realistic_parent_of_link(self) -> None:
+        """'Parent of' link with realistic link type structure creates hierarchy.
+
+        In real Jira API responses, link types have:
+        - name: e.g., "Hierarchy" or "Parent"
+        - outward: e.g., "is parent of"
+        - inward: e.g., "is child of"
+
+        The code should check the outward/inward fields, not the name field.
+        """
+        # Create a realistic "parent of" link as returned by Jira API
+        link = JiraIssueLink(
+            id="link-1",
+            link_type=JiraIssueLinkType(
+                id="10003",
+                name="Hierarchy",  # Real name, not "Parent of"
+                inward="is child of",
+                outward="is parent of",
+            ),
+            outward_issue=JiraLinkedIssue(id="child-id", key="FHIR-100"),
+            inward_issue=None,
+        )
+        issues = [
+            _make_issue(key="EPIC-1", links=[link]),
+            _make_issue(key="FHIR-100"),
+        ]
+
+        hierarchy, warnings = build_hierarchy(issues)
+
+        # FHIR-100 should have EPIC-1 as parent
+        assert hierarchy["FHIR-100"].parent_key == "EPIC-1"
+
+    def test_build_hierarchy_realistic_child_of_link(self) -> None:
+        """'Child of' link with realistic link type structure creates hierarchy.
+
+        The child issue has an inward link to its parent.
+        """
+        # Create a realistic "child of" link as returned by Jira API
+        link = JiraIssueLink(
+            id="link-1",
+            link_type=JiraIssueLinkType(
+                id="10003",
+                name="Hierarchy",  # Real name, not "Child of"
+                inward="is child of",
+                outward="is parent of",
+            ),
+            inward_issue=JiraLinkedIssue(id="parent-id", key="EPIC-1"),
+            outward_issue=None,
+        )
+        issues = [
+            _make_issue(key="EPIC-1"),
+            _make_issue(key="FHIR-100", links=[link]),
+        ]
+
+        hierarchy, warnings = build_hierarchy(issues)
+
+        # FHIR-100 should have EPIC-1 as parent
+        assert hierarchy["FHIR-100"].parent_key == "EPIC-1"
+
+    def test_build_hierarchy_epic_link_field(self) -> None:
+        """Epic Link custom field creates hierarchy for epic children.
+
+        Stories/tasks linked to epics via Epic Link have the epic key
+        in a custom field (e.g., customfield_10014), not in the parent field.
+        The parent field is only for subtasks.
+        """
+        # Create an epic and a story with Epic Link to the epic
+        epic = _make_issue(key="EPIC-1", issue_type="Epic")
+        # Story with epic_link field pointing to EPIC-1
+        story = _make_issue(key="STORY-1", issue_type="Story")
+        # Set epic_link via model_copy since _make_issue doesn't support it yet
+        story_fields = story.fields.model_copy(update={"epic_link": "EPIC-1"})
+        story = story.model_copy(update={"fields": story_fields})
+
+        hierarchy, warnings = build_hierarchy([epic, story])
+
+        # STORY-1 should have EPIC-1 as parent via epic_link
+        assert hierarchy["STORY-1"].parent_key == "EPIC-1"
+
 
 class TestExtractCompletionEdgeCases:
     """Additional edge case tests for extract_completion."""

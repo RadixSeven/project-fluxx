@@ -46,9 +46,9 @@ from fluxx.jira.distributions import (
     fit_fallback_distribution,
 )
 from fluxx.jira.extraction import (
-    CHILD_OF_LINK_TYPES,
-    PARENT_OF_LINK_TYPES,
     HierarchyEntry,
+    _is_child_of_link,
+    _is_parent_of_link,
     build_hierarchy,
     calculate_hours_per_workday,
     extract_completion,
@@ -140,7 +140,10 @@ def get_children_from_links(
 
         for link in issue.fields.issuelinks:
             # "parent of" outward link: linked issue is a child of this issue
-            if link.link_type.name in PARENT_OF_LINK_TYPES and link.outward_issue:
+            if (
+                _is_parent_of_link(link.link_type.name, link.link_type.outward)
+                and link.outward_issue
+            ):
                 child_key = link.outward_issue.key
                 if child_key not in already_fetched:
                     child_keys.add(child_key)
@@ -150,7 +153,10 @@ def get_children_from_links(
             # but we see it from the parent's perspective)
             # Actually, "child of" inward means: the inward_issue is saying
             # "I am child of this issue" - so inward_issue is a child
-            if link.link_type.name in CHILD_OF_LINK_TYPES and link.inward_issue:
+            if (
+                _is_child_of_link(link.link_type.name, link.link_type.inward)
+                and link.inward_issue
+            ):
                 child_key = link.inward_issue.key
                 if child_key not in already_fetched:
                     child_keys.add(child_key)

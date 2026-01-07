@@ -453,6 +453,38 @@ PARENT_OF_LINK_TYPES = {"Parent of", "parent of", "is parent of"}
 CHILD_OF_LINK_TYPES = {"Child of", "child of", "is child of"}
 
 
+def _is_parent_of_link(
+    link_type_name: str | None, link_type_outward: str | None
+) -> bool:
+    """Check if a link represents a 'parent of' relationship.
+
+    Jira link types have:
+    - name: e.g., "Hierarchy", "Parent"
+    - outward: e.g., "is parent of"
+    - inward: e.g., "is child of"
+
+    We check both name and outward fields to handle different Jira configurations.
+    """
+    if link_type_name and link_type_name in PARENT_OF_LINK_TYPES:
+        return True
+    return bool(link_type_outward and link_type_outward in PARENT_OF_LINK_TYPES)
+
+
+def _is_child_of_link(link_type_name: str | None, link_type_inward: str | None) -> bool:
+    """Check if a link represents a 'child of' relationship.
+
+    Jira link types have:
+    - name: e.g., "Hierarchy", "Parent"
+    - outward: e.g., "is parent of"
+    - inward: e.g., "is child of"
+
+    We check both name and inward fields to handle different Jira configurations.
+    """
+    if link_type_name and link_type_name in CHILD_OF_LINK_TYPES:
+        return True
+    return bool(link_type_inward and link_type_inward in CHILD_OF_LINK_TYPES)
+
+
 def build_hierarchy(
     issues: list[JiraIssueResponse],
 ) -> tuple[dict[str, HierarchyEntry], list[HierarchyWarning]]:
@@ -464,9 +496,10 @@ def build_hierarchy(
     Returns:
         Tuple of (hierarchy dict, warnings list)
 
-    Sources of hierarchy:
-    1. Parent field (standard Jira subtask/Epic relationship)
-    2. "Parent of" / "Child of" links
+    Sources of hierarchy (in priority order):
+    1. Parent field (standard Jira subtask relationship)
+    2. Epic Link field (stories/tasks linked to epics)
+    3. "Parent of" / "Child of" links
     """
     hierarchy: dict[str, HierarchyEntry] = {}
     warnings: list[HierarchyWarning] = []
@@ -476,9 +509,13 @@ def build_hierarchy(
     for issue in issues:
         issue_types[issue.key] = issue.fields.issuetype.name
 
-    # First pass: collect parent relationships from parent field
+    # First pass: collect parent relationships from parent field and epic_link
     for issue in issues:
+        # Priority: parent field > epic_link
         parent_key = issue.fields.parent.key if issue.fields.parent else None
+        if parent_key is None and issue.fields.epic_link:
+            parent_key = issue.fields.epic_link
+
         hierarchy[issue.key] = HierarchyEntry(
             issue_key=issue.key,
             parent_key=parent_key,
@@ -498,7 +535,10 @@ def build_hierarchy(
 
         for link in issue.fields.issuelinks:
             # "Parent of" outward link: this issue is parent of the linked issue
-            if link.link_type.name in PARENT_OF_LINK_TYPES and link.outward_issue:
+            if (
+                _is_parent_of_link(link.link_type.name, link.link_type.outward)
+                and link.outward_issue
+            ):
                 child_key = link.outward_issue.key
                 # Only set if no parent already defined
                 if child_key in hierarchy and hierarchy[child_key].parent_key is None:
@@ -506,7 +546,7 @@ def build_hierarchy(
 
             # "Child of" inward link: the linked issue is parent of this issue
             if (
-                link.link_type.name in CHILD_OF_LINK_TYPES
+                _is_child_of_link(link.link_type.name, link.link_type.inward)
                 and link.inward_issue
                 and hierarchy[issue.key].parent_key is None
             ):
