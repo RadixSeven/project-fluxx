@@ -33,6 +33,21 @@ Initial implementations will support:
 
 2. **Triangular**: Specified by min, mode, and max, all in work-hours
 
+3. **JiraDurationDistribution**: For tasks imported from Jira. Stores:
+   - `original_estimate_seconds`: Original time estimate from Jira (stored in seconds, displayed in hours)
+   - `story_points`: Story points assigned to the issue (optional)
+   - `remaining_estimate_seconds`: Remaining estimate from Jira (stored in seconds, displayed in hours)
+
+   **Sampling**: Uses an empirical bin-based approach. At simulation start, historical (estimate, actual) duration pairs from synchronized Jira history are grouped into bins by estimate value. To sample:
+   1. Find the bin whose center estimate is closest to the task's `original_estimate_seconds` (converted to hours)
+   2. If equidistant from two bins, pick the higher estimate bin (conservative)
+   3. Randomly select an actual duration from that bin's multiset of historical values
+
+   **Edge cases**:
+   - No estimate on task: Use a fallback bin containing all historical samples
+   - No history data: Use exponential distribution with mean = original estimate (maximum entropy)
+   - In-progress tasks: Filter bin to values > hours_logged; if empty, filter fallback; if still empty, return hours_logged + sample_from_fallback (treat remaining as "unknown issue")
+
 Additional distributions will be added over time.
 
 ### 2.3 Possible Worlds
@@ -67,7 +82,7 @@ Task {
 
   # Duration (for leaf tasks only)
   # Must be one of the DurationDistribution subclasses
-  duration_distribution: ShiftedLognormal | Triangular
+  duration_distribution: ShiftedLognormal | Triangular | JiraDurationDistribution
 
   # Dependencies
   dependencies: list of {
