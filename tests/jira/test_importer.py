@@ -1,6 +1,6 @@
 """Tests for Jira import orchestration."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 from fluxx.data.id_generation import (
@@ -3446,3 +3446,297 @@ class TestMergeHistoryEntries:
         assert len(result) == 2
         servers = {e.server_url for e in result}
         assert servers == {"https://jira1.example.com", "https://jira2.example.com"}
+
+
+class TestSyncHistoryUpdates:
+    """Tests for sync history updates (Phase 4 and 6)."""
+
+    def test_sync_updates_history_entries_and_returns_count(self) -> None:
+        """Sync fetches history entries and returns count in result."""
+        mock_client = MagicMock()
+
+        # Initial import
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+            iter([]),  # History entries query (empty for import)
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Create a completed issue for history
+        completed_issue = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[make_worklog(time_seconds=7200)],
+            original_estimate_seconds=14400,
+        )
+
+        # Sync should fetch this completed issue for history
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),  # No children
+            iter([completed_issue.model_dump(by_alias=True)]),  # History entries
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # Should have history entries added
+        assert sync_result.history_entries_added == 1
+        # Project should have updated jira_config
+        assert sync_result.project.jira_config is not None
+        assert sync_result.project.jira_config.sync_metadata is not None
+        assert len(sync_result.project.jira_config.sync_metadata.history_entries) == 1
+
+    def test_sync_merges_history_with_existing(self) -> None:
+        """Sync merges new history entries with existing ones."""
+        mock_client = MagicMock()
+
+        # Create project with existing history
+        existing_history = JiraDurationHistoryEntry(
+            server_url="https://jira.example.com",
+            issue_key=JiraIssueKey.from_string("OLD-1"),
+            issue_type="Story",
+            original_estimate_seconds=14400,  # 4 hours
+            total_logged_time_seconds=18000,  # 5 hours
+        )
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+            iter([]),  # History entries (empty for import)
+        ]
+
+        # Create config with existing history
+        past = datetime.now().astimezone() - timedelta(days=1)
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=past,
+                history_entries=[existing_history],
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Create new completed issue
+        new_completed = make_issue(
+            key="NEW-1",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[make_worklog(time_seconds=7200)],
+            original_estimate_seconds=14400,
+        )
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+            iter([new_completed.model_dump(by_alias=True)]),
+        ]
+
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+
+        # Should have merged history (existing + new)
+        assert sync_result.project.jira_config is not None
+        entries = sync_result.project.jira_config.sync_metadata.history_entries
+        assert len(entries) == 2
+        keys = {str(e.issue_key) for e in entries}
+        assert keys == {"OLD-1", "NEW-1"}
+
+    def test_sync_updates_last_history_sync_timestamp(self) -> None:
+        """Sync updates the last_history_sync timestamp."""
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+            iter([]),
+        ]
+
+        old_time = datetime.now().astimezone() - timedelta(days=7)
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=old_time,
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),
+            iter([]),
+            iter([]),
+        ]
+
+        before_sync = datetime.now().astimezone()
+        sync_result = sync_from_jira(import_result.project, mock_client, config)
+        after_sync = datetime.now().astimezone()
+
+        # last_history_sync should be updated to current time
+        assert sync_result.project.jira_config is not None
+        new_sync_time = sync_result.project.jira_config.sync_metadata.last_history_sync
+        assert new_sync_time > old_time
+        assert before_sync <= new_sync_time <= after_sync
+
+
+class TestImportHistoryPersistence:
+    """Tests for import history persistence (Phase 3 and 6)."""
+
+    def test_import_stores_history_in_project_jira_config(self) -> None:
+        """Import stores fetched history in project.jira_config.sync_metadata."""
+        mock_client = MagicMock()
+
+        # Create completed issue for history
+        completed_issue = make_issue(
+            key="DONE-1",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[make_worklog(time_seconds=14400)],
+            original_estimate_seconds=28800,
+        )
+
+        # Open issue for import
+        open_issue = make_issue(
+            key="OPEN-1",
+            summary="Open Issue",
+        )
+
+        mock_client.search.side_effect = [
+            iter([open_issue.model_dump(by_alias=True)]),  # Main import
+            iter([]),  # Children
+            iter([completed_issue.model_dump(by_alias=True)]),  # History
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        result = import_from_jira(
+            client=mock_client,
+            jql="key = OPEN-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Verify history is stored in project
+        assert result.project.jira_config is not None
+        assert result.project.jira_config.sync_metadata is not None
+        entries = result.project.jira_config.sync_metadata.history_entries
+        assert len(entries) == 1
+        assert str(entries[0].issue_key) == "DONE-1"
+        assert entries[0].total_logged_time_seconds == 14400  # 4 hours
+        assert entries[0].original_estimate_seconds == 28800  # 8 hours
+
+    def test_import_sets_last_history_sync(self) -> None:
+        """Import sets last_history_sync timestamp."""
+        mock_client = MagicMock()
+
+        issue = make_issue(key="TEST-1")
+
+        mock_client.search.side_effect = [
+            iter([issue.model_dump(by_alias=True)]),
+            iter([]),
+            iter([]),
+        ]
+
+        old_time = datetime.now().astimezone() - timedelta(days=7)
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=old_time,
+            ),
+        )
+
+        before_import = datetime.now().astimezone()
+        result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+        after_import = datetime.now().astimezone()
+
+        # Verify last_history_sync is set
+        assert result.project.jira_config is not None
+        sync_time = result.project.jira_config.sync_metadata.last_history_sync
+        assert before_import <= sync_time <= after_import
