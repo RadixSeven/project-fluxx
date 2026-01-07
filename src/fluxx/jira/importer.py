@@ -847,6 +847,39 @@ def build_sync_jql(issue_keys: list[str]) -> str:
     return f"key in ({', '.join(quoted_keys)})"
 
 
+def collect_jira_project_keys(project: Project) -> set[str]:
+    """Collect all distinct Jira project keys from tasks with jira_reference.
+
+    This iterates over all tasks with `jira_reference` and extracts their
+    `project_key` values. Per spec section 11.3.4, this is effectively instant
+    even for large files (<100K issues).
+
+    Args:
+        project: The project to scan
+
+    Returns:
+        Set of unique Jira project keys (e.g., {"CORE", "FHIR"})
+    """
+    project_keys: set[str] = set()
+    dag_version = project.dag.current_version_id
+
+    for persistent_id in project.dag.node_map.values():
+        if persistent_id not in project.persistent_tasks:
+            continue
+
+        ptask = project.persistent_tasks[persistent_id]
+        task = ptask.versions.get(dag_version)
+        if task is None:
+            continue
+
+        if task.jira_reference is None:
+            continue
+
+        project_keys.add(task.jira_reference.issue_key.project_key)
+
+    return project_keys
+
+
 def _update_parent_relationships(
     issues: list[JiraIssueResponse],
     hierarchy: dict[str, HierarchyEntry],

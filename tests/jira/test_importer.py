@@ -55,6 +55,7 @@ from fluxx.jira.importer import (
     _update_parent_relationships,
     build_children_jql,
     build_sync_jql,
+    collect_jira_project_keys,
     collect_jira_referenced_tasks,
     extract_raw_estimate_data,
     fetch_all_issues_with_children,
@@ -2838,3 +2839,302 @@ class TestUpdateParentRelationships:
         updated_ptask = new_persistent_tasks[child_persistent_id]
         updated_task = updated_ptask.versions[new_version]
         assert updated_task.parent_id == parent_task_id
+
+
+class TestCollectJiraProjectKeys:
+    """Tests for collect_jira_project_keys function."""
+
+    def test_empty_project(self) -> None:
+        """Empty project returns empty set."""
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=generate_dag_version_id(),
+            ),
+        )
+        result = collect_jira_project_keys(project)
+        assert result == set()
+
+    def test_project_with_single_jira_task(self) -> None:
+        """Project with one Jira task returns its project key."""
+        from fluxx.jira.models import JiraIssueKey, JiraReference
+
+        dag_version_id = generate_dag_version_id()
+        task_id = generate_task_id()
+
+        task = Task(
+            id=task_id,
+            title="Test Task",
+            description="A task from Jira",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="CORE", issue_number=123),
+            ),
+        )
+        task_persistent_id = generate_persistent_object_id()
+        persistent_task = PersistentTask(
+            id=task_persistent_id,
+            versions={dag_version_id: task},
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,
+                node_map={task_id: task_persistent_id},
+            ),
+            persistent_tasks={task_persistent_id: persistent_task},
+        )
+
+        result = collect_jira_project_keys(project)
+        assert result == {"CORE"}
+
+    def test_project_with_multiple_project_keys(self) -> None:
+        """Project with tasks from different Jira projects returns all keys."""
+        from fluxx.jira.models import JiraIssueKey, JiraReference
+
+        dag_version_id = generate_dag_version_id()
+
+        # Task from CORE project
+        task1_id = generate_task_id()
+        task1 = Task(
+            id=task1_id,
+            title="CORE Task",
+            description="From CORE project",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="CORE", issue_number=123),
+            ),
+        )
+        task1_persistent_id = generate_persistent_object_id()
+        persistent_task1 = PersistentTask(
+            id=task1_persistent_id,
+            versions={dag_version_id: task1},
+        )
+
+        # Task from FHIR project
+        task2_id = generate_task_id()
+        task2 = Task(
+            id=task2_id,
+            title="FHIR Task",
+            description="From FHIR project",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="FHIR", issue_number=456),
+            ),
+        )
+        task2_persistent_id = generate_persistent_object_id()
+        persistent_task2 = PersistentTask(
+            id=task2_persistent_id,
+            versions={dag_version_id: task2},
+        )
+
+        # Another CORE task (should not duplicate)
+        task3_id = generate_task_id()
+        task3 = Task(
+            id=task3_id,
+            title="Another CORE Task",
+            description="Also from CORE project",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="CORE", issue_number=789),
+            ),
+        )
+        task3_persistent_id = generate_persistent_object_id()
+        persistent_task3 = PersistentTask(
+            id=task3_persistent_id,
+            versions={dag_version_id: task3},
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,
+                node_map={
+                    task1_id: task1_persistent_id,
+                    task2_id: task2_persistent_id,
+                    task3_id: task3_persistent_id,
+                },
+            ),
+            persistent_tasks={
+                task1_persistent_id: persistent_task1,
+                task2_persistent_id: persistent_task2,
+                task3_persistent_id: persistent_task3,
+            },
+        )
+
+        result = collect_jira_project_keys(project)
+        assert result == {"CORE", "FHIR"}
+
+    def test_skips_tasks_without_jira_reference(self) -> None:
+        """Tasks without jira_reference are not included."""
+        from fluxx.jira.models import JiraIssueKey, JiraReference
+
+        dag_version_id = generate_dag_version_id()
+
+        # Task with Jira reference
+        task1_id = generate_task_id()
+        task1 = Task(
+            id=task1_id,
+            title="Jira Task",
+            description="From Jira",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="CORE", issue_number=123),
+            ),
+        )
+        task1_persistent_id = generate_persistent_object_id()
+        persistent_task1 = PersistentTask(
+            id=task1_persistent_id,
+            versions={dag_version_id: task1},
+        )
+
+        # Local task without Jira reference
+        task2_id = generate_task_id()
+        task2 = Task(
+            id=task2_id,
+            title="Local Task",
+            description="Not from Jira",
+            jira_reference=None,
+        )
+        task2_persistent_id = generate_persistent_object_id()
+        persistent_task2 = PersistentTask(
+            id=task2_persistent_id,
+            versions={dag_version_id: task2},
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,
+                node_map={
+                    task1_id: task1_persistent_id,
+                    task2_id: task2_persistent_id,
+                },
+            ),
+            persistent_tasks={
+                task1_persistent_id: persistent_task1,
+                task2_persistent_id: persistent_task2,
+            },
+        )
+
+        result = collect_jira_project_keys(project)
+        assert result == {"CORE"}
+
+    def test_skips_branches(self) -> None:
+        """Branch nodes are skipped (only tasks are processed)."""
+        from fluxx.jira.models import JiraIssueKey, JiraReference
+
+        dag_version_id = generate_dag_version_id()
+
+        # Task with Jira reference
+        task_id = generate_task_id()
+        task = Task(
+            id=task_id,
+            title="Jira Task",
+            description="From Jira",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="CORE", issue_number=123),
+            ),
+        )
+        task_persistent_id = generate_persistent_object_id()
+        persistent_task = PersistentTask(
+            id=task_persistent_id,
+            versions={dag_version_id: task},
+        )
+
+        # Branch node
+        branch_id = generate_branch_id()
+        branch = Branch(
+            id=branch_id,
+            title="Decision Branch",
+            description="A branch decision",
+        )
+        branch_persistent_id = generate_persistent_object_id()
+        persistent_branch = PersistentBranch(
+            id=branch_persistent_id,
+            versions={dag_version_id: branch},
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,
+                node_map={
+                    task_id: task_persistent_id,
+                    branch_id: branch_persistent_id,
+                },
+            ),
+            persistent_tasks={task_persistent_id: persistent_task},
+            persistent_branches={branch_persistent_id: persistent_branch},
+        )
+
+        result = collect_jira_project_keys(project)
+        assert result == {"CORE"}
+
+    def test_skips_tasks_missing_version(self) -> None:
+        """Tasks missing version for current DAG are skipped."""
+        from fluxx.jira.models import JiraIssueKey, JiraReference
+
+        dag_version_id = generate_dag_version_id()
+        other_version_id = generate_dag_version_id()
+
+        # Task with Jira reference but wrong version
+        task_id = generate_task_id()
+        task = Task(
+            id=task_id,
+            title="Old Version Task",
+            description="Wrong version",
+            jira_reference=JiraReference(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="OLD", issue_number=999),
+            ),
+        )
+        task_persistent_id = generate_persistent_object_id()
+        persistent_task = PersistentTask(
+            id=task_persistent_id,
+            versions={other_version_id: task},  # Different version
+        )
+
+        project = Project(
+            metadata=ProjectMetadata(
+                name="Test",
+                created=datetime.now().astimezone(),
+                last_modified=datetime.now().astimezone(),
+            ),
+            dag=DAG(
+                id=generate_dag_id(),
+                current_version_id=dag_version_id,  # Different from task's version
+                node_map={task_id: task_persistent_id},
+            ),
+            persistent_tasks={task_persistent_id: persistent_task},
+        )
+
+        result = collect_jira_project_keys(project)
+        assert result == set()
