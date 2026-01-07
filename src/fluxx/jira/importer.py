@@ -31,7 +31,6 @@ from fluxx.data.models import (
     PersistentTask,
     Project,
     ProjectMetadata,
-    ShiftedLognormal,
     Task,
     TaskId,
     Worker,
@@ -39,12 +38,9 @@ from fluxx.data.models import (
 )
 from fluxx.jira.api_types import JiraIssueResponse, JiraWorklogEntry
 from fluxx.jira.client import JiraClient
-from fluxx.jira.distributions import (
-    EstimateBin,
-    create_estimate_bins,
-    find_bin_for_estimate,
-    fit_fallback_distribution,
-)
+
+# Note: Empirical bin-based sampling happens at simulation time, not during import.
+# The import process stores JiraDurationDistribution with raw parameters.
 from fluxx.jira.extraction import (
     HierarchyEntry,
     _is_child_of_link,
@@ -380,21 +376,19 @@ def _create_history_entries(
 
 def _build_duration_distribution(
     issue: JiraIssueResponse,
-    bins: list[EstimateBin],
-    fallback: ShiftedLognormal | None,
-) -> JiraDurationDistribution | ShiftedLognormal:
+) -> JiraDurationDistribution:
     """Build duration distribution for an issue.
+
+    All Jira-imported tasks use JiraDurationDistribution which stores the raw
+    estimate parameters. Actual sampling from historical data happens at
+    simulation time using empirical bins.
 
     Args:
         issue: The Jira issue
-        bins: Estimate bins for conditional distributions
-        fallback: Fallback distribution when no estimate available
 
     Returns:
-        JiraDurationDistribution if issue has Jira estimate data,
-        or ShiftedLognormal from fitted distributions
+        JiraDurationDistribution containing the issue's estimate data
     """
-    # Get original estimate in seconds
     original_estimate_seconds: int | None = None
     remaining_estimate_seconds: int | None = None
     story_points = issue.fields.story_points
@@ -405,18 +399,6 @@ def _build_duration_distribution(
             issue.fields.timetracking.remaining_estimate_seconds
         )
 
-    # If we have bins and an estimate, use the bin distribution
-    if bins and original_estimate_seconds:
-        # Convert to hours for bin lookup
-        estimate_hours = original_estimate_seconds / 3600.0
-        bin_ = find_bin_for_estimate(estimate_hours, bins)
-        return bin_.distribution
-
-    # If we have a fallback distribution, use it
-    if fallback:
-        return fallback
-
-    # Return Jira distribution data (which needs to be resolved later)
     return JiraDurationDistribution(
         original_estimate_seconds=original_estimate_seconds,
         story_points=story_points,
@@ -428,8 +410,6 @@ def _build_project(
     issues: list[JiraIssueResponse],
     workers: dict[str, Worker],
     config: JiraConfig,
-    bins: list[EstimateBin],
-    fallback: ShiftedLognormal | None,
     project_name: str,
 ) -> tuple[Project, list[ImportWarningFluxx]]:
     """Build a Project from extracted Jira data.
@@ -438,8 +418,6 @@ def _build_project(
         issues: All Jira issues to import
         workers: Extracted workers keyed by Jira account ID
         config: Jira configuration
-        bins: Estimate bins for duration distributions
-        fallback: Fallback distribution
         project_name: Name for the project
 
     Returns:
@@ -469,8 +447,8 @@ def _build_project(
             server_timezone=config.server_timezone,
         )
 
-        # Override duration distribution with fitted distribution if available
-        dist = _build_duration_distribution(issue, bins, fallback)
+        # Set duration distribution (JiraDurationDistribution with raw parameters)
+        dist = _build_duration_distribution(issue)
         task = task.model_copy(update={"duration_distribution": dist})
 
         task_by_key[issue.key] = task
@@ -703,30 +681,8 @@ def import_from_jira(
             server_timezone=config.server_timezone,
         )
 
-    # Prepare data for distribution fitting using project-wide history
-    # (estimate_hours, actual_hours) tuples
-    raw_estimate_data = extract_raw_estimate_data(history_entries)
-
-    # Filter out the None values to accomodate our simple estimation methods
-    actual_times: list[float] = [h for _, h in raw_estimate_data if h is not None]
-    estimate_data: list[tuple[float, float]] = [
-        (e, a) for e, a in raw_estimate_data if e is not None and a is not None
-    ]
-
-    update_progress("fitting_distributions", len(issues) * 3 // 4, len(issues))
-
-    # Build duration distributions from history
-
-    # Fit distributions
-    # actual_times is always non-empty when we call fit_fallback_distribution
-    # because history_entries only includes completed issues with logged time
-    fallback: ShiftedLognormal | None = None
-    if actual_times:
-        fallback = fit_fallback_distribution(actual_times)
-
-    bins: list[EstimateBin] = []
-    if estimate_data and len(estimate_data) >= min_samples_for_bins:
-        bins = create_estimate_bins(estimate_data, min_samples=min_samples_for_bins)
+    # Note: Distribution fitting happens at simulation time using empirical bins.
+    # The import process just stores JiraDurationDistribution with raw parameters.
 
     update_progress("building_project", len(issues), len(issues))
 
@@ -747,8 +703,6 @@ def import_from_jira(
         issues=issues,
         workers=workers,
         config=updated_config,
-        bins=bins,
-        fallback=fallback,
         project_name=project_name,
     )
 

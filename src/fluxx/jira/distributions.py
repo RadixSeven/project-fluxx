@@ -1,17 +1,14 @@
 """Distribution fitting for Jira historical duration data.
 
-This module provides functions to fit ShiftedLognormal distributions
-to historical task duration data, supporting both simple fallback
-distributions and bin-based conditional distributions keyed by estimates.
+This module provides functions for empirical bin-based duration sampling
+from historical task duration data. Tasks are grouped into bins by estimate,
+and sampling is done by randomly selecting from historical (estimate, actual)
+pairs within a bin.
 """
 
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import stats
-
-from fluxx.data.models import ShiftedLognormal
-from fluxx.simulation.distributions import sample_shifted_lognormal
 
 
 class InsufficientDataError(Exception):
@@ -19,195 +16,71 @@ class InsufficientDataError(Exception):
 
 
 @dataclass
-class EstimateBin:
-    """A bin of historical data grouped by original estimate.
+class EmpiricalEstimateBin:
+    """A bin containing historical (estimate, actual) pairs for empirical sampling.
+
+    Unlike fitted distributions, this stores raw pairs and samples directly
+    from them, preserving the actual historical variation.
 
     Attributes:
-        center_estimate: The estimate value this bin is centered on
-        lower_bound: Lower bound of estimates included (exclusive)
-        upper_bound: Upper bound of estimates included (inclusive)
-        samples: The actual duration times in this bin
-        distribution: The fitted ShiftedLognormal for this bin
+        center_estimate: The estimate value this bin is centered on (in hours)
+        lower_bound: Lower bound of estimates included (exclusive, in hours)
+        upper_bound: Upper bound of estimates included (inclusive, in hours)
+        samples: List of (estimate_hours, actual_hours) pairs in this bin
     """
 
     center_estimate: float
     lower_bound: float
     upper_bound: float
-    samples: list[float]
-    distribution: ShiftedLognormal
+    samples: list[tuple[float, float]]
 
     def sample(self, rng: np.random.Generator) -> float:
-        """Sample a duration from this bin's distribution.
+        """Randomly select an actual duration from this bin's samples.
 
         Args:
             rng: NumPy random generator
 
         Returns:
-            Sampled duration value
+            Sampled actual duration in hours
         """
-        return sample_shifted_lognormal(self.distribution, rng)
+        index = rng.integers(0, len(self.samples))
+        return self.samples[index][1]  # Return the actual duration
+
+    def sample_filtered(
+        self, rng: np.random.Generator, min_duration: float
+    ) -> float | None:
+        """Sample from filtered bin where actual > min_duration.
+
+        Args:
+            rng: NumPy random generator
+            min_duration: Minimum duration threshold (exclusive)
+
+        Returns:
+            Sampled actual duration, or None if no samples exceed threshold
+        """
+        valid_samples = [s for s in self.samples if s[1] > min_duration]
+        if not valid_samples:
+            return None
+        index = rng.integers(0, len(valid_samples))
+        return valid_samples[index][1]
 
 
-def fit_fallback_distribution(times: list[float]) -> ShiftedLognormal:
-    """Fit a ShiftedLognormal distribution to a list of duration times.
-
-    This is the "fallback" distribution used when no estimate is available
-    or when there's not enough data for bin-based fitting.
-
-    Args:
-        times: List of historical duration times (in hours)
-
-    Returns:
-        A ShiftedLognormal distribution fitted to the data
-
-    Raises:
-        InsufficientDataError: If times is empty
-    """
-    if not times:
-        raise InsufficientDataError("Cannot fit distribution with no data")
-
-    times_array = np.array(times)
-
-    # Handle edge case: all values identical or single value
-    if len(times) == 1 or np.std(times_array) < 1e-10:
-        value = float(times_array[0])
-        # Create a minimal distribution centered around the value
-        # For zero or negative values (shouldn't happen for durations), use defaults
-        if value <= 0:
-            return ShiftedLognormal(min=0.1, mode=0.2, percentile_95=1.0)
-        # For positive values, constraints are automatically satisfied:
-        # min = 0.8*value, mode = value > min, p95 = 1.5*value > mode
-        return ShiftedLognormal(
-            min=value * 0.8,
-            mode=value,
-            percentile_95=value * 1.5,
-        )
-
-    # Try 3-parameter fit first
-    shape, loc, scale = stats.lognorm.fit(times_array)
-
-    # Validate the fit: sigma > 3 usually indicates an unstable fit
-    # In such cases, fall back to constrained 2-parameter fit
-    if shape > 3.0 or loc < 0:
-        # Use constrained fit: shift = 0.8 * min_time
-        min_time = float(np.min(times_array))
-        loc = max(0.0, min_time * 0.8)
-        shifted_data = times_array - loc
-        shifted_data = np.maximum(shifted_data, 1e-10)
-        shape, _, scale = stats.lognorm.fit(shifted_data, floc=0)
-
-    # Ensure loc is non-negative (durations can't be negative)
-    loc = max(0.0, loc)
-
-    # Convert scipy parameters to our parameterization
-    mu = np.log(scale)
-    sigma = shape
-
-    # Calculate mode and p95 from fitted parameters
-    # For lognormal: mode = exp(mu - sigma^2)
-    # For shifted: mode = loc + exp(mu - sigma^2)
-    min_val = float(loc)
-    mode_unshifted = np.exp(mu - sigma**2)
-    # Ensure mode > min_val (mathematically guaranteed, but use max for robustness)
-    mode = max(min_val + 0.01, float(loc + mode_unshifted))
-
-    # p95 = loc + exp(mu + 1.645 * sigma)
-    # Ensure p95 > mode (mathematically guaranteed, but use max for robustness)
-    p95 = max(mode * 1.5, float(loc + np.exp(mu + 1.645 * sigma)))
-
-    return ShiftedLognormal(min=min_val, mode=mode, percentile_95=p95)
-
-
-def fit_bin_distribution(
-    data: list[float],
-    lower_bound: float,
-) -> ShiftedLognormal:
-    """Fit a ShiftedLognormal distribution to bin data.
-
-    Args:
-        data: List of actual duration times in the bin
-        lower_bound: Lower bound for the distribution's location parameter.
-            If 0, fits with loc=0 (no shift). Otherwise, lets scipy determine shift.
-
-    Returns:
-        A ShiftedLognormal distribution fitted to the data
-
-    Raises:
-        InsufficientDataError: If data is empty
-    """
-    if not data:
-        raise InsufficientDataError("Cannot fit distribution with no data")
-
-    times_array = np.array(data)
-
-    # Handle edge case: all values identical
-    if np.std(times_array) < 1e-10:
-        value = float(times_array[0])
-        # Use lower_bound as min, ensure mode and p95 are valid
-        min_val = max(lower_bound, 0.0)
-        # Ensure mode > min_val
-        mode = max(min_val + 0.01, value, min_val * 1.1 if min_val > 0 else 0.1)
-        # Ensure p95 > mode
-        p95 = max(mode * 1.5, mode + 0.01)
-        return ShiftedLognormal(min=min_val, mode=mode, percentile_95=p95)
-
-    # Fit lognormal to unshifted data
-    # For zero lower bound, force loc=0; otherwise let scipy determine loc
-    if lower_bound == 0.0:
-        shape, loc, scale = stats.lognorm.fit(times_array, floc=0)
-    else:
-        # Let scipy determine the location parameter naturally
-        shape, loc, scale = stats.lognorm.fit(times_array)
-
-        # Validate the fit: sigma > 3 usually indicates an unstable fit
-        # In such cases, fall back to constrained 2-parameter fit
-        if shape > 3.0 or loc < 0:
-            min_time = float(np.min(times_array))
-            loc = max(0.0, min_time * 0.8)
-            shifted_data = times_array - loc
-            shifted_data = np.maximum(shifted_data, 1e-10)
-            shape, _, scale = stats.lognorm.fit(shifted_data, floc=0)
-
-        # Ensure loc is non-negative (durations can't be negative)
-        loc = max(0.0, loc)
-
-    # Convert scipy parameters to our parameterization:
-    # - shape is sigma (std of underlying normal)
-    # - loc is the shift (minimum value)
-    # - scale is exp(mu) where mu is the mean of underlying normal
-    mu = np.log(scale)
-    sigma = shape
-
-    # Calculate mode and p95 from fitted parameters
-    # For lognormal: mode = exp(mu - sigma^2)
-    # For shifted: mode = loc + exp(mu - sigma^2)
-    min_val = float(loc)
-    mode_unshifted = np.exp(mu - sigma**2)
-    # Ensure mode > min_val (mathematically guaranteed, but use max for robustness)
-    mode = max(min_val + 0.01, float(loc + mode_unshifted))
-    # p95 = loc + exp(mu + 1.645 * sigma)
-    # Ensure p95 > mode (mathematically guaranteed, but use max for robustness)
-    p95 = max(mode * 1.5, float(loc + np.exp(mu + 1.645 * sigma)))
-
-    return ShiftedLognormal(min=min_val, mode=mode, percentile_95=p95)
-
-
-def create_estimate_bins(
+def create_empirical_bins(
     data: list[tuple[float, float]],
     min_samples: int = 30,
-) -> list[EstimateBin]:
+) -> list[EmpiricalEstimateBin]:
     """Create bins of historical data grouped by original estimate.
 
     Each bin contains at least min_samples entries. Bins are centered on
     unique estimate values and expand outward until they contain enough
-    samples.
+    samples. Unlike fitted bins, these store raw (estimate, actual) pairs.
 
     Args:
-        data: List of (estimate, actual_time) tuples
+        data: List of (estimate_hours, actual_hours) tuples
         min_samples: Minimum number of samples per bin
 
     Returns:
-        List of EstimateBin objects with fitted distributions
+        List of EmpiricalEstimateBin objects containing raw sample pairs
     """
     if not data:
         return []
@@ -215,21 +88,17 @@ def create_estimate_bins(
     # Sort by estimate
     sorted_data = sorted(data, key=lambda x: x[0])
     estimates = [d[0] for d in sorted_data]
-    times = [d[1] for d in sorted_data]
 
-    # If total data < min_samples, create one bin
+    # If total data < min_samples, create one bin with all data
     if len(data) < min_samples:
-        all_times = [t for _, t in data]
-        dist = fit_fallback_distribution(all_times)
         min_est = min(estimates)
         max_est = max(estimates)
         return [
-            EstimateBin(
+            EmpiricalEstimateBin(
                 center_estimate=(min_est + max_est) / 2,
                 lower_bound=0.0,
                 upper_bound=float("inf"),
-                samples=all_times,
-                distribution=dist,
+                samples=list(data),  # Store all (estimate, actual) pairs
             )
         ]
 
@@ -237,20 +106,20 @@ def create_estimate_bins(
     unique_estimates = sorted(set(estimates))
 
     # Create bins for each unique estimate
-    bins: list[EstimateBin] = []
+    bins: list[EmpiricalEstimateBin] = []
     min_estimate = min(estimates)
     max_estimate = max(estimates)
 
     for center in unique_estimates:
         # Find samples within expanding distance until we have min_samples
-        bin_samples: list[float] = []
+        bin_samples: list[tuple[float, float]] = []
         included_estimates: list[float] = []
         excluded_below: float | None = None
         excluded_above: float | None = None
 
-        # Sort estimates by distance from center
+        # Sort by distance from center
         indexed_by_dist = sorted(
-            range(len(estimates)), key=lambda i: abs(estimates[i] - center)
+            range(len(sorted_data)), key=lambda i: abs(estimates[i] - center)
         )
 
         for i in indexed_by_dist:
@@ -262,57 +131,45 @@ def create_estimate_bins(
                 elif est > center and (excluded_above is None or est < excluded_above):
                     excluded_above = est
             else:
-                bin_samples.append(times[i])
+                bin_samples.append(sorted_data[i])
                 included_estimates.append(estimates[i])
-
-        # bin_samples is always non-empty because we add samples until min_samples
-        # or until we exhaust indexed_by_dist (which has at least len(data) entries)
 
         # Calculate bounds as midpoints between included and excluded
         min_included = min(included_estimates)
         max_included = max(included_estimates)
 
-        # Lower bound: 0 if at minimum, else midpoint to nearest excluded below.
-        # When min_included != min_estimate, excluded_below is always set because
-        # any estimate below min_included would have been processed and excluded.
         lower_bound = 0.0
         if min_included != min_estimate and excluded_below is not None:
             lower_bound = (excluded_below + min_included) / 2
 
-        # Upper bound: inf if at maximum, else midpoint to nearest excluded above.
-        # When max_included != max_estimate, excluded_above is always set because
-        # any estimate above max_included would have been processed and excluded.
         upper_bound = float("inf")
         if max_included != max_estimate and excluded_above is not None:
             upper_bound = (max_included + excluded_above) / 2
 
-        # Fit distribution to bin samples
-        dist = fit_bin_distribution(bin_samples, lower_bound)
-
         bins.append(
-            EstimateBin(
+            EmpiricalEstimateBin(
                 center_estimate=center,
                 lower_bound=lower_bound,
                 upper_bound=upper_bound,
                 samples=bin_samples,
-                distribution=dist,
             )
         )
 
-    # If we created multiple bins with overlapping ranges, deduplicate
-    # by keeping bins with distinct lower/upper bounds
+    # Deduplicate bins with identical sample sets
     if len(bins) > 1:
-        bins = _deduplicate_bins(bins)
+        bins = _deduplicate_empirical_bins(bins)
 
     return bins
 
 
-def _deduplicate_bins(bins: list[EstimateBin]) -> list[EstimateBin]:
+def _deduplicate_empirical_bins(
+    bins: list[EmpiricalEstimateBin],
+) -> list[EmpiricalEstimateBin]:
     """Remove bins with identical sample sets.
 
     Keeps the first bin encountered with each unique sample set.
     """
-    seen_samples: dict[tuple[float, ...], EstimateBin] = {}
+    seen_samples: dict[tuple[tuple[float, float], ...], EmpiricalEstimateBin] = {}
     for bin_ in bins:
         key = tuple(sorted(bin_.samples))
         if key not in seen_samples:
@@ -320,19 +177,22 @@ def _deduplicate_bins(bins: list[EstimateBin]) -> list[EstimateBin]:
     return list(seen_samples.values())
 
 
-def find_bin_for_estimate(
+def find_empirical_bin_for_estimate(
     estimate: float,
-    bins: list[EstimateBin],
-) -> EstimateBin:
+    bins: list[EmpiricalEstimateBin],
+) -> EmpiricalEstimateBin:
     """Find the appropriate bin for a given estimate.
 
+    When equidistant from two bins, prefers the higher estimate bin
+    (conservative approach).
+
     Args:
-        estimate: The original estimate value
+        estimate: The original estimate value (in hours)
         bins: List of available bins
 
     Returns:
         The bin whose range contains the estimate, or the nearest bin
-        if the estimate is outside all ranges.
+        (preferring higher when equidistant).
     """
     # First, try to find a bin where estimate is within bounds
     for bin_ in bins:
@@ -343,4 +203,10 @@ def find_bin_for_estimate(
             return bin_
 
     # If not found, return the bin with the closest center
-    return min(bins, key=lambda b: abs(b.center_estimate - estimate))
+    # When equidistant, prefer higher center (conservative)
+    def distance_key(b: EmpiricalEstimateBin) -> tuple[float, float]:
+        dist = abs(b.center_estimate - estimate)
+        # Negative center so higher centers sort first when distances are equal
+        return (dist, -b.center_estimate)
+
+    return min(bins, key=distance_key)

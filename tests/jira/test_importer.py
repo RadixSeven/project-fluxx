@@ -22,7 +22,6 @@ from fluxx.data.models import (
     PersistentTask,
     Project,
     ProjectMetadata,
-    ShiftedLognormal,
     Task,
     TaskId,
     Worker,
@@ -41,7 +40,6 @@ from fluxx.jira.api_types import (
     JiraWorklog,
     JiraWorklogEntry,
 )
-from fluxx.jira.distributions import EstimateBin
 from fluxx.jira.extraction import HierarchyEntry
 from fluxx.jira.importer import (
     COMPLETED_RESOLUTIONS,
@@ -237,40 +235,37 @@ class TestCreateHistoryEntries:
 class TestBuildDurationDistribution:
     """Tests for _build_duration_distribution."""
 
-    def test_with_bins_and_estimate(self) -> None:
-        """Uses bin distribution when bins and estimate available."""
-        dist = ShiftedLognormal(min=1.0, mode=2.0, percentile_95=5.0)
-        bin_ = EstimateBin(
-            center_estimate=4.0,
-            lower_bound=2.0,
-            upper_bound=6.0,
-            samples=[3.0, 4.0, 5.0],
-            distribution=dist,
-        )
-        issue = make_issue(original_estimate_seconds=14400)  # 4 hours
-
-        result = _build_duration_distribution(issue, [bin_], None)
-        assert result == dist
-
-    def test_with_fallback(self) -> None:
-        """Uses fallback distribution when no bins or estimate."""
-        fallback = ShiftedLognormal(min=0.5, mode=1.5, percentile_95=4.0)
-        issue = make_issue()
-
-        result = _build_duration_distribution(issue, [], fallback)
-        assert result == fallback
-
-    def test_returns_jira_distribution(self) -> None:
-        """Returns JiraDurationDistribution when no fitted distribution."""
+    def test_returns_jira_distribution_with_estimate(self) -> None:
+        """Returns JiraDurationDistribution with estimate data."""
         issue = make_issue(
             original_estimate_seconds=7200,
+            remaining_estimate_seconds=3600,
             story_points=3.0,
         )
 
-        result = _build_duration_distribution(issue, [], None)
+        result = _build_duration_distribution(issue)
         assert isinstance(result, JiraDurationDistribution)
         assert result.original_estimate_seconds == 7200
+        assert result.remaining_estimate_seconds == 3600
         assert result.story_points == 3.0
+
+    def test_returns_jira_distribution_without_estimate(self) -> None:
+        """Returns JiraDurationDistribution even without estimate."""
+        issue = make_issue()
+
+        result = _build_duration_distribution(issue)
+        assert isinstance(result, JiraDurationDistribution)
+        assert result.original_estimate_seconds is None
+        assert result.story_points is None
+
+    def test_returns_jira_distribution_with_story_points_only(self) -> None:
+        """Returns JiraDurationDistribution with only story points."""
+        issue = make_issue(story_points=5.0)
+
+        result = _build_duration_distribution(issue)
+        assert isinstance(result, JiraDurationDistribution)
+        assert result.original_estimate_seconds is None
+        assert result.story_points == 5.0
 
 
 class TestBuildProject:
@@ -299,8 +294,6 @@ class TestBuildProject:
             issues=[issue],
             workers=workers,
             config=config,
-            bins=[],
-            fallback=None,
             project_name="Test Project",
         )
 
@@ -336,8 +329,6 @@ class TestBuildProject:
             issues=[parent_issue, child_issue],
             workers=workers,
             config=config,
-            bins=[],
-            fallback=None,
             project_name="Test Project",
         )
 
@@ -390,8 +381,6 @@ class TestBuildProject:
             issues=[parent_issue, child_issue],
             workers=workers,
             config=config,
-            bins=[],
-            fallback=None,
             project_name="Test Project",
         )
 
@@ -684,8 +673,6 @@ class TestBuildProjectWithDependencies:
             issues=[blocker_issue, blocked_issue],
             workers=workers,
             config=config,
-            bins=[],
-            fallback=None,
             project_name="Test Project",
         )
 
@@ -878,8 +865,6 @@ class TestBuildProjectWithHierarchyWarning:
             issues=[parent_epic, sub_epic],
             workers=workers,
             config=config,
-            bins=[],
-            fallback=None,
             project_name="Test Project",
         )
 
