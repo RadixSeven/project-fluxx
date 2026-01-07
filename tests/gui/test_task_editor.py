@@ -3374,3 +3374,114 @@ def test_task_editor_get_worker_names_list_unknown(
     names = task_editor._get_worker_names_list([unknown_id])
     assert len(names) == 1
     assert "Unknown (unknown_worker)" in names[0]
+
+
+def test_task_editor_jira_distribution_display(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading a task with JiraDurationDistribution displays correctly."""
+    from fluxx.data.models import JiraDurationDistribution
+
+    # Create a task first with triangular distribution
+    task_id = controller.create_task(
+        title="Jira Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update it to have a JiraDurationDistribution
+    jira_dist = JiraDurationDistribution(
+        original_estimate_seconds=14400,  # 4 hours
+        story_points=5.0,
+        remaining_estimate_seconds=7200,  # 2 hours
+    )
+    controller.update_task(task_id, duration_distribution=jira_dist)
+
+    # Load the task
+    task_editor.load_task(task_id)
+
+    # Verify distribution type is set
+    assert task_editor.distribution_type.currentText() == "Jira (read-only)"
+
+    # Verify read-only labels are displayed (check the layout has items)
+    param_layout = task_editor.distribution_params_layout
+    assert param_layout.count() >= 4  # info label + 3 fields
+
+
+def test_task_editor_jira_distribution_with_none_values(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test loading JiraDurationDistribution with None values displays '(not set)'."""
+    from fluxx.data.models import JiraDurationDistribution
+
+    # Create a task first with triangular distribution
+    task_id = controller.create_task(
+        title="Jira Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update it to have a JiraDurationDistribution with all None values
+    jira_dist = JiraDurationDistribution(
+        original_estimate_seconds=None,
+        story_points=None,
+        remaining_estimate_seconds=None,
+    )
+    controller.update_task(task_id, duration_distribution=jira_dist)
+
+    # Load the task
+    task_editor.load_task(task_id)
+
+    # Verify distribution type is set
+    assert task_editor.distribution_type.currentText() == "Jira (read-only)"
+
+
+def test_task_editor_jira_distribution_readonly_selection(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test that manually selecting 'Jira (read-only)' reverts to 'None'."""
+    # Create a task with no distribution
+    task_id = controller.create_task(
+        title="Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    task_editor.load_task(task_id)
+
+    # Try to manually select "Jira (read-only)"
+    task_editor.distribution_type.setCurrentText("Jira (read-only)")
+
+    # Should revert to "None"
+    assert task_editor.distribution_type.currentText() == "None"
+
+    # Pending change should be None (not Jira distribution)
+    assert "duration_distribution" in task_editor.pending_changes
+    assert task_editor.pending_changes["duration_distribution"] is None
+
+
+def test_task_editor_jira_distribution_partial_values(
+    task_editor: TaskEditor, controller: ProjectController
+) -> None:
+    """Test JiraDurationDistribution with partial values."""
+    from fluxx.data.models import JiraDurationDistribution
+
+    # Create a task first
+    task_id = controller.create_task(
+        title="Jira Task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Update with only original_estimate_seconds set
+    jira_dist = JiraDurationDistribution(
+        original_estimate_seconds=28800,  # 8 hours
+        story_points=None,
+        remaining_estimate_seconds=None,
+    )
+    controller.update_task(task_id, duration_distribution=jira_dist)
+
+    # Load the task
+    task_editor.load_task(task_id)
+
+    # Verify distribution type is correct
+    assert task_editor.distribution_type.currentText() == "Jira (read-only)"
+
+    # Verify layout has the expected fields
+    param_layout = task_editor.distribution_params_layout
+    assert param_layout.count() >= 4

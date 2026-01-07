@@ -27,6 +27,7 @@ from fluxx.data.models import (
     DoneCompletion,
     DurationDistribution,
     Endpoint,
+    JiraDurationDistribution,
     NodeId,
     NotStartedCompletion,
     ShiftedLognormal,
@@ -163,7 +164,9 @@ class TaskEditor(QWidget):
 
         # Distribution type selector
         self.distribution_type = QComboBox()
-        self.distribution_type.addItems(["None", "Triangular", "Shifted Lognormal"])
+        self.distribution_type.addItems(
+            ["None", "Triangular", "Shifted Lognormal", "Jira (read-only)"]
+        )
         self.distribution_type.currentTextChanged.connect(
             self._on_distribution_type_changed
         )
@@ -542,6 +545,9 @@ class TaskEditor(QWidget):
         elif isinstance(distribution, ShiftedLognormal):
             self.distribution_type.setCurrentText("Shifted Lognormal")
             self._setup_lognormal_fields(distribution)
+        elif isinstance(distribution, JiraDurationDistribution):
+            self.distribution_type.setCurrentText("Jira (read-only)")
+            self._setup_jira_distribution_fields(distribution)
         else:
             # Fallback for unknown or base class instance
             self.distribution_type.setCurrentText("None")
@@ -633,6 +639,50 @@ class TaskEditor(QWidget):
             self.mode_field.blockSignals(False)
             self.percentile_95_field.blockSignals(False)
 
+    def _setup_jira_distribution_fields(
+        self, distribution: JiraDurationDistribution
+    ) -> None:
+        """Set up read-only fields for Jira duration distribution.
+
+        Displays the Jira distribution parameters in hours (converted from seconds).
+
+        Args:
+            distribution: The Jira duration distribution to display
+        """
+        # Clear existing parameter fields
+        self._clear_distribution_params()
+
+        # Create read-only labels for Jira distribution parameters
+        info_label = QLabel("(Imported from Jira - values shown in hours)")
+        info_label.setStyleSheet("color: gray; font-style: italic;")
+        self.distribution_params_layout.addRow(info_label)
+
+        # Original estimate (convert seconds to hours)
+        if distribution.original_estimate_seconds is not None:
+            estimate_hours = distribution.original_estimate_seconds / 3600.0
+            estimate_label = QLabel(f"{estimate_hours:.2f} hours")
+        else:
+            estimate_label = QLabel("(not set)")
+            estimate_label.setStyleSheet("color: gray;")
+        self.distribution_params_layout.addRow("Original Estimate:", estimate_label)
+
+        # Story points (optional)
+        if distribution.story_points is not None:
+            points_label = QLabel(f"{distribution.story_points}")
+        else:
+            points_label = QLabel("(not set)")
+            points_label.setStyleSheet("color: gray;")
+        self.distribution_params_layout.addRow("Story Points:", points_label)
+
+        # Remaining estimate (convert seconds to hours)
+        if distribution.remaining_estimate_seconds is not None:
+            remaining_hours = distribution.remaining_estimate_seconds / 3600.0
+            remaining_label = QLabel(f"{remaining_hours:.2f} hours")
+        else:
+            remaining_label = QLabel("(not set)")
+            remaining_label.setStyleSheet("color: gray;")
+        self.distribution_params_layout.addRow("Remaining Estimate:", remaining_label)
+
     def _clear_distribution_params(self) -> None:
         """Clear all distribution parameter fields."""
         while self.distribution_params_layout.count():
@@ -671,6 +721,15 @@ class TaskEditor(QWidget):
         elif dist_type == "Shifted Lognormal":
             self._setup_lognormal_fields()
             # Don't set pending change yet - wait for params
+        elif dist_type == "Jira (read-only)":
+            # Jira distributions are read-only - can't be manually selected
+            # This case is only reached when the user manually selects it
+            # Revert to None if they try to select it manually
+            self.distribution_type.blockSignals(True)
+            self.distribution_type.setCurrentText("None")
+            self.distribution_type.blockSignals(False)
+            self._clear_distribution_params()
+            self.pending_changes["duration_distribution"] = None
 
         self._update_button_states()
 
