@@ -449,12 +449,62 @@ def _build_project(
 
         task_by_key[issue.key] = task
 
-    # Second pass: set parent relationships
+    # Second pass: set parent relationships with children list and dependencies
+    # Build parent-to-children mapping first
+    parent_to_children: dict[str, list[str]] = {}
     for issue_key, entry in hierarchy.items():
         if entry.parent_key and entry.parent_key in task_by_key:
-            parent_id = task_by_key[entry.parent_key].id
-            task = task_by_key[issue_key]
-            task_by_key[issue_key] = task.model_copy(update={"parent_id": parent_id})
+            if entry.parent_key not in parent_to_children:
+                parent_to_children[entry.parent_key] = []
+            parent_to_children[entry.parent_key].append(issue_key)
+
+    # Update child tasks: set parent_id and add child.start >= parent.start dependency
+    for issue_key, entry in hierarchy.items():
+        if entry.parent_key and entry.parent_key in task_by_key:
+            parent_task = task_by_key[entry.parent_key]
+            child_task = task_by_key[issue_key]
+
+            # Add dependency: child.start >= parent.start
+            child_deps = list(child_task.dependencies)
+            child_deps.append(
+                Dependency(
+                    source_endpoint=Endpoint.START,
+                    target_node_id=parent_task.id,
+                    target_endpoint=Endpoint.START,
+                    constraint_type=ConstraintType.GREATER_EQUAL,
+                )
+            )
+
+            task_by_key[issue_key] = child_task.model_copy(
+                update={
+                    "parent_id": parent_task.id,
+                    "dependencies": child_deps,
+                }
+            )
+
+    # Update parent tasks: add children list and parent.end >= child.end dependencies
+    for parent_key, child_keys in parent_to_children.items():
+        parent_task = task_by_key[parent_key]
+        child_ids = [task_by_key[ck].id for ck in child_keys]
+
+        # Add dependency for each child: parent.end >= child.end
+        parent_deps = list(parent_task.dependencies)
+        for child_id in child_ids:
+            parent_deps.append(
+                Dependency(
+                    source_endpoint=Endpoint.END,
+                    target_node_id=child_id,
+                    target_endpoint=Endpoint.END,
+                    constraint_type=ConstraintType.GREATER_EQUAL,
+                )
+            )
+
+        task_by_key[parent_key] = parent_task.model_copy(
+            update={
+                "children": list(parent_task.children) + child_ids,
+                "dependencies": parent_deps,
+            }
+        )
 
     # Third pass: extract and add dependencies to tasks
     started_issues = {

@@ -317,6 +317,99 @@ class TestBuildProject:
         assert child_task is not None
         assert child_task.parent_id is not None
 
+    def test_hierarchy_creates_children_list_and_dependencies(self) -> None:
+        """Verify parent-child import creates proper children list and dependencies.
+
+        When importing issues with parent-child relationships:
+        1. child.parent_id points to parent
+        2. parent.children includes child
+        3. child has dependency: child.start >= parent.start
+        4. parent has dependency: parent.end >= child.end
+        """
+        from fluxx.data.models import ConstraintType, Endpoint
+
+        worker = Worker(
+            id=generate_worker_id(),
+            name="User One",
+            jira_user_id="user1",
+            hours_per_workday=8.0,
+        )
+        workers = {"user1": worker}
+
+        parent_issue = make_issue(key="TEST-1", summary="Parent Task")
+        child_issue = make_issue(
+            key="TEST-2", summary="Child Task", parent_key="TEST-1"
+        )
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        project, warnings = _build_project(
+            issues=[parent_issue, child_issue],
+            workers=workers,
+            config=config,
+            bins=[],
+            fallback=None,
+            project_name="Test Project",
+        )
+
+        dag_version = project.dag.current_version_id
+
+        # Find parent and child tasks
+        parent_task = None
+        child_task = None
+        for pt in project.persistent_tasks.values():
+            task = pt.versions.get(dag_version)
+            if task:
+                if task.title == "Parent Task":
+                    parent_task = task
+                elif task.title == "Child Task":
+                    child_task = task
+
+        assert parent_task is not None
+        assert child_task is not None
+
+        # 1. Verify child.parent_id points to parent
+        assert child_task.parent_id == parent_task.id
+
+        # 2. Verify parent.children includes child
+        assert child_task.id in parent_task.children
+
+        # 3. Verify child has dependency: child.start >= parent.start
+        child_start_dep = None
+        for dep in child_task.dependencies:
+            if (
+                dep.source_endpoint == Endpoint.START
+                and dep.target_node_id == parent_task.id
+                and dep.target_endpoint == Endpoint.START
+                and dep.constraint_type == ConstraintType.GREATER_EQUAL
+            ):
+                child_start_dep = dep
+                break
+        assert child_start_dep is not None, (
+            "Child should have dependency: child.start >= parent.start"
+        )
+
+        # 4. Verify parent has dependency: parent.end >= child.end
+        parent_end_dep = None
+        for dep in parent_task.dependencies:
+            if (
+                dep.source_endpoint == Endpoint.END
+                and dep.target_node_id == child_task.id
+                and dep.target_endpoint == Endpoint.END
+                and dep.constraint_type == ConstraintType.GREATER_EQUAL
+            ):
+                parent_end_dep = dep
+                break
+        assert parent_end_dep is not None, (
+            "Parent should have dependency: parent.end >= child.end"
+        )
+
 
 class TestImportFromJira:
     """Tests for import_from_jira."""
