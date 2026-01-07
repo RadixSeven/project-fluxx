@@ -1888,6 +1888,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict_v2]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -1970,6 +1971,7 @@ class TestSyncFromJira:
             iter([parent_dict]),  # Initial fetch
             iter([child_dict]),  # Children of parent
             iter([]),  # Children of child
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2045,6 +2047,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([parent_dict]),  # Only parent returns
             iter([]),  # No children
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2099,6 +2102,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         progress_updates: list[ImportProgress] = []
@@ -2208,6 +2212,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([epic_dict, story_dict_v2]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2292,6 +2297,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict_v2]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2383,6 +2389,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict_v2]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2460,6 +2467,7 @@ class TestSyncFromJira:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2532,6 +2540,7 @@ class TestSyncFromJira:
             iter([epic_dict]),
             iter([sub_epic_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(import_result.project, mock_client, config)
@@ -2731,6 +2740,7 @@ class TestSyncWithBranches:
         mock_client.search.side_effect = [
             iter([issue_dict]),
             iter([]),
+            iter([]),  # History entries query
         ]
 
         sync_result = sync_from_jira(project_with_branch, mock_client, config)

@@ -102,6 +102,7 @@ class SyncResult:
     created_count: int = 0
     deleted_keys: list[str] = field(default_factory=list)
     warnings: list[ImportWarningFluxx] = field(default_factory=list)
+    history_entries_added: int = 0
 
 
 # Required fields for Jira API requests
@@ -1355,6 +1356,7 @@ def sync_from_jira(
     3. Updates existing tasks with new data
     4. Creates new tasks for new issues
     5. Deletes tasks that were removed from Jira
+    6. Fetches and merges history entries for distribution fitting
 
     Args:
         project: The project to sync
@@ -1420,6 +1422,51 @@ def sync_from_jira(
     all_deleted_keys.extend(deleted_keys)
     warnings.extend(sync_warnings)
 
+    # Phase 4: Sync history entries for distribution fitting
+    update_progress("syncing_history", len(issues), len(issues))
+
+    # Collect all project keys from synced tasks
+    project_keys = collect_jira_project_keys(updated_project)
+
+    # Get existing history and last sync time from config
+    existing_history: list[JiraDurationHistoryEntry] = []
+    last_history_sync: datetime | None = None
+    if config.sync_metadata:
+        existing_history = config.sync_metadata.history_entries
+        last_history_sync = config.sync_metadata.last_history_sync
+
+    # Fetch new/updated history entries since last sync
+    history_entries_added = 0
+    if project_keys:
+        new_history = fetch_history_entries(
+            client=client,
+            project_keys=project_keys,
+            last_sync=last_history_sync,
+            server_url=config.server_url,
+            server_timezone=config.server_timezone,
+        )
+        history_entries_added = len(new_history)
+
+        # Merge with existing history entries
+        merged_history = merge_history_entries(existing_history, new_history)
+
+        # Create updated config with new history
+        now = datetime.now().astimezone()
+        updated_config = JiraConfig(
+            server_url=config.server_url,
+            server_timezone=config.server_timezone,
+            sync_metadata=JiraSyncMetadata(
+                server_url=config.server_url,
+                last_history_sync=now,
+                history_entries=merged_history,
+            ),
+        )
+
+        # Update the project's jira_config
+        updated_project = updated_project.model_copy(
+            update={"jira_config": updated_config}
+        )
+
     update_progress("sync_complete", len(issues), len(issues))
 
     return SyncResult(
@@ -1428,4 +1475,5 @@ def sync_from_jira(
         created_count=total_created,
         deleted_keys=all_deleted_keys,
         warnings=warnings,
+        history_entries_added=history_entries_added,
     )
