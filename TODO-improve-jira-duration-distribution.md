@@ -122,40 +122,198 @@ Replace the fitted ShiftedLognormal bin-based approach with an empirical multise
 
 1. Unit tests for `EmpiricalEstimateBin.sample()`
 2. Unit tests for `create_empirical_bins()`
-3. Unit tests for `find_empirical_bin_for_estimate()`
+3. Unit tests for `find_empirical_bin_for_estimate()` (including tie-breaking to higher bin)
 4. Integration tests for `sample_task_duration()` with `JiraDurationDistribution`
 5. End-to-end simulation test with Jira-imported project
 6. Edge case tests: no history, no estimate, single sample bin
+7. Filtered sampling tests for in-progress tasks:
+   - Filter removes values <= hours_logged
+   - Fallback to all-history bin when filtered bin is empty
+   - "Unknown issue" path: hours_logged + sampled when all history exhausted
+8. CLI export tests:
+   - CSV generation with all columns
+   - Correct bin_centers calculation
+   - Empty history handling
+9. Extended history entry tests for new fields
 
-### Phase 7: Migration
+### Phase 7: Extend History Model for EDA
+
+**File**: `src/fluxx/jira/models.py`
+
+Current `JiraDurationHistoryEntry` has:
+- `server_url`, `issue_key`, `original_estimate_seconds`, `worker_jira_id`, `issue_type`, `total_logged_time_seconds`
+
+Add new fields for CSV export:
+```python
+class JiraDurationHistoryEntry(BaseModel):
+    # ... existing fields ...
+
+    # New fields for EDA
+    remaining_estimate_seconds: int | None = Field(
+        default=None, description="Remaining estimate in seconds at resolution"
+    )
+    story_points: float | None = Field(
+        default=None, description="Story points assigned to the issue"
+    )
+    created_datetime: datetime | None = Field(
+        default=None, description="When the issue was created"
+    )
+    resolved_datetime: datetime | None = Field(
+        default=None, description="When the issue was resolved"
+    )
+```
+
+**File**: `src/fluxx/jira/extraction.py`
+
+Update history extraction to populate the new fields from Jira issue data.
+
+### Phase 8: CLI Export for Exploratory Data Analysis
+
+**File**: `src/fluxx/__main__.py` (and new `src/fluxx/jira/export.py`)
+
+Add command-line parameter `--write-historical-data-csv <output-filename.csv>` that exports history data for EDA.
+
+1. Add CLI argument parsing:
+   ```
+   fluxx project.fluxx --write-historical-data-csv output.csv
+   ```
+
+2. CSV columns:
+   - `issue_key`: Jira issue key (e.g., "PROJ-123")
+   - `original_estimate_seconds`: Original estimate from Jira (or empty)
+   - `actual_seconds`: Total logged time (or empty)
+   - `remaining_seconds`: Remaining estimate (or empty)
+   - `story_points`: Story points (or empty)
+   - `issue_created_datetime`: When the issue was created
+   - `issue_resolved_datetime`: When the issue was resolved
+   - `bin_centers`: Pipe-separated list of bin centers that contain this (estimate, actual) pair
+
+3. Implementation in `src/fluxx/jira/export.py`:
+   ```python
+   def write_historical_data_csv(
+       project: Project,
+       output_path: Path,
+       min_samples_per_bin: int = 30,
+   ) -> None:
+       """Export historical duration data to CSV for exploratory analysis."""
+       # Extract history entries
+       # Build bins to determine which bins each entry belongs to
+       # Write CSV with all columns
+   ```
+
+4. The `bin_centers` column helps analyze which historical data points inform each bin
+
+### Phase 9: Migration
 
 1. Existing `.fluxx` files with `JiraDurationDistribution` should work unchanged (model already stores the parameters)
-2. No migration needed for the distribution model itself
-3. Consider if any cached/fitted distributions need invalidation
+2. Migration needed for `JiraDurationHistoryEntry` to add new fields (Pydantic handles missing fields with defaults)
+3. Users may need to re-sync history to populate new fields (created_datetime, resolved_datetime, etc.)
 
 ---
 
-## Open Questions for User
+## Design Decisions (Clarified)
 
-1. **Fallback behavior**: What should happen when a task has a `JiraDurationDistribution` but:
-   - No `original_estimate_seconds`? (Use all history as fallback bin?)
-   - No history data at all? (Error? Use a hardcoded default?)
+1. **Fallback behavior**: When a task has `JiraDurationDistribution` but no `original_estimate_seconds`:
+   - **Decision**: Use all history as fallback - sample from all historical (estimate, actual) pairs
 
-2. **Minimum bin size**: Current code uses 30 samples per bin. Should this be configurable or is 30 acceptable?
+2. **Bin selection tie-breaking**: When equidistant from two bins:
+   - **Decision**: Pick the higher estimate bin (conservative approach)
 
-3. **Bin selection tie-breaking**: If equidistant from two bins, should we:
-   - Pick the lower estimate bin?
-   - Pick the higher estimate bin?
-   - Pick randomly between them?
+3. **History scope**:
+   - **Decision**: All projects combined - more data, better statistical power
 
-4. **History scope**: Should binning use:
-   - Only history from the same Jira project?
-   - All history across all synchronized projects?
+4. **Old code deprecation**:
+   - **Decision**: Remove old fitted ShiftedLognormal approach, keep only empirical sampling
 
-5. **Units consistency**: The model stores `original_estimate_seconds` but you mentioned "displayed in hours". Should we:
-   - Keep storing in seconds (current) and convert for display?
-   - Change the model to store hours (breaking change)?
+5. **Units storage**:
+   - **Decision**: Keep storing in seconds (no breaking change), convert to hours for display and bin matching
 
-6. **Story points and remaining estimate**: For this MVP, we're ignoring these fields when choosing a bin. Is this correct? Should they be considered in future iterations?
+6. **Story points and remaining estimate**:
+   - For MVP, ignored when choosing a bin (only use `original_estimate_seconds`)
+   - Future iterations may incorporate these
 
-7. **Deprecation**: Should we deprecate/remove the old `fit_bin_distribution()` and `EstimateBin.distribution` code paths, or keep them as alternatives?
+---
+
+## Detailed Implementation
+
+### Phase 2: Data Model Changes (Details)
+
+**New data structures in `src/fluxx/jira/distributions.py`**:
+
+```python
+@dataclass
+class EmpiricalEstimateBin:
+    """A bin containing historical (estimate, actual) pairs for empirical sampling.
+
+    Unlike EstimateBin which stores a fitted distribution, this stores the raw
+    pairs and samples directly from them.
+    """
+    center_estimate: float  # in hours
+    lower_bound: float      # in hours (exclusive)
+    upper_bound: float      # in hours (inclusive)
+    samples: list[tuple[float, float]]  # (estimate_hours, actual_hours) pairs
+
+    def sample(self, rng: np.random.Generator) -> float:
+        """Randomly select an actual duration from this bin's samples."""
+        index = rng.integers(0, len(self.samples))
+        return self.samples[index][1]  # Return the actual duration
+```
+
+**Bin creation algorithm**:
+- Convert all `JiraDurationHistoryEntry` to (estimate_hours, actual_hours) pairs
+- Filter out entries without estimates for binning (but keep for fallback)
+- Group by estimate with minimum 30 samples per bin
+- Store all (estimate, actual) pairs in each bin (not just actuals)
+
+### Phase 3: Simulation Integration (Details)
+
+**Sampling flow**:
+1. At simulation start, call `prepare_jira_sampling_context(project)`:
+   - Extract history entries from `project.jira_config.sync_metadata.history_entries`
+   - Convert seconds to hours for all estimates and actuals
+   - Create bins using `create_empirical_bins()`
+   - Store in `JiraSamplingContext`
+
+2. In `sample_task_duration()` for `JiraDurationDistribution`:
+   ```python
+   if isinstance(dist, JiraDurationDistribution):
+       if context is None:
+           raise ValueError("JiraDurationDistribution requires sampling context")
+
+       if dist.original_estimate_seconds is not None:
+           estimate_hours = dist.original_estimate_seconds / 3600
+           bin = find_empirical_bin_for_estimate(estimate_hours, context.bins)
+       else:
+           # No estimate: use fallback bin containing all samples
+           bin = context.fallback_bin
+
+       return bin.sample(rng)
+   ```
+
+3. **Tie-breaking**: When equidistant from two bins, pick the one with higher center_estimate
+
+### Phase 4: Edge Cases (Details)
+
+1. **No history data at all**:
+   - **Decision**: Use exponential distribution with mean = original estimate
+   - Exponential is the maximum entropy distribution when only the mean is known
+   - This should be rare in practice (why use JiraDurationDistribution without data?)
+   - Implementation: `rng.exponential(scale=estimate_hours)`
+
+2. **Task has no estimate AND no history**:
+   - Use exponential with a sensible default mean (e.g., 8 hours = 1 workday)
+   - Log a warning
+
+3. **Task has no estimate but history exists**:
+   - Use fallback bin containing ALL historical (estimate, actual) pairs
+   - Sample uniformly from all actuals regardless of estimate
+
+4. **In-progress tasks with JiraDurationDistribution** (filtered sampling, not rejection):
+   - Filter the bin to only include samples where actual > hours_logged
+   - If filtered bin is non-empty: sample uniformly from remaining values
+   - If filtered bin is empty: filter the fallback bin the same way
+   - If fallback bin also empty (hours_logged > all historical actuals):
+     - Treat remaining work as an "unknown issue"
+     - Sample from unfiltered fallback distribution
+     - Return: hours_logged + sampled_value
+   - This avoids rejection sampling entirely and handles edge cases gracefully
