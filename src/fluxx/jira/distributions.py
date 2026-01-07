@@ -83,30 +83,23 @@ def fit_fallback_distribution(times: list[float]) -> ShiftedLognormal:
             percentile_95=value * 1.5,
         )
 
-    # Fit a 3-parameter lognormal: X = loc + exp(normal(s, scale))
-    # scipy.stats.lognorm uses (s, loc, scale) where:
-    # - s is the shape parameter (sigma of the underlying normal)
-    # - loc is the shift (minimum value)
-    # - scale is exp(mu) where mu is the mean of underlying normal
+    # Try 3-parameter fit first
+    shape, loc, scale = stats.lognorm.fit(times_array)
 
-    # First, try to fit with loc (shift) constrained to be at or below min
-    min_time = float(np.min(times_array))
-    # Use a small shift to ensure positive values for log
-    initial_shift = max(0, min_time * 0.8)
+    # Validate the fit: sigma > 3 usually indicates an unstable fit
+    # In such cases, fall back to constrained 2-parameter fit
+    if shape > 3.0 or loc < 0:
+        # Use constrained fit: shift = 0.8 * min_time
+        min_time = float(np.min(times_array))
+        loc = max(0.0, min_time * 0.8)
+        shifted_data = times_array - loc
+        shifted_data = np.maximum(shifted_data, 1e-10)
+        shape, _, scale = stats.lognorm.fit(shifted_data, floc=0)
 
-    # Shift data and fit a 2-parameter lognormal
-    shifted_data = times_array - initial_shift
-    # Ensure all shifted values are positive
-    shifted_data = np.maximum(shifted_data, 1e-10)
+    # Ensure loc is non-negative (durations can't be negative)
+    loc = max(0.0, loc)
 
-    # Fit lognormal to shifted data
-    shape, _, scale = stats.lognorm.fit(shifted_data, floc=0)
-
-    # Convert to our parameterization:
-    # loc (shift) = initial_shift
-    # mu (mean of underlying normal) = log(scale)
-    # sigma (std of underlying normal) = shape
-    loc = initial_shift
+    # Convert scipy parameters to our parameterization
     mu = np.log(scale)
     sigma = shape
 
@@ -134,7 +127,7 @@ def fit_bin_distribution(
     Args:
         data: List of actual duration times in the bin
         lower_bound: Lower bound for the distribution's location parameter.
-            If 0, fits with loc=0 (no shift). Otherwise, allows shift.
+            If 0, fits with loc=0 (no shift). Otherwise, lets scipy determine shift.
 
     Returns:
         A ShiftedLognormal distribution fitted to the data
@@ -158,28 +151,41 @@ def fit_bin_distribution(
         p95 = max(mode * 1.5, mode + 0.01)
         return ShiftedLognormal(min=min_val, mode=mode, percentile_95=p95)
 
-    # Determine the shift (loc) parameter
-    # For zero lower bound, fit with floc=0; otherwise use lower_bound
-    initial_shift = 0.0 if lower_bound == 0.0 else lower_bound
+    # Fit lognormal to unshifted data
+    # For zero lower bound, force loc=0; otherwise let scipy determine loc
+    if lower_bound == 0.0:
+        shape, loc, scale = stats.lognorm.fit(times_array, floc=0)
+    else:
+        # Let scipy determine the location parameter naturally
+        shape, loc, scale = stats.lognorm.fit(times_array)
 
-    # Shift data and fit
-    shifted_data = times_array - initial_shift
-    # Ensure all shifted values are positive
-    shifted_data = np.maximum(shifted_data, 1e-10)
+        # Validate the fit: sigma > 3 usually indicates an unstable fit
+        # In such cases, fall back to constrained 2-parameter fit
+        if shape > 3.0 or loc < 0:
+            min_time = float(np.min(times_array))
+            loc = max(0.0, min_time * 0.8)
+            shifted_data = times_array - loc
+            shifted_data = np.maximum(shifted_data, 1e-10)
+            shape, _, scale = stats.lognorm.fit(shifted_data, floc=0)
 
-    # Fit lognormal to shifted data
-    shape, _, scale = stats.lognorm.fit(shifted_data, floc=0)
+        # Ensure loc is non-negative (durations can't be negative)
+        loc = max(0.0, loc)
 
-    # Convert parameters
-    loc = initial_shift
+    # Convert scipy parameters to our parameterization:
+    # - shape is sigma (std of underlying normal)
+    # - loc is the shift (minimum value)
+    # - scale is exp(mu) where mu is the mean of underlying normal
     mu = np.log(scale)
     sigma = shape
 
-    # Calculate mode and p95
+    # Calculate mode and p95 from fitted parameters
+    # For lognormal: mode = exp(mu - sigma^2)
+    # For shifted: mode = loc + exp(mu - sigma^2)
     min_val = float(loc)
     mode_unshifted = np.exp(mu - sigma**2)
     # Ensure mode > min_val (mathematically guaranteed, but use max for robustness)
     mode = max(min_val + 0.01, float(loc + mode_unshifted))
+    # p95 = loc + exp(mu + 1.645 * sigma)
     # Ensure p95 > mode (mathematically guaranteed, but use max for robustness)
     p95 = max(mode * 1.5, float(loc + np.exp(mu + 1.645 * sigma)))
 
