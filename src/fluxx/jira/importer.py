@@ -880,6 +880,145 @@ def collect_jira_project_keys(project: Project) -> set[str]:
     return project_keys
 
 
+# Resolution values that indicate a completed issue (from spec section 11.4.3)
+COMPLETED_RESOLUTIONS = ["Complete", "Fixed", "Not a bug", "Done", "Cannot Reproduce"]
+
+
+def build_history_jql(
+    project_keys: set[str],
+    last_sync: datetime | None = None,
+) -> str:
+    """Build JQL query to fetch completed issues for history data.
+
+    Args:
+        project_keys: Set of Jira project keys to query
+        last_sync: If provided, only fetch issues updated since this timestamp.
+            If None, fetches all completed issues (first sync).
+
+    Returns:
+        JQL query string for completed issues
+
+    Raises:
+        ValueError: If project_keys is empty
+    """
+    if not project_keys:
+        raise ValueError("project_keys cannot be empty")
+
+    # Build project clause
+    quoted_keys = [f'"{key}"' for key in sorted(project_keys)]
+    project_clause = f"project in ({', '.join(quoted_keys)})"
+
+    # Build resolution clause
+    quoted_resolutions = [f'"{r}"' for r in COMPLETED_RESOLUTIONS]
+    resolution_clause = f"resolution in ({', '.join(quoted_resolutions)})"
+
+    # Combine clauses
+    jql = f"{project_clause} AND {resolution_clause}"
+
+    # Add date filter for incremental sync
+    if last_sync is not None:
+        # Format: "2024-01-15 14:30"
+        date_str = last_sync.strftime("%Y-%m-%d %H:%M")
+        jql += f' AND updated >= "{date_str}"'
+
+    return jql
+
+
+def fetch_history_entries(
+    client: JiraClient,
+    project_keys: set[str],
+    last_sync: datetime | None,
+    server_url: str,
+    server_timezone: str,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+) -> list[JiraDurationHistoryEntry]:
+    """Fetch completed issues from Jira and create history entries.
+
+    This queries all completed issues in the specified projects (optionally
+    filtered by update date for incremental sync) and creates history entries
+    for duration distribution fitting.
+
+    Args:
+        client: Configured Jira client
+        project_keys: Set of Jira project keys to query
+        last_sync: If provided, only fetch issues updated since this timestamp
+        server_url: Jira server URL for history entries
+        server_timezone: Server timezone for datetime parsing
+        progress_callback: Optional callback(phase, processed, total)
+
+    Returns:
+        List of history entries for completed issues
+    """
+    if not project_keys:
+        return []
+
+    if progress_callback:
+        progress_callback("fetching_history", 0, 0)
+
+    # Build JQL for completed issues
+    jql = build_history_jql(project_keys, last_sync)
+
+    # Fields needed for history entries (minimal set)
+    history_fields = [
+        "summary",
+        "issuetype",
+        "status",
+        "resolutiondate",
+        "worklog",
+        "timetracking",
+    ]
+
+    # Fetch issues
+    issues: list[JiraIssueResponse] = []
+    for issue_dict in client.search(jql, history_fields):
+        try:
+            issue = JiraIssueResponse.model_validate(issue_dict)
+            issues.append(issue)
+        except Exception:
+            # Skip issues that fail validation (might be old/corrupt)
+            pass
+
+    if progress_callback:
+        progress_callback("processing_history", len(issues), len(issues))
+
+    # Create history entries (reuse existing function with empty workers)
+    # Note: _create_history_entries only includes DoneCompletion issues
+    return _create_history_entries(issues, {}, server_url, server_timezone)
+
+
+def merge_history_entries(
+    existing: list[JiraDurationHistoryEntry],
+    new: list[JiraDurationHistoryEntry],
+) -> list[JiraDurationHistoryEntry]:
+    """Merge new history entries with existing ones.
+
+    Deduplicates by (server_url, issue_key) tuple. New entries replace
+    existing entries for the same issue (handles updates). Existing entries
+    not in the new set are preserved (handles issues not in incremental query).
+
+    Args:
+        existing: Existing history entries
+        new: New history entries to merge
+
+    Returns:
+        Merged list with duplicates resolved (new entries win)
+    """
+    # Build lookup by (server_url, issue_key)
+    entries_by_key: dict[tuple[str, str], JiraDurationHistoryEntry] = {}
+
+    # Add existing entries first
+    for entry in existing:
+        key = (entry.server_url, str(entry.issue_key))
+        entries_by_key[key] = entry
+
+    # New entries override existing
+    for entry in new:
+        key = (entry.server_url, str(entry.issue_key))
+        entries_by_key[key] = entry
+
+    return list(entries_by_key.values())
+
+
 def _update_parent_relationships(
     issues: list[JiraIssueResponse],
     hierarchy: dict[str, HierarchyEntry],

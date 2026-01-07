@@ -1,6 +1,6 @@
 """Tests for Jira import orchestration."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from fluxx.data.id_generation import (
@@ -44,6 +44,7 @@ from fluxx.jira.api_types import (
 from fluxx.jira.distributions import EstimateBin
 from fluxx.jira.extraction import HierarchyEntry
 from fluxx.jira.importer import (
+    COMPLETED_RESOLUTIONS,
     ImportProgress,
     ImportResult,
     ImportWarningFluxx,
@@ -54,14 +55,17 @@ from fluxx.jira.importer import (
     _create_history_entries,
     _update_parent_relationships,
     build_children_jql,
+    build_history_jql,
     build_sync_jql,
     collect_jira_project_keys,
     collect_jira_referenced_tasks,
     extract_raw_estimate_data,
     fetch_all_issues_with_children,
     fetch_and_validate_issues,
+    fetch_history_entries,
     get_children_from_links,
     import_from_jira,
+    merge_history_entries,
     sync_from_jira,
 )
 from fluxx.jira.models import (
@@ -3138,3 +3142,250 @@ class TestCollectJiraProjectKeys:
 
         result = collect_jira_project_keys(project)
         assert result == set()
+
+
+class TestBuildHistoryJql:
+    """Tests for build_history_jql function."""
+
+    def test_single_project(self) -> None:
+        """Single project key generates correct JQL."""
+        jql = build_history_jql({"CORE"})
+
+        assert 'project in ("CORE")' in jql
+        # Check all expected resolutions are present
+        for resolution in COMPLETED_RESOLUTIONS:
+            assert f'"{resolution}"' in jql
+        assert "resolution in" in jql
+        # No date filter without last_sync
+        assert "updated >=" not in jql
+
+    def test_multiple_projects(self) -> None:
+        """Multiple project keys are sorted and quoted."""
+        jql = build_history_jql({"FHIR", "CORE", "API"})
+
+        # Projects should be sorted
+        assert 'project in ("API", "CORE", "FHIR")' in jql
+
+    def test_with_last_sync_date(self) -> None:
+        """Last sync date adds updated filter."""
+
+        last_sync = datetime(2024, 1, 15, 14, 30, tzinfo=UTC)
+        jql = build_history_jql({"CORE"}, last_sync)
+
+        assert 'updated >= "2024-01-15 14:30"' in jql
+
+    def test_empty_project_keys_raises(self) -> None:
+        """Empty project keys raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="project_keys cannot be empty"):
+            build_history_jql(set())
+
+
+class TestFetchHistoryEntries:
+    """Tests for fetch_history_entries function."""
+
+    def test_empty_project_keys_returns_empty(self) -> None:
+        """Empty project keys returns empty list without calling client."""
+        mock_client = MagicMock()
+        result = fetch_history_entries(
+            client=mock_client,
+            project_keys=set(),
+            last_sync=None,
+            server_url="https://jira.example.com",
+            server_timezone="UTC",
+        )
+        assert result == []
+        mock_client.search.assert_not_called()
+
+    def test_fetches_completed_issues(self) -> None:
+        """Fetches completed issues and creates history entries."""
+        mock_client = MagicMock()
+
+        # Create a completed issue using the helper functions
+        worklog = make_worklog(time_seconds=7200)
+        issue = make_issue(
+            key="CORE-123",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,
+        )
+
+        # Return issue dict that will be validated back to the same structure
+        mock_client.search.return_value = iter([issue.model_dump(by_alias=True)])
+
+        result = fetch_history_entries(
+            client=mock_client,
+            project_keys={"CORE"},
+            last_sync=None,
+            server_url="https://jira.example.com",
+            server_timezone="UTC",
+        )
+
+        assert len(result) == 1
+        assert str(result[0].issue_key) == "CORE-123"
+        assert result[0].total_logged_time_seconds == 7200
+        assert result[0].original_estimate_seconds == 14400
+
+    def test_calls_progress_callback(self) -> None:
+        """Progress callback is called during fetch."""
+        mock_client = MagicMock()
+        mock_client.search.return_value = iter([])
+
+        callbacks: list[tuple[str, int, int]] = []
+
+        def progress_callback(phase: str, processed: int, total: int) -> None:
+            callbacks.append((phase, processed, total))
+
+        fetch_history_entries(
+            client=mock_client,
+            project_keys={"CORE"},
+            last_sync=None,
+            server_url="https://jira.example.com",
+            server_timezone="UTC",
+            progress_callback=progress_callback,
+        )
+
+        assert ("fetching_history", 0, 0) in callbacks
+        assert ("processing_history", 0, 0) in callbacks
+
+    def test_skips_invalid_issues(self) -> None:
+        """Invalid issues are skipped without raising."""
+        mock_client = MagicMock()
+
+        # Invalid issue missing required fields
+        invalid_dict = {"key": "CORE-BAD", "fields": {}}
+
+        # Valid issue using helper functions
+        worklog = make_worklog(time_seconds=3600)
+        valid_issue = make_issue(
+            key="CORE-123",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+
+        mock_client.search.return_value = iter(
+            [invalid_dict, valid_issue.model_dump(by_alias=True)]
+        )
+
+        result = fetch_history_entries(
+            client=mock_client,
+            project_keys={"CORE"},
+            last_sync=None,
+            server_url="https://jira.example.com",
+            server_timezone="UTC",
+        )
+
+        # Only valid issue should be in results
+        assert len(result) == 1
+        assert str(result[0].issue_key) == "CORE-123"
+
+
+class TestMergeHistoryEntries:
+    """Tests for merge_history_entries function."""
+
+    def test_empty_lists(self) -> None:
+        """Merging empty lists returns empty list."""
+        result = merge_history_entries([], [])
+        assert result == []
+
+    def test_only_existing_entries(self) -> None:
+        """Only existing entries are preserved."""
+        existing = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-1"),
+                issue_type="Story",
+            )
+        ]
+        result = merge_history_entries(existing, [])
+        assert len(result) == 1
+        assert str(result[0].issue_key) == "CORE-1"
+
+    def test_only_new_entries(self) -> None:
+        """Only new entries are included."""
+        new = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-2"),
+                issue_type="Bug",
+            )
+        ]
+        result = merge_history_entries([], new)
+        assert len(result) == 1
+        assert str(result[0].issue_key) == "CORE-2"
+
+    def test_new_entries_override_existing(self) -> None:
+        """New entries override existing entries with same key."""
+        existing = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-1"),
+                issue_type="Story",
+                total_logged_time_seconds=3600,  # Old value
+            )
+        ]
+        new = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-1"),
+                issue_type="Story",
+                total_logged_time_seconds=7200,  # Updated value
+            )
+        ]
+
+        result = merge_history_entries(existing, new)
+
+        assert len(result) == 1
+        assert result[0].total_logged_time_seconds == 7200
+
+    def test_preserves_non_overlapping_entries(self) -> None:
+        """Entries with different keys are all preserved."""
+        existing = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-1"),
+                issue_type="Story",
+            ),
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-2"),
+                issue_type="Bug",
+            ),
+        ]
+        new = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-3"),
+                issue_type="Task",
+            )
+        ]
+
+        result = merge_history_entries(existing, new)
+
+        assert len(result) == 3
+        keys = {str(e.issue_key) for e in result}
+        assert keys == {"CORE-1", "CORE-2", "CORE-3"}
+
+    def test_different_servers_not_deduplicated(self) -> None:
+        """Same issue key on different servers are kept separate."""
+        existing = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira1.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-1"),
+                issue_type="Story",
+            )
+        ]
+        new = [
+            JiraDurationHistoryEntry(
+                server_url="https://jira2.example.com",
+                issue_key=JiraIssueKey.from_string("CORE-1"),
+                issue_type="Story",
+            )
+        ]
+
+        result = merge_history_entries(existing, new)
+
+        assert len(result) == 2
+        servers = {e.server_url for e in result}
+        assert servers == {"https://jira1.example.com", "https://jira2.example.com"}
