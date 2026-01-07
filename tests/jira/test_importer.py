@@ -85,9 +85,11 @@ def make_issue(
     assignee: JiraUser | None = None,
     parent_key: str | None = None,
     original_estimate_seconds: int | None = None,
+    remaining_estimate_seconds: int | None = None,
     story_points: float | None = None,
     issue_id: str = "12345",
     issuelinks: list[JiraIssueLink] | None = None,
+    created: str | None = None,
 ) -> JiraIssueResponse:
     """Create a test JiraIssueResponse."""
     worklog = None
@@ -100,9 +102,10 @@ def make_issue(
         )
 
     timetracking = None
-    if original_estimate_seconds is not None:
+    if original_estimate_seconds is not None or remaining_estimate_seconds is not None:
         timetracking = JiraTimeTracking(
-            original_estimate_seconds=original_estimate_seconds
+            original_estimate_seconds=original_estimate_seconds,
+            remaining_estimate_seconds=remaining_estimate_seconds,
         )
 
     parent = None
@@ -121,6 +124,7 @@ def make_issue(
         worklog=worklog,
         timetracking=timetracking,
         story_points=story_points,
+        created=created,
     )
 
     return JiraIssueResponse(id=issue_id, key=key, fields=fields)
@@ -200,6 +204,34 @@ class TestCreateHistoryEntries:
         assert entry.total_logged_time_seconds == 7200
         assert entry.worker_jira_id == "user1"
         assert entry.issue_type == "Story"
+
+    def test_extracts_all_eda_fields(self) -> None:
+        """History entries include all EDA fields."""
+        worklog = make_worklog(time_seconds=7200)
+        issue = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T16:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,
+            remaining_estimate_seconds=3600,
+            story_points=5.0,
+            created="2024-01-10T09:00:00.000+0000",
+        )
+
+        result = _create_history_entries([issue], {}, "https://jira.example.com", "UTC")
+
+        assert len(result) == 1
+        entry = result[0]
+        # Original fields
+        assert entry.original_estimate_seconds == 14400
+        assert entry.total_logged_time_seconds == 7200
+        # New EDA fields
+        assert entry.remaining_estimate_seconds == 3600
+        assert entry.story_points == 5.0
+        # Check created datetime (UTC-aware)
+        assert entry.created_datetime == datetime(2024, 1, 10, 9, 0, 0, tzinfo=UTC)
+        # Check resolved datetime (UTC-aware)
+        assert entry.resolved_datetime == datetime(2024, 1, 20, 16, 0, 0, tzinfo=UTC)
 
 
 class TestBuildDurationDistribution:

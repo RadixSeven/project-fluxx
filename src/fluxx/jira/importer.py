@@ -8,7 +8,7 @@ components.
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fluxx.data.id_generation import (
     generate_dag_id,
@@ -55,6 +55,7 @@ from fluxx.jira.extraction import (
     extract_dependencies,
     extract_task,
     extract_workers_with_no_hours,
+    parse_jira_datetime,
 )
 from fluxx.jira.models import (
     JiraConfig,
@@ -328,10 +329,12 @@ def _create_history_entries(
         if not isinstance(completion_result.completion, DoneCompletion):
             continue
 
-        # Get original estimate
+        # Get original estimate and remaining estimate
         original_estimate = None
+        remaining_estimate = None
         if issue.fields.timetracking:
             original_estimate = issue.fields.timetracking.original_estimate_seconds
+            remaining_estimate = issue.fields.timetracking.remaining_estimate_seconds
 
         # Calculate total logged time
         worklogs = issue.fields.worklog.worklogs if issue.fields.worklog else []
@@ -347,6 +350,16 @@ def _create_history_entries(
                 logged_by_worker[wlog.author.user_id] += wlog.time_spent_seconds
             worker_jira_id = max(logged_by_worker, key=lambda k: logged_by_worker[k])
 
+        # Parse datetime fields (convert to UTC-aware)
+        created_dt = None
+        if issue.fields.created:
+            naive_dt = parse_jira_datetime(issue.fields.created, server_timezone)
+            created_dt = naive_dt.replace(tzinfo=UTC)
+        resolved_dt = None
+        if issue.fields.resolutiondate:
+            naive_dt = parse_jira_datetime(issue.fields.resolutiondate, server_timezone)
+            resolved_dt = naive_dt.replace(tzinfo=UTC)
+
         entries.append(
             JiraDurationHistoryEntry(
                 server_url=server_url,
@@ -355,6 +368,10 @@ def _create_history_entries(
                 worker_jira_id=worker_jira_id,
                 issue_type=issue.fields.issuetype.name,
                 total_logged_time_seconds=total_seconds,
+                remaining_estimate_seconds=remaining_estimate,
+                story_points=issue.fields.story_points,
+                created_datetime=created_dt,
+                resolved_datetime=resolved_dt,
             )
         )
 

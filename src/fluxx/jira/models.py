@@ -118,6 +118,10 @@ class JiraDurationHistoryEntry(BaseModel):
         worker_jira_id: Jira user identifier (name for Data Center, accountId for Cloud)
         issue_type: Jira issue type (e.g., 'Story', 'Bug', 'Task')
         total_logged_time_seconds: Total time logged on the issue in seconds
+        remaining_estimate_seconds: Remaining estimate in seconds at resolution
+        story_points: Story points assigned to the issue
+        created_datetime: When the issue was created
+        resolved_datetime: When the issue was resolved
     """
 
     server_url: str = Field(description="Jira server base URL")
@@ -132,6 +136,19 @@ class JiraDurationHistoryEntry(BaseModel):
     issue_type: str = Field(description="Jira issue type (e.g., 'Story', 'Bug')")
     total_logged_time_seconds: int | None = Field(
         default=None, description="Total time logged in seconds"
+    )
+    # New fields for exploratory data analysis
+    remaining_estimate_seconds: int | None = Field(
+        default=None, description="Remaining estimate in seconds at resolution"
+    )
+    story_points: float | None = Field(
+        default=None, description="Story points assigned to the issue"
+    )
+    created_datetime: datetime | None = Field(
+        default=None, description="When the issue was created"
+    )
+    resolved_datetime: datetime | None = Field(
+        default=None, description="When the issue was resolved"
     )
 
 
