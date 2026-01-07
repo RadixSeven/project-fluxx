@@ -1,7 +1,10 @@
 """Simulation state management for tracking a single simulation sample."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from fluxx.data.models import (
     BranchId,
@@ -14,6 +17,9 @@ from fluxx.data.models import (
     WorkerId,
     type_explode_id,
 )
+
+if TYPE_CHECKING:
+    from fluxx.simulation.distributions import JiraSamplingContext
 
 
 @dataclass
@@ -64,6 +70,23 @@ class SimulationState:
             )
             for worker in workers
         }
+
+        # Lazy-initialized Jira sampling context
+        self._jira_sampling_context: JiraSamplingContext | None = None
+
+    def get_jira_sampling_context(self) -> JiraSamplingContext:
+        """Get or build the Jira sampling context.
+
+        Lazily builds the context on first access from project's Jira history.
+
+        Returns:
+            JiraSamplingContext for sampling JiraDurationDistribution
+        """
+        if self._jira_sampling_context is None:
+            from fluxx.simulation.distributions import build_jira_sampling_context
+
+            self._jira_sampling_context = build_jira_sampling_context(self.project)
+        return self._jira_sampling_context
 
     def complete_task(self, task_id: TaskId, completion_time: datetime) -> None:
         """Mark a task as completed.

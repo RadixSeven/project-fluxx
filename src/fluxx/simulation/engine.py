@@ -25,6 +25,8 @@ from fluxx.data.models import (
 )
 from fluxx.simulation.calendar import WorkCalendar, add_work_hours
 from fluxx.simulation.distributions import (
+    sample_jira_duration,
+    sample_jira_duration_filtered,
     sample_shifted_lognormal,
     sample_triangular,
     sample_with_rejection,
@@ -42,12 +44,15 @@ from fluxx.simulation.state import SimulationState
 # Task duration sampling
 
 
-def sample_task_duration(task: Task, rng: np.random.Generator) -> float:
+def sample_task_duration(
+    task: Task, rng: np.random.Generator, state: SimulationState | None = None
+) -> float:
     """Sample a duration from a task's distribution.
 
     Args:
         task: The task to sample duration for
         rng: Random number generator
+        state: Simulation state (required for JiraDurationDistribution)
 
     Returns:
         Sampled duration in work-hours
@@ -61,25 +66,39 @@ def sample_task_duration(task: Task, rng: np.random.Generator) -> float:
     dist = task.duration_distribution
 
     # Import here to avoid circular dependency issues
-    from fluxx.data.models import ShiftedLognormal, Triangular
+    from fluxx.data.models import JiraDurationDistribution, ShiftedLognormal, Triangular
 
     if isinstance(dist, Triangular):
         return sample_triangular(dist, rng)
     elif isinstance(dist, ShiftedLognormal):
         return sample_shifted_lognormal(dist, rng)
+    elif isinstance(dist, JiraDurationDistribution):
+        if state is None:
+            raise ValueError(
+                "SimulationState required for sampling JiraDurationDistribution"
+            )
+        context = state.get_jira_sampling_context()
+        return sample_jira_duration(dist, context, rng)
     else:
         raise ValueError(f"Unknown distribution type: {type(dist)}")
 
 
 def sample_in_progress_task_remaining_duration(
-    task: Task, elapsed_hours: float, rng: np.random.Generator
+    task: Task,
+    elapsed_hours: float,
+    rng: np.random.Generator,
+    state: SimulationState | None = None,
 ) -> float:
-    """Sample remaining duration for an in-progress task using rejection sampling.
+    """Sample remaining duration for an in-progress task.
+
+    For JiraDurationDistribution, uses filtered sampling (not rejection sampling).
+    For other distributions, uses rejection sampling.
 
     Args:
         task: The in-progress task
         elapsed_hours: Work-hours already completed
         rng: Random number generator
+        state: Simulation state (required for JiraDurationDistribution)
 
     Returns:
         Remaining duration in work-hours
@@ -90,10 +109,24 @@ def sample_in_progress_task_remaining_duration(
     if task.duration_distribution is None:
         raise ValueError(f"Task {task.id} has no duration distribution")
 
-    # Sample total duration >= elapsed using rejection sampling
-    total_duration = sample_with_rejection(
-        task.duration_distribution, rng, elapsed_hours
-    )
+    dist = task.duration_distribution
+
+    # Import here to avoid circular dependency issues
+    from fluxx.data.models import JiraDurationDistribution
+
+    if isinstance(dist, JiraDurationDistribution):
+        # Use filtered sampling for Jira distributions
+        if state is None:
+            raise ValueError(
+                "SimulationState required for sampling JiraDurationDistribution"
+            )
+        context = state.get_jira_sampling_context()
+        total_duration = sample_jira_duration_filtered(
+            dist, context, rng, elapsed_hours
+        )
+    else:
+        # Use rejection sampling for other distributions
+        total_duration = sample_with_rejection(dist, rng, elapsed_hours)
 
     # Return remaining duration
     return total_duration - elapsed_hours
@@ -160,7 +193,7 @@ def start_task(
 
         # Sample remaining duration using hours already logged
         duration_hours = sample_in_progress_task_remaining_duration(
-            task, task.completion.hours_logged, rng
+            task, task.completion.hours_logged, rng, state
         )
 
         # Apply time-splitting if worker has multiple in-progress tasks
@@ -174,7 +207,7 @@ def start_task(
         worker_id = select_worker_for_task(task, state, rng)
 
         # Sample full duration
-        duration_hours = sample_task_duration(task, rng)
+        duration_hours = sample_task_duration(task, rng, state)
 
     # Get worker's hours per day
     worker_state = state.worker_states[worker_id]

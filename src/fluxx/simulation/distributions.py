@@ -1,8 +1,21 @@
 """Distribution sampling utilities for simulation."""
 
+from dataclasses import dataclass
+
 import numpy as np
 
-from fluxx.data.models import DurationDistribution, ShiftedLognormal, Triangular
+from fluxx.data.models import (
+    DurationDistribution,
+    JiraDurationDistribution,
+    Project,
+    ShiftedLognormal,
+    Triangular,
+)
+from fluxx.jira.distributions import (
+    EmpiricalEstimateBin,
+    create_empirical_bins,
+    find_empirical_bin_for_estimate,
+)
 
 
 def convert_shifted_lognormal_params(
@@ -152,3 +165,153 @@ def sample_with_rejection(
     lambda_rate = 1.0 / mean_original
     tail_sample = rng.exponential(scale=1.0 / lambda_rate)
     return min_value + tail_sample
+
+
+# Jira empirical distribution sampling
+
+
+@dataclass
+class JiraSamplingContext:
+    """Context for sampling from JiraDurationDistribution.
+
+    Pre-computed bins from historical Jira data, built once per simulation.
+    The bins contain (estimate_hours, actual_hours) pairs for empirical sampling.
+
+    Attributes:
+        bins: Pre-computed empirical estimate bins
+        all_actuals: All actual durations for fallback when no estimate
+    """
+
+    bins: list[EmpiricalEstimateBin]
+    all_actuals: list[float]
+
+
+def build_jira_sampling_context(project: Project) -> JiraSamplingContext:
+    """Build sampling context from project's Jira history.
+
+    Extracts historical (estimate, actual) pairs from the project's
+    Jira configuration and creates empirical bins for sampling.
+
+    Args:
+        project: The project containing Jira history
+
+    Returns:
+        JiraSamplingContext with pre-computed bins
+    """
+    data: list[tuple[float, float]] = []
+    all_actuals: list[float] = []
+
+    # Extract data from Jira history
+    if project.jira_config and project.jira_config.sync_metadata:
+        for entry in project.jira_config.sync_metadata.history_entries:
+            # Need both estimate and actual
+            if (
+                entry.original_estimate_seconds is not None
+                and entry.total_logged_time_seconds is not None
+                and entry.total_logged_time_seconds > 0
+            ):
+                estimate_hours = entry.original_estimate_seconds / 3600.0
+                actual_hours = entry.total_logged_time_seconds / 3600.0
+                data.append((estimate_hours, actual_hours))
+                all_actuals.append(actual_hours)
+            elif (
+                entry.total_logged_time_seconds is not None
+                and entry.total_logged_time_seconds > 0
+            ):
+                # No estimate, but have actual - use for fallback
+                actual_hours = entry.total_logged_time_seconds / 3600.0
+                all_actuals.append(actual_hours)
+
+    # Create bins from historical data
+    bins = create_empirical_bins(data, min_samples=30)
+
+    return JiraSamplingContext(bins=bins, all_actuals=all_actuals)
+
+
+def sample_jira_duration(
+    dist: JiraDurationDistribution,
+    context: JiraSamplingContext,
+    rng: np.random.Generator,
+) -> float:
+    """Sample duration from JiraDurationDistribution using empirical bins.
+
+    Algorithm:
+    1. If task has estimate, find bin with closest center, sample from it
+    2. If no estimate, sample from all historical actuals (fallback)
+    3. If no history at all, use exponential distribution with mean = estimate
+
+    Args:
+        dist: The JiraDurationDistribution containing task's estimate data
+        context: Pre-computed sampling context with bins
+        rng: Random number generator
+
+    Returns:
+        Sampled duration in hours
+    """
+    estimate_hours: float | None = None
+    if dist.original_estimate_seconds is not None:
+        estimate_hours = dist.original_estimate_seconds / 3600.0
+
+    # Case 1: Have estimate and bins - use bin-based sampling
+    if estimate_hours is not None and context.bins:
+        bin_ = find_empirical_bin_for_estimate(estimate_hours, context.bins)
+        return bin_.sample(rng)
+
+    # Case 2: No estimate but have history - sample from all actuals
+    if context.all_actuals:
+        index = rng.integers(0, len(context.all_actuals))
+        return context.all_actuals[index]
+
+    # Case 3: No history at all - use exponential with mean = estimate (or default)
+    if estimate_hours is not None and estimate_hours > 0:
+        return float(rng.exponential(scale=estimate_hours))
+    else:
+        # No estimate and no history - use default 8 hours
+        return float(rng.exponential(scale=8.0))
+
+
+def sample_jira_duration_filtered(
+    dist: JiraDurationDistribution,
+    context: JiraSamplingContext,
+    rng: np.random.Generator,
+    min_duration: float,
+) -> float:
+    """Sample duration for in-progress task using filtered sampling.
+
+    For tasks with elapsed time, we need durations > min_duration.
+    Uses filtered sampling (not rejection) for efficiency:
+    1. Filter bin to values > min_duration, sample if any exist
+    2. If filtered bin empty, filter all history > min_duration
+    3. If all history exhausted, return min_duration + exponential sample
+
+    Args:
+        dist: The JiraDurationDistribution
+        context: Pre-computed sampling context
+        rng: Random number generator
+        min_duration: Minimum acceptable duration (hours already logged)
+
+    Returns:
+        Sampled duration in hours, guaranteed >= min_duration
+    """
+    estimate_hours: float | None = None
+    if dist.original_estimate_seconds is not None:
+        estimate_hours = dist.original_estimate_seconds / 3600.0
+
+    # Try bin-based filtered sampling first
+    if estimate_hours is not None and context.bins:
+        bin_ = find_empirical_bin_for_estimate(estimate_hours, context.bins)
+        sample = bin_.sample_filtered(rng, min_duration)
+        if sample is not None:
+            return sample
+
+    # Try filtered sampling from all actuals
+    if context.all_actuals:
+        valid_samples = [s for s in context.all_actuals if s > min_duration]
+        if valid_samples:
+            index = rng.integers(0, len(valid_samples))
+            return valid_samples[index]
+
+    # All history exhausted - return min_duration + exponential
+    mean = estimate_hours if estimate_hours and estimate_hours > 0 else 8.0
+    tail_sample = rng.exponential(scale=mean)
+    return min_duration + tail_sample

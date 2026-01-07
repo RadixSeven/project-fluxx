@@ -1,11 +1,31 @@
 """Tests for distribution sampling functions."""
 
+from datetime import UTC, datetime
+
 import numpy as np
 
-from fluxx.data.models import ShiftedLognormal, Triangular
+from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
+from fluxx.data.models import (
+    DAG,
+    JiraDurationDistribution,
+    Project,
+    ProjectMetadata,
+    ShiftedLognormal,
+    Triangular,
+)
+from fluxx.jira.models import (
+    JiraConfig,
+    JiraDurationHistoryEntry,
+    JiraIssueKey,
+    JiraSyncMetadata,
+)
 from fluxx.simulation.distributions import (
+    JiraSamplingContext,
+    build_jira_sampling_context,
     convert_shifted_lognormal_params,
     estimate_mean,
+    sample_jira_duration,
+    sample_jira_duration_filtered,
     sample_shifted_lognormal,
     sample_triangular,
     sample_with_rejection,
@@ -193,3 +213,270 @@ def test_sample_with_rejection_unknown_distribution() -> None:
 
     with pytest.raises(ValueError, match="Unknown distribution type"):
         sample_with_rejection(unknown_dist, rng, 0.0)
+
+
+# Tests for Jira empirical distribution sampling
+
+
+def make_history_entry(
+    issue_number: int,
+    estimate_seconds: int | None,
+    actual_seconds: int,
+) -> JiraDurationHistoryEntry:
+    """Create a test history entry."""
+    return JiraDurationHistoryEntry(
+        server_url="https://jira.example.com",
+        issue_key=JiraIssueKey(project_key="TEST", issue_number=issue_number),
+        original_estimate_seconds=estimate_seconds,
+        total_logged_time_seconds=actual_seconds,
+        worker_jira_id="user1",
+        issue_type="Story",
+    )
+
+
+def make_project_with_history(
+    entries: list[JiraDurationHistoryEntry],
+) -> Project:
+    """Create a project with Jira history."""
+    dag = DAG(
+        id=generate_dag_id(),
+        current_version_id=generate_dag_version_id(),
+        node_map={},
+    )
+    now = datetime.now(UTC)
+    return Project(
+        version="1.3",
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=dag,
+        persistent_tasks={},
+        persistent_branches={},
+        workers=[],
+        simulations=[],
+        jira_config=JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=now,
+                history_entries=entries,
+            ),
+        ),
+    )
+
+
+class TestBuildJiraSamplingContext:
+    """Tests for build_jira_sampling_context."""
+
+    def test_build_context_from_history(self) -> None:
+        """Builds context from project history entries."""
+        entries = [
+            make_history_entry(1, 3600, 7200),  # 1h estimate, 2h actual
+            make_history_entry(2, 3600, 5400),  # 1h estimate, 1.5h actual
+            make_history_entry(3, 7200, 10800),  # 2h estimate, 3h actual
+        ]
+        project = make_project_with_history(entries)
+
+        context = build_jira_sampling_context(project)
+
+        # Should have extracted all actuals
+        assert len(context.all_actuals) == 3
+        assert 2.0 in context.all_actuals  # 7200 / 3600
+        assert 1.5 in context.all_actuals  # 5400 / 3600
+        assert 3.0 in context.all_actuals  # 10800 / 3600
+
+    def test_build_context_includes_no_estimate_actuals(self) -> None:
+        """Actuals without estimates go into all_actuals for fallback."""
+        entries = [
+            make_history_entry(1, None, 7200),  # No estimate, 2h actual
+            make_history_entry(2, 3600, 5400),  # 1h estimate, 1.5h actual
+        ]
+        project = make_project_with_history(entries)
+
+        context = build_jira_sampling_context(project)
+
+        # All actuals should include both
+        assert len(context.all_actuals) == 2
+        assert 2.0 in context.all_actuals
+        assert 1.5 in context.all_actuals
+
+    def test_build_context_empty_history(self) -> None:
+        """Empty history creates empty context."""
+        project = make_project_with_history([])
+
+        context = build_jira_sampling_context(project)
+
+        assert context.bins == []
+        assert context.all_actuals == []
+
+    def test_build_context_no_jira_config(self) -> None:
+        """Project without Jira config creates empty context."""
+        dag = DAG(
+            id=generate_dag_id(),
+            current_version_id=generate_dag_version_id(),
+            node_map={},
+        )
+        now = datetime.now(UTC)
+        project = Project(
+            version="1.3",
+            metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+            dag=dag,
+            persistent_tasks={},
+            persistent_branches={},
+            workers=[],
+            simulations=[],
+            jira_config=None,
+        )
+
+        context = build_jira_sampling_context(project)
+
+        assert context.bins == []
+        assert context.all_actuals == []
+
+
+class TestSampleJiraDuration:
+    """Tests for sample_jira_duration."""
+
+    def test_sample_with_estimate_and_bins(self) -> None:
+        """Uses bin-based sampling when estimate and bins exist."""
+        # Create enough history for bin creation (need 30+ for meaningful bins)
+        entries = [
+            make_history_entry(i + 1, 3600, 3600 + (i * 100))  # ~1h est, varying actual
+            for i in range(50)
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+        rng = np.random.default_rng(42)
+
+        sample = sample_jira_duration(dist, context, rng)
+
+        # Should be one of the actual durations from the bin
+        assert sample > 0
+
+    def test_sample_no_estimate_uses_all_actuals(self) -> None:
+        """When no estimate, samples from all actuals."""
+        entries = [
+            make_history_entry(1, 3600, 7200),  # 2h
+            make_history_entry(2, 7200, 10800),  # 3h
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=None)
+        rng = np.random.default_rng(42)
+
+        sample = sample_jira_duration(dist, context, rng)
+
+        # Should be one of the actual durations
+        assert sample in [2.0, 3.0]
+
+    def test_sample_no_history_uses_exponential(self) -> None:
+        """When no history, uses exponential with mean = estimate."""
+        context = JiraSamplingContext(bins=[], all_actuals=[])
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)  # 1h
+        rng = np.random.default_rng(42)
+
+        # Sample many times to verify distribution
+        samples = [sample_jira_duration(dist, context, rng) for _ in range(1000)]
+
+        # Mean should be close to 1.0 (exponential mean = scale)
+        mean = np.mean(samples)
+        assert 0.7 < mean < 1.3
+
+    def test_sample_no_history_no_estimate_uses_default(self) -> None:
+        """When no history and no estimate, uses exponential with 8h mean."""
+        context = JiraSamplingContext(bins=[], all_actuals=[])
+        dist = JiraDurationDistribution(original_estimate_seconds=None)
+        rng = np.random.default_rng(42)
+
+        samples = [sample_jira_duration(dist, context, rng) for _ in range(1000)]
+
+        # Mean should be close to 8.0
+        mean = np.mean(samples)
+        assert 6.0 < mean < 10.0
+
+
+class TestSampleJiraDurationFiltered:
+    """Tests for sample_jira_duration_filtered."""
+
+    def test_filtered_sampling_returns_valid_sample(self) -> None:
+        """Filtered sampling returns values > min_duration."""
+        entries = [
+            make_history_entry(1, 3600, 3600),  # 1h
+            make_history_entry(2, 3600, 7200),  # 2h
+            make_history_entry(3, 3600, 14400),  # 4h
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+        rng = np.random.default_rng(42)
+
+        sample = sample_jira_duration_filtered(dist, context, rng, min_duration=1.5)
+
+        # Should be one of the actuals > 1.5h
+        assert sample in [2.0, 4.0]
+
+    def test_filtered_falls_back_to_all_actuals(self) -> None:
+        """When bin is exhausted, uses all actuals as fallback."""
+        entries = [
+            make_history_entry(1, 3600, 3600),  # 1h estimate, 1h actual
+            make_history_entry(2, 7200, 14400),  # 2h estimate, 4h actual
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+        rng = np.random.default_rng(42)
+
+        sample = sample_jira_duration_filtered(dist, context, rng, min_duration=2.0)
+
+        # Only 4h entry is > 2.0
+        assert sample == 4.0
+
+    def test_filtered_with_no_estimate_uses_all_actuals(self) -> None:
+        """Filtered sampling with no estimate uses all actuals directly."""
+        entries = [
+            make_history_entry(1, 3600, 3600),  # 1h
+            make_history_entry(2, 3600, 7200),  # 2h
+            make_history_entry(3, 3600, 14400),  # 4h
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=None)  # No estimate
+        rng = np.random.default_rng(42)
+
+        sample = sample_jira_duration_filtered(dist, context, rng, min_duration=1.5)
+
+        # Should be one of the actuals > 1.5h
+        assert sample in [2.0, 4.0]
+
+    def test_filtered_exhausted_uses_exponential(self) -> None:
+        """When all history exhausted, uses exponential fallback."""
+        entries = [
+            make_history_entry(1, 3600, 3600),  # 1h
+            make_history_entry(2, 3600, 7200),  # 2h
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+        rng = np.random.default_rng(42)
+
+        sample = sample_jira_duration_filtered(dist, context, rng, min_duration=10.0)
+
+        # Should be >= min_duration
+        assert sample >= 10.0
+
+    def test_filtered_deterministic(self) -> None:
+        """Filtered sampling is deterministic with seeded RNG."""
+        entries = [
+            make_history_entry(1, 3600, 7200),
+            make_history_entry(2, 3600, 10800),
+        ]
+        project = make_project_with_history(entries)
+        context = build_jira_sampling_context(project)
+        dist = JiraDurationDistribution(original_estimate_seconds=3600)
+
+        rng1 = np.random.default_rng(42)
+        rng2 = np.random.default_rng(42)
+
+        sample1 = sample_jira_duration_filtered(dist, context, rng1, min_duration=1.0)
+        sample2 = sample_jira_duration_filtered(dist, context, rng2, min_duration=1.0)
+
+        assert sample1 == sample2

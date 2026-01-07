@@ -526,3 +526,62 @@ def test_is_task_reachable_nonexistent_task(
 
     # Should return False for nonexistent tasks
     assert not state.is_task_reachable(nonexistent_task)
+
+
+def test_get_jira_sampling_context(start_date: datetime) -> None:
+    """Test get_jira_sampling_context returns context and caches it."""
+    from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
+    from fluxx.jira.models import (
+        JiraConfig,
+        JiraDurationHistoryEntry,
+        JiraIssueKey,
+        JiraSyncMetadata,
+    )
+    from fluxx.simulation.distributions import JiraSamplingContext
+
+    # Create project with Jira history
+    now = start_date
+    dag = DAG(
+        id=generate_dag_id(),
+        current_version_id=generate_dag_version_id(),
+        node_map={},
+    )
+    project = Project(
+        version="1.3",
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=dag,
+        persistent_tasks={},
+        persistent_branches={},
+        workers=[],
+        simulations=[],
+        jira_config=JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=now,
+                history_entries=[
+                    JiraDurationHistoryEntry(
+                        server_url="https://jira.example.com",
+                        issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
+                        original_estimate_seconds=3600,
+                        total_logged_time_seconds=7200,
+                        worker_jira_id="user1",
+                        issue_type="Story",
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    workers = [Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)]
+    state = SimulationState(project, now, workers)
+
+    # Get context first time - should build it
+    context1 = state.get_jira_sampling_context()
+    assert isinstance(context1, JiraSamplingContext)
+    assert len(context1.all_actuals) == 1
+    assert 2.0 in context1.all_actuals  # 7200 seconds = 2 hours
+
+    # Get context second time - should return cached instance
+    context2 = state.get_jira_sampling_context()
+    assert context1 is context2  # Same object (cached)

@@ -226,6 +226,176 @@ def test_sample_in_progress_task_no_distribution() -> None:
         sample_in_progress_task_remaining_duration(task, 1.0, rng)
 
 
+# Tests for JiraDurationDistribution sampling
+
+
+def test_sample_task_duration_jira_distribution() -> None:
+    """Test sampling duration from JiraDurationDistribution."""
+    from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
+    from fluxx.data.models import JiraDurationDistribution
+    from fluxx.jira.models import (
+        JiraConfig,
+        JiraDurationHistoryEntry,
+        JiraIssueKey,
+        JiraSyncMetadata,
+    )
+
+    # Create project with Jira history
+    now = datetime.now(UTC)
+    dag = DAG(
+        id=generate_dag_id(),
+        current_version_id=generate_dag_version_id(),
+        node_map={},
+    )
+    project = Project(
+        version="1.3",
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=dag,
+        persistent_tasks={},
+        persistent_branches={},
+        workers=[],
+        simulations=[],
+        jira_config=JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=now,
+                history_entries=[
+                    JiraDurationHistoryEntry(
+                        server_url="https://jira.example.com",
+                        issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
+                        original_estimate_seconds=3600,
+                        total_logged_time_seconds=7200,
+                        worker_jira_id="user1",
+                        issue_type="Story",
+                    ),
+                    JiraDurationHistoryEntry(
+                        server_url="https://jira.example.com",
+                        issue_key=JiraIssueKey(project_key="TEST", issue_number=2),
+                        original_estimate_seconds=3600,
+                        total_logged_time_seconds=5400,
+                        worker_jira_id="user1",
+                        issue_type="Story",
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    workers = [Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)]
+    state = SimulationState(project, now, workers)
+
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=JiraDurationDistribution(original_estimate_seconds=3600),
+    )
+    rng = np.random.default_rng(seed=42)
+
+    duration = sample_task_duration(task, rng, state)
+
+    # Should be one of the actual durations (1.5h or 2h)
+    assert duration in [1.5, 2.0]
+
+
+def test_sample_task_duration_jira_without_state() -> None:
+    """Test error when JiraDurationDistribution used without state."""
+    from fluxx.data.models import JiraDurationDistribution
+
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=JiraDurationDistribution(original_estimate_seconds=3600),
+    )
+    rng = np.random.default_rng(seed=42)
+
+    with pytest.raises(ValueError, match="SimulationState required"):
+        sample_task_duration(task, rng, None)
+
+
+def test_sample_in_progress_jira_distribution() -> None:
+    """Test sampling remaining duration for in-progress task with Jira distribution."""
+    from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
+    from fluxx.data.models import JiraDurationDistribution
+    from fluxx.jira.models import (
+        JiraConfig,
+        JiraDurationHistoryEntry,
+        JiraIssueKey,
+        JiraSyncMetadata,
+    )
+
+    # Create project with Jira history
+    now = datetime.now(UTC)
+    dag = DAG(
+        id=generate_dag_id(),
+        current_version_id=generate_dag_version_id(),
+        node_map={},
+    )
+    project = Project(
+        version="1.3",
+        metadata=ProjectMetadata(name="Test", created=now, last_modified=now),
+        dag=dag,
+        persistent_tasks={},
+        persistent_branches={},
+        workers=[],
+        simulations=[],
+        jira_config=JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=now,
+                history_entries=[
+                    JiraDurationHistoryEntry(
+                        server_url="https://jira.example.com",
+                        issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
+                        original_estimate_seconds=3600,
+                        total_logged_time_seconds=14400,  # 4h
+                        worker_jira_id="user1",
+                        issue_type="Story",
+                    ),
+                ],
+            ),
+        ),
+    )
+
+    workers = [Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)]
+    state = SimulationState(project, now, workers)
+
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=JiraDurationDistribution(original_estimate_seconds=3600),
+    )
+    rng = np.random.default_rng(seed=42)
+    elapsed_hours = 1.0
+
+    remaining = sample_in_progress_task_remaining_duration(
+        task, elapsed_hours, rng, state
+    )
+
+    # Total should be 4h, so remaining = 4 - 1 = 3h
+    assert remaining == 3.0
+
+
+def test_sample_in_progress_jira_without_state() -> None:
+    """Test error when JiraDurationDistribution used without state."""
+    from fluxx.data.models import JiraDurationDistribution
+
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Test task",
+        duration_distribution=JiraDurationDistribution(original_estimate_seconds=3600),
+    )
+    rng = np.random.default_rng(seed=42)
+
+    with pytest.raises(ValueError, match="SimulationState required"):
+        sample_in_progress_task_remaining_duration(task, 1.0, rng, None)
+
+
 # Tests for worker assignment
 
 
