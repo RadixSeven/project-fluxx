@@ -15,6 +15,7 @@ from fluxx.data.id_generation import (
     generate_dag_id,
     generate_dag_version_id,
     generate_event_id,
+    generate_task_id,
 )
 from fluxx.data.models import (
     DAG,
@@ -34,6 +35,7 @@ from fluxx.data.models import (
     ProjectMetadata,
     Task,
     TaskId,
+    Triangular,
     Worker,
     WorkerId,
 )
@@ -43,6 +45,8 @@ from fluxx.jira.client import JiraClient
 # Note: Empirical bin-based sampling happens at simulation time, not during import.
 # The import process stores JiraDurationDistribution with raw parameters.
 from fluxx.jira.extraction import (
+    BLOCKS_LINK_TYPES,
+    DEPENDS_ON_LINK_TYPES,
     HierarchyEntry,
     _is_child_of_link,
     _is_parent_of_link,
@@ -58,6 +62,7 @@ from fluxx.jira.models import (
     JiraConfig,
     JiraDurationHistoryEntry,
     JiraIssueKey,
+    JiraReference,
     JiraSyncMetadata,
 )
 
@@ -103,6 +108,29 @@ class SyncResult:
     deleted_keys: list[str] = field(default_factory=list)
     warnings: list[ImportWarningFluxx] = field(default_factory=list)
     history_entries_added: int = 0
+
+
+@dataclass
+class InaccessibleIssue:
+    """Represents an issue that could not be fetched from Jira.
+
+    Used to track dependency targets that are referenced but inaccessible
+    (possibly due to permissions or the issue being deleted).
+    """
+
+    issue_key: str
+    referenced_from: str  # The issue key that referenced this one
+
+
+@dataclass
+class FetchResult:
+    """Result of fetching issues from Jira.
+
+    Includes both successfully fetched issues and keys that couldn't be accessed.
+    """
+
+    issues: list[JiraIssueResponse]
+    inaccessible: list[InaccessibleIssue] = field(default_factory=list)
 
 
 # Required fields for Jira API requests
@@ -167,6 +195,45 @@ def get_children_from_links(
     return child_keys
 
 
+def get_dependencies_from_links(
+    issues: list[JiraIssueResponse],
+    already_fetched: set[str],
+) -> set[str]:
+    """Extract dependency target issue keys from issue links.
+
+    This finds issues that the given issues depend on (blocking dependencies).
+
+    Args:
+        issues: List of Jira issues to examine
+        already_fetched: Set of issue keys already fetched (to exclude)
+
+    Returns:
+        Set of issue keys that are dependency targets but not yet fetched
+    """
+    dependency_keys: set[str] = set()
+
+    for issue in issues:
+        if not issue.fields.issuelinks:
+            continue
+
+        for link in issue.fields.issuelinks:
+            target_key: str | None = None
+
+            # "depends on" type outward link: this issue depends on the outward issue
+            if link.link_type.name in DEPENDS_ON_LINK_TYPES and link.outward_issue:
+                target_key = link.outward_issue.key
+
+            # "blocks" type inward link: inward issue blocks this issue
+            # (so this issue depends on the inward issue)
+            if link.link_type.name in BLOCKS_LINK_TYPES and link.inward_issue:
+                target_key = link.inward_issue.key
+
+            if target_key is not None and target_key not in already_fetched:
+                dependency_keys.add(target_key)
+
+    return dependency_keys
+
+
 def build_children_jql(parent_keys: list[str]) -> str:
     """Build JQL to fetch children of the given parent issues.
 
@@ -188,14 +255,18 @@ def fetch_all_issues_with_children(
     client: JiraClient,
     initial_jql: str,
     progress_callback: Callable[[str, int, int], None] | None = None,
-) -> list[JiraIssueResponse]:
-    """Fetch issues matching JQL and all their descendants.
+) -> FetchResult:
+    """Fetch issues matching JQL, all their descendants, and all dependencies.
 
-    Uses a queue-based iterative approach to fetch all children:
+    Uses a queue-based iterative approach to fetch all related issues:
     1. Fetch initial issues from JQL
     2. For each batch of issues, fetch their children via Epic Link/parent
     3. Check links for "parent of"/"child of" references
-    4. Repeat until no new issues found
+    4. Check links for "depends on"/"blocks" references (dependency targets)
+    5. Repeat until no new issues found
+
+    Inaccessible dependency targets (due to permissions or deletion) are tracked
+    and returned separately for dummy task creation.
 
     Args:
         client: Jira client
@@ -203,7 +274,7 @@ def fetch_all_issues_with_children(
         progress_callback: Optional callback(phase, processed, total)
 
     Returns:
-        List of all fetched issues (deduplicated by key)
+        FetchResult containing fetched issues and inaccessible issue keys
     """
     logger.debug("Fetching issues with children for JQL: %s", initial_jql)
     if progress_callback:
@@ -215,15 +286,22 @@ def fetch_all_issues_with_children(
     # Track which issues we've already fetched children for
     children_fetched_for: set[str] = set()
 
+    # Track inaccessible issues (key -> referencing issue key)
+    inaccessible_issues: dict[str, str] = {}
+
+    # Track issues we've already tried to fetch (to avoid repeated failures)
+    fetch_attempted: set[str] = set()
+
     # Fetch initial issues
     for issue_dict in client.search(initial_jql, REQUIRED_FIELDS, expand=["changelog"]):
         issue = JiraIssueResponse.model_validate(issue_dict)
         issues_by_key[issue.key] = issue
+        fetch_attempted.add(issue.key)
 
     if progress_callback:
         progress_callback("fetching_children", 0, len(issues_by_key))
 
-    # Iteratively fetch children until no new issues found
+    # Iteratively fetch children and dependencies until no new issues found
     iteration = 0
     max_iterations = 100  # Safety limit to prevent infinite loops
 
@@ -252,6 +330,7 @@ def fetch_all_issues_with_children(
             children_jql, REQUIRED_FIELDS, expand=["changelog"]
         ):
             issue = JiraIssueResponse.model_validate(issue_dict)
+            fetch_attempted.add(issue.key)
             if issue.key not in issues_by_key:
                 issues_by_key[issue.key] = issue
                 new_issues_count += 1
@@ -268,7 +347,8 @@ def fetch_all_issues_with_children(
 
         # Fetch any link-referenced children individually
         for child_key in link_children:
-            if child_key not in issues_by_key:
+            if child_key not in issues_by_key and child_key not in fetch_attempted:
+                fetch_attempted.add(child_key)
                 try:
                     issue_dict = client.get_issue(
                         child_key, REQUIRED_FIELDS, expand=["changelog"]
@@ -277,14 +357,96 @@ def fetch_all_issues_with_children(
                     issues_by_key[issue.key] = issue
                 except Exception:
                     # Issue might not exist or not accessible - skip it
+                    # (children don't need dummy tasks, only dependencies do)
                     pass
 
-        # If no new issues were added (from JQL or links), we're done
-        if new_issues_count == 0 and len(link_children) == 0:
+        # Check for dependency targets referenced in links but not yet fetched
+        dependency_targets = get_dependencies_from_links(
+            list(issues_by_key.values()), set(issues_by_key.keys())
+        )
+
+        # Fetch any dependency targets individually
+        deps_added = 0
+        for dep_key in dependency_targets:
+            if dep_key not in issues_by_key and dep_key not in fetch_attempted:
+                fetch_attempted.add(dep_key)
+                # Find which issue references this dependency
+                referencing_issue = _find_referencing_issue(
+                    dep_key, list(issues_by_key.values())
+                )
+                try:
+                    issue_dict = client.get_issue(
+                        dep_key, REQUIRED_FIELDS, expand=["changelog"]
+                    )
+                    issue = JiraIssueResponse.model_validate(issue_dict)
+                    issues_by_key[issue.key] = issue
+                    deps_added += 1
+                    logger.debug(
+                        "Fetched dependency target %s (referenced from %s)",
+                        dep_key,
+                        referencing_issue,
+                    )
+                except Exception as e:
+                    # Dependency target is inaccessible - track it for dummy task
+                    inaccessible_issues[dep_key] = referencing_issue
+                    logger.debug(
+                        "Could not fetch dependency target %s (referenced from %s): %s",
+                        dep_key,
+                        referencing_issue,
+                        e,
+                    )
+
+        # If no new issues were added, we're done
+        if new_issues_count == 0 and len(link_children) == 0 and deps_added == 0:
             break
 
-    logger.debug("Fetched %d total issues with children", len(issues_by_key))
-    return list(issues_by_key.values())
+    logger.debug(
+        "Fetched %d total issues, %d inaccessible dependency targets",
+        len(issues_by_key),
+        len(inaccessible_issues),
+    )
+
+    # Build inaccessible issues list
+    inaccessible_list = [
+        InaccessibleIssue(issue_key=key, referenced_from=ref)
+        for key, ref in inaccessible_issues.items()
+    ]
+
+    return FetchResult(
+        issues=list(issues_by_key.values()),
+        inaccessible=inaccessible_list,
+    )
+
+
+def _find_referencing_issue(dep_key: str, issues: list[JiraIssueResponse]) -> str:
+    """Find which issue references a given dependency target.
+
+    Args:
+        dep_key: The dependency target key to find
+        issues: List of issues to search
+
+    Returns:
+        The key of the issue that references dep_key, or "unknown"
+    """
+    for issue in issues:
+        if not issue.fields.issuelinks:
+            continue
+        for link in issue.fields.issuelinks:
+            # Check outward "depends on" links
+            if (
+                link.link_type.name in DEPENDS_ON_LINK_TYPES
+                and link.outward_issue
+                and link.outward_issue.key == dep_key
+            ):
+                return issue.key
+            # Check inward "blocks" links
+            if (
+                link.link_type.name in BLOCKS_LINK_TYPES
+                and link.inward_issue
+                and link.inward_issue.key == dep_key
+            ):
+                return issue.key
+    return "unknown"
 
 
 def _collect_all_worklogs(issues: list[JiraIssueResponse]) -> list[JiraWorklogEntry]:
@@ -379,6 +541,45 @@ def _create_history_entries(
     return entries
 
 
+def create_dummy_task(
+    issue_key: str,
+    referenced_from: str,
+    server_url: str,
+) -> Task:
+    """Create a dummy task for an inaccessible Jira issue.
+
+    This is used when a dependency target cannot be fetched (due to permissions
+    or deletion) but we need a task to represent it in the project.
+
+    Args:
+        issue_key: The Jira issue key (e.g., "CORE-123")
+        referenced_from: The issue key that references this dependency
+        server_url: Jira server URL for the jira_reference
+
+    Returns:
+        A Task with minimal information representing the inaccessible issue
+    """
+    jira_key = JiraIssueKey.from_string(issue_key)
+
+    description = (
+        f"{issue_key} could not be imported but was referenced from "
+        f"{referenced_from}, so this dummy task was created to act as a stand-in."
+    )
+
+    return Task(
+        id=generate_task_id(),
+        title=f"Dummy task for {issue_key}",
+        description=description,
+        # Use a tiny duration since Triangular requires mode > min and max > mode
+        duration_distribution=Triangular(min=0.0, mode=0.001, max=0.002),
+        jira_reference=JiraReference(
+            server_url=server_url,
+            issue_key=jira_key,
+        ),
+        jira_issue_type="Dummy",
+    )
+
+
 def _build_duration_distribution(
     issue: JiraIssueResponse,
 ) -> JiraDurationDistribution:
@@ -416,6 +617,7 @@ def _build_project(
     workers: dict[str, Worker],
     config: JiraConfig,
     project_name: str,
+    inaccessible: list[InaccessibleIssue] | None = None,
 ) -> tuple[Project, list[ImportWarningFluxx]]:
     """Build a Project from extracted Jira data.
 
@@ -424,11 +626,36 @@ def _build_project(
         workers: Extracted workers keyed by Jira account ID
         config: Jira configuration
         project_name: Name for the project
+        inaccessible: List of inaccessible issues to create dummy tasks for
 
     Returns:
         Tuple of (Project, list of warnings)
     """
     warnings: list[ImportWarningFluxx] = []
+
+    # Create dummy tasks for inaccessible dependency targets
+    dummy_tasks: dict[str, Task] = {}
+    if inaccessible:
+        dummy_keys = [i.issue_key for i in inaccessible]
+        for inacc in inaccessible:
+            dummy = create_dummy_task(
+                issue_key=inacc.issue_key,
+                referenced_from=inacc.referenced_from,
+                server_url=config.server_url,
+            )
+            dummy_tasks[inacc.issue_key] = dummy
+
+        # Add warning about dummy tasks
+        if dummy_keys:
+            warnings.append(
+                ImportWarningFluxx(
+                    issue_key="",
+                    message=(
+                        f"Dummy tasks ({', '.join(sorted(dummy_keys))}) were created "
+                        "because the originals could not be accessed."
+                    ),
+                )
+            )
 
     # Build hierarchy
     hierarchy, hierarchy_warnings = build_hierarchy(issues)
@@ -442,7 +669,8 @@ def _build_project(
             workers_by_jira_id[w.jira_user_id] = w.id
 
     # First pass: create tasks (without parent relationships or dependencies)
-    task_by_key: dict[str, Task] = {}
+    # Start with dummy tasks for inaccessible issues
+    task_by_key: dict[str, Task] = dict(dummy_tasks)
     for issue in issues:
         task = extract_task(
             issue=issue,
@@ -659,8 +887,10 @@ def import_from_jira(
     logger.info("Starting Jira import: project_name=%s, jql=%s", project_name, jql)
     update_progress = generate_progress_updater(progress_callback)
 
-    # Fetch all issues including children recursively
-    issues = fetch_all_issues_with_children(client, jql, update_progress)
+    # Fetch all issues including children and dependencies recursively
+    fetch_result = fetch_all_issues_with_children(client, jql, update_progress)
+    issues = fetch_result.issues
+    inaccessible = fetch_result.inaccessible
 
     update_progress("extracting_workers", 0, len(issues))
 
@@ -704,17 +934,20 @@ def import_from_jira(
         ),
     )
 
-    # Build the project
+    # Build the project (including dummy tasks for inaccessible dependencies)
     project, warnings = _build_project(
         issues=issues,
         workers=workers,
         config=updated_config,
         project_name=project_name,
+        inaccessible=inaccessible,
     )
 
     logger.info(
-        "Jira import complete: %d issues, %d history entries, %d warnings",
+        "Jira import complete: %d issues, %d inaccessible, %d history entries, "
+        "%d warnings",
         len(issues),
+        len(inaccessible),
         len(history_entries),
         len(warnings),
     )
@@ -1387,9 +1620,38 @@ def sync_from_jira(
     issue_keys = list(server_tasks.keys())
     jql = build_sync_jql(issue_keys)
 
-    # Fetch issues including their children
+    # Fetch issues including their children and dependencies
     update_progress("fetching_issues", 0, len(issue_keys))
-    issues = fetch_all_issues_with_children(client, jql, update_progress)
+    fetch_result = fetch_all_issues_with_children(client, jql, update_progress)
+    issues = fetch_result.issues
+    inaccessible = fetch_result.inaccessible
+
+    # Check which originally requested tasks could not be fetched
+    fetched_keys = {issue.key for issue in issues}
+    unfetched_keys = [key for key in issue_keys if key not in fetched_keys]
+    if unfetched_keys:
+        warnings.append(
+            ImportWarningFluxx(
+                issue_key="",
+                message=(
+                    f"Unable to update ({', '.join(sorted(unfetched_keys))}) "
+                    "due to inability to access those tasks."
+                ),
+            )
+        )
+
+    # Add warning about inaccessible dependency targets
+    if inaccessible:
+        inacc_keys = sorted([i.issue_key for i in inaccessible])
+        warnings.append(
+            ImportWarningFluxx(
+                issue_key="",
+                message=(
+                    f"Dependency targets ({', '.join(inacc_keys)}) could not be "
+                    "accessed and were skipped during sync."
+                ),
+            )
+        )
 
     update_progress("updating_tasks", len(issues) // 2, len(issues))
 

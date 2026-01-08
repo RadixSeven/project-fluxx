@@ -43,25 +43,30 @@ from fluxx.jira.api_types import (
 from fluxx.jira.extraction import HierarchyEntry
 from fluxx.jira.importer import (
     COMPLETED_RESOLUTIONS,
+    FetchResult,
     ImportProgress,
     ImportResult,
     ImportWarningFluxx,
+    InaccessibleIssue,
     SyncResult,
     _build_duration_distribution,
     _build_project,
     _collect_all_worklogs,
     _create_history_entries,
+    _find_referencing_issue,
     _update_parent_relationships,
     build_children_jql,
     build_history_jql,
     build_sync_jql,
     collect_jira_project_keys,
     collect_jira_referenced_tasks,
+    create_dummy_task,
     extract_raw_estimate_data,
     fetch_all_issues_with_children,
     fetch_and_validate_issues,
     fetch_history_entries,
     get_children_from_links,
+    get_dependencies_from_links,
     import_from_jira,
     merge_history_entries,
     sync_from_jira,
@@ -1329,8 +1334,9 @@ class TestFetchAllIssuesWithChildren:
 
         result = fetch_all_issues_with_children(mock_client, 'key = "EPIC-1"')
 
-        assert len(result) == 1
-        assert result[0].key == "EPIC-1"
+        assert len(result.issues) == 1
+        assert result.issues[0].key == "EPIC-1"
+        assert len(result.inaccessible) == 0
 
     def test_fetches_direct_children(self) -> None:
         """Fetches children via Epic Link and parent fields."""
@@ -1379,8 +1385,8 @@ class TestFetchAllIssuesWithChildren:
 
         result = fetch_all_issues_with_children(mock_client, 'key = "EPIC-1"')
 
-        assert len(result) == 2
-        keys = {issue.key for issue in result}
+        assert len(result.issues) == 2
+        keys = {issue.key for issue in result.issues}
         assert keys == {"EPIC-1", "STORY-1"}
 
     def test_fetches_nested_children(self) -> None:
@@ -1447,8 +1453,8 @@ class TestFetchAllIssuesWithChildren:
 
         result = fetch_all_issues_with_children(mock_client, 'key = "EPIC-1"')
 
-        assert len(result) == 3
-        keys = {issue.key for issue in result}
+        assert len(result.issues) == 3
+        keys = {issue.key for issue in result.issues}
         assert keys == {"EPIC-1", "STORY-1", "SUB-1"}
 
     def test_deduplicates_issues(self) -> None:
@@ -1498,8 +1504,8 @@ class TestFetchAllIssuesWithChildren:
 
         result = fetch_all_issues_with_children(mock_client, "project = TEST")
 
-        assert len(result) == 2  # Deduplicated
-        keys = {issue.key for issue in result}
+        assert len(result.issues) == 2  # Deduplicated
+        keys = {issue.key for issue in result.issues}
         assert keys == {"EPIC-1", "STORY-1"}
 
     def test_fetches_children_from_links(self) -> None:
@@ -1557,8 +1563,8 @@ class TestFetchAllIssuesWithChildren:
 
         result = fetch_all_issues_with_children(mock_client, 'key = "PARENT-1"')
 
-        assert len(result) == 2
-        keys = {issue.key for issue in result}
+        assert len(result.issues) == 2
+        keys = {issue.key for issue in result.issues}
         assert keys == {"PARENT-1", "CHILD-1"}
 
     def test_handles_get_issue_failure_gracefully(self) -> None:
@@ -1598,8 +1604,10 @@ class TestFetchAllIssuesWithChildren:
         result = fetch_all_issues_with_children(mock_client, 'key = "PARENT-1"')
 
         # Only parent should be returned, inaccessible child is skipped
-        assert len(result) == 1
-        assert result[0].key == "PARENT-1"
+        # (child link failures don't create inaccessible entries, only deps do)
+        assert len(result.issues) == 1
+        assert result.issues[0].key == "PARENT-1"
+        assert len(result.inaccessible) == 0
 
     def test_progress_callback_called(self) -> None:
         """Progress callback is called during fetching."""
@@ -3757,3 +3765,572 @@ class TestImportHistoryPersistence:
         assert result.project.jira_config is not None
         sync_time = result.project.jira_config.sync_metadata.last_history_sync
         assert before_import <= sync_time <= after_import
+
+
+class TestGetDependenciesFromLinks:
+    """Tests for get_dependencies_from_links function."""
+
+    def test_empty_issues(self) -> None:
+        """Empty issues returns empty set."""
+        result = get_dependencies_from_links([], set())
+        assert result == set()
+
+    def test_no_links(self) -> None:
+        """Issue without links returns empty set."""
+        issue = make_issue(key="TEST-1")
+        result = get_dependencies_from_links([issue], set())
+        assert result == set()
+
+    def test_depends_on_outward_link(self) -> None:
+        """'Depends' outward link extracts dependency target."""
+        depends_link = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(
+                id="10001",
+                name="Depends",
+                inward="is depended on by",
+                outward="depends on",
+            ),
+            outward_issue=JiraLinkedIssue(id="10002", key="DEP-1"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[depends_link])
+        result = get_dependencies_from_links([issue], set())
+        assert result == {"DEP-1"}
+
+    def test_blocks_inward_link(self) -> None:
+        """'Blocks' inward link extracts dependency target (blocker)."""
+        blocks_link = JiraIssueLink(
+            id="1002",
+            link_type=JiraIssueLinkType(
+                id="10002",
+                name="Blocks",
+                inward="is blocked by",
+                outward="blocks",
+            ),
+            inward_issue=JiraLinkedIssue(id="10003", key="BLOCKER-1"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[blocks_link])
+        result = get_dependencies_from_links([issue], set())
+        assert result == {"BLOCKER-1"}
+
+    def test_excludes_already_fetched(self) -> None:
+        """Dependencies already fetched are excluded."""
+        depends_link = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(
+                id="10001",
+                name="Depends",
+                inward="is depended on by",
+                outward="depends on",
+            ),
+            outward_issue=JiraLinkedIssue(id="10002", key="DEP-1"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[depends_link])
+        # DEP-1 is already fetched
+        result = get_dependencies_from_links([issue], {"DEP-1"})
+        assert result == set()
+
+    def test_multiple_dependencies(self) -> None:
+        """Multiple dependencies from multiple issues."""
+        link1 = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(
+                id="10001",
+                name="Depends",
+                inward="is depended on by",
+                outward="depends on",
+            ),
+            outward_issue=JiraLinkedIssue(id="10002", key="DEP-1"),
+        )
+        link2 = JiraIssueLink(
+            id="1002",
+            link_type=JiraIssueLinkType(
+                id="10001",
+                name="Depends",
+                inward="is depended on by",
+                outward="depends on",
+            ),
+            outward_issue=JiraLinkedIssue(id="10003", key="DEP-2"),
+        )
+        issue1 = make_issue(key="TEST-1", issuelinks=[link1])
+        issue2 = make_issue(key="TEST-2", issuelinks=[link2])
+        result = get_dependencies_from_links([issue1, issue2], set())
+        assert result == {"DEP-1", "DEP-2"}
+
+
+class TestFindReferencingIssue:
+    """Tests for _find_referencing_issue function."""
+
+    def test_finds_depends_on_reference(self) -> None:
+        """Finds issue that has 'Depends' link to target."""
+        depends_link = JiraIssueLink(
+            id="1001",
+            link_type=JiraIssueLinkType(
+                id="10001",
+                name="Depends",
+                inward="is depended on by",
+                outward="depends on",
+            ),
+            outward_issue=JiraLinkedIssue(id="10002", key="DEP-1"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[depends_link])
+        result = _find_referencing_issue("DEP-1", [issue])
+        assert result == "TEST-1"
+
+    def test_finds_blocks_reference(self) -> None:
+        """Finds issue that has 'Blocks' inward link to target."""
+        blocks_link = JiraIssueLink(
+            id="1002",
+            link_type=JiraIssueLinkType(
+                id="10002",
+                name="Blocks",
+                inward="is blocked by",
+                outward="blocks",
+            ),
+            inward_issue=JiraLinkedIssue(id="10003", key="BLOCKER-1"),
+        )
+        issue = make_issue(key="TEST-1", issuelinks=[blocks_link])
+        result = _find_referencing_issue("BLOCKER-1", [issue])
+        assert result == "TEST-1"
+
+    def test_returns_unknown_when_not_found(self) -> None:
+        """Returns 'unknown' when no issue references target."""
+        issue = make_issue(key="TEST-1")
+        result = _find_referencing_issue("NONEXISTENT-1", [issue])
+        assert result == "unknown"
+
+
+class TestCreateDummyTask:
+    """Tests for create_dummy_task function."""
+
+    def test_creates_task_with_correct_title(self) -> None:
+        """Dummy task has correct title."""
+        task = create_dummy_task(
+            issue_key="CORE-123",
+            referenced_from="OTHER-234",
+            server_url="https://jira.example.com",
+        )
+        assert task.title == "Dummy task for CORE-123"
+
+    def test_creates_task_with_correct_description(self) -> None:
+        """Dummy task has informative description."""
+        task = create_dummy_task(
+            issue_key="CORE-123",
+            referenced_from="OTHER-234",
+            server_url="https://jira.example.com",
+        )
+        assert "CORE-123 could not be imported" in task.description
+        assert "OTHER-234" in task.description
+        assert "dummy task" in task.description
+
+    def test_creates_task_with_jira_reference(self) -> None:
+        """Dummy task has jira_reference set."""
+        task = create_dummy_task(
+            issue_key="CORE-123",
+            referenced_from="OTHER-234",
+            server_url="https://jira.example.com",
+        )
+        assert task.jira_reference is not None
+        assert str(task.jira_reference.issue_key) == "CORE-123"
+        assert task.jira_reference.server_url == "https://jira.example.com"
+
+    def test_creates_task_with_zero_duration(self) -> None:
+        """Dummy task has zero duration distribution."""
+        task = create_dummy_task(
+            issue_key="CORE-123",
+            referenced_from="OTHER-234",
+            server_url="https://jira.example.com",
+        )
+        # Triangular(0, 0, 0) effectively has no duration
+        assert task.duration_distribution is not None
+
+    def test_creates_task_with_dummy_issue_type(self) -> None:
+        """Dummy task has 'Dummy' issue type."""
+        task = create_dummy_task(
+            issue_key="CORE-123",
+            referenced_from="OTHER-234",
+            server_url="https://jira.example.com",
+        )
+        assert task.jira_issue_type == "Dummy"
+
+
+class TestInaccessibleIssueDataclass:
+    """Tests for InaccessibleIssue dataclass."""
+
+    def test_creation(self) -> None:
+        """InaccessibleIssue can be created with required fields."""
+        inacc = InaccessibleIssue(
+            issue_key="CORE-123",
+            referenced_from="OTHER-234",
+        )
+        assert inacc.issue_key == "CORE-123"
+        assert inacc.referenced_from == "OTHER-234"
+
+
+class TestFetchResultDataclass:
+    """Tests for FetchResult dataclass."""
+
+    def test_creation_with_defaults(self) -> None:
+        """FetchResult can be created with just issues."""
+        result = FetchResult(issues=[])
+        assert result.issues == []
+        assert result.inaccessible == []
+
+    def test_creation_with_inaccessible(self) -> None:
+        """FetchResult can include inaccessible issues."""
+        inacc = InaccessibleIssue(issue_key="CORE-123", referenced_from="OTHER-234")
+        result = FetchResult(issues=[], inaccessible=[inacc])
+        assert len(result.inaccessible) == 1
+        assert result.inaccessible[0].issue_key == "CORE-123"
+
+
+class TestFetchDependencies:
+    """Tests for dependency fetching in fetch_all_issues_with_children."""
+
+    def test_fetches_dependency_targets(self) -> None:
+        """Dependencies are fetched along with children."""
+        mock_client = MagicMock()
+
+        depends_link = {
+            "id": "1001",
+            "type": {
+                "id": "10001",
+                "name": "Depends",
+                "inward": "is depended on by",
+                "outward": "depends on",
+            },
+            "outwardIssue": {"id": "10002", "key": "DEP-1"},
+        }
+
+        main_dict = {
+            "id": "10001",
+            "key": "MAIN-1",
+            "fields": {
+                "summary": "Main Issue",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [depends_link],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        dep_dict = {
+            "id": "10002",
+            "key": "DEP-1",
+            "fields": {
+                "summary": "Dependency Issue",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Story"},
+                "status": {"id": "1", "name": "Done"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([main_dict]),  # Initial query
+            iter([]),  # Children query for MAIN-1
+            iter([]),  # Children query for DEP-1 (fetched as dependency)
+        ]
+        mock_client.get_issue.return_value = dep_dict
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "MAIN-1"')
+
+        assert len(result.issues) == 2
+        keys = {issue.key for issue in result.issues}
+        assert keys == {"MAIN-1", "DEP-1"}
+        assert len(result.inaccessible) == 0
+
+    def test_tracks_inaccessible_dependencies(self) -> None:
+        """Inaccessible dependencies are tracked in result."""
+        mock_client = MagicMock()
+
+        depends_link = {
+            "id": "1001",
+            "type": {
+                "id": "10001",
+                "name": "Depends",
+                "inward": "is depended on by",
+                "outward": "depends on",
+            },
+            "outwardIssue": {"id": "10002", "key": "INACCESSIBLE-1"},
+        }
+
+        main_dict = {
+            "id": "10001",
+            "key": "MAIN-1",
+            "fields": {
+                "summary": "Main Issue",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [depends_link],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([main_dict]),  # Initial query
+            iter([]),  # Children query
+        ]
+        # Dependency fetch fails
+        mock_client.get_issue.side_effect = Exception("Not found")
+
+        result = fetch_all_issues_with_children(mock_client, 'key = "MAIN-1"')
+
+        assert len(result.issues) == 1
+        assert result.issues[0].key == "MAIN-1"
+        assert len(result.inaccessible) == 1
+        assert result.inaccessible[0].issue_key == "INACCESSIBLE-1"
+        assert result.inaccessible[0].referenced_from == "MAIN-1"
+
+
+class TestImportWithDummyTasks:
+    """Tests for import creating dummy tasks for inaccessible dependencies."""
+
+    def test_import_creates_dummy_task_for_inaccessible_dep(self) -> None:
+        """Import creates dummy task when dependency is inaccessible."""
+        mock_client = MagicMock()
+
+        depends_link = {
+            "id": "1001",
+            "type": {
+                "id": "10001",
+                "name": "Depends",
+                "inward": "is depended on by",
+                "outward": "depends on",
+            },
+            "outwardIssue": {"id": "10002", "key": "INACCESSIBLE-1"},
+        }
+
+        main_dict = {
+            "id": "10001",
+            "key": "MAIN-1",
+            "fields": {
+                "summary": "Main Issue",
+                "description": "Test",
+                "issuetype": {"id": "10000", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [depends_link],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([main_dict]),  # Initial query
+            iter([]),  # Children query
+            iter([]),  # History query
+        ]
+        mock_client.get_issue.side_effect = Exception("Not found")
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        result = import_from_jira(
+            client=mock_client,
+            jql='key = "MAIN-1"',
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Both main task and dummy task should exist
+        assert len(result.project.dag.node_map) == 2
+
+        # Check for dummy task warning
+        dummy_warnings = [w for w in result.warnings if "Dummy tasks" in w.message]
+        assert len(dummy_warnings) == 1
+        assert "INACCESSIBLE-1" in dummy_warnings[0].message
+
+        # Verify dummy task exists
+        dummy_found = False
+        for _node_id, persistent_id in result.project.dag.node_map.items():
+            if persistent_id in result.project.persistent_tasks:
+                ptask = result.project.persistent_tasks[persistent_id]
+                task = ptask.versions[result.project.dag.current_version_id]
+                if (
+                    task.jira_reference
+                    and str(task.jira_reference.issue_key) == "INACCESSIBLE-1"
+                ):
+                    dummy_found = True
+                    assert task.title == "Dummy task for INACCESSIBLE-1"
+                    assert task.jira_issue_type == "Dummy"
+        assert dummy_found
+
+
+class TestSyncWithInaccessibleTasks:
+    """Tests for sync handling inaccessible tasks."""
+
+    def test_sync_warns_about_unfetchable_tasks(self) -> None:
+        """Sync generates warning when originally requested tasks can't be fetched."""
+        # Create a project with a Jira task
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),  # Initial import
+            iter([]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Now sync, but the task is no longer accessible
+        mock_client.search.side_effect = [
+            iter([]),  # Task no longer found
+        ]
+
+        sync_result = sync_from_jira(
+            project=import_result.project,
+            client=mock_client,
+            config=config,
+        )
+
+        # Should have warning about unfetchable task
+        unfetch_warnings = [
+            w for w in sync_result.warnings if "Unable to update" in w.message
+        ]
+        assert len(unfetch_warnings) == 1
+        assert "TEST-1" in unfetch_warnings[0].message
+
+    def test_sync_warns_about_inaccessible_dependency_targets(self) -> None:
+        """Sync generates warning when dependency targets can't be accessed."""
+        # Create a project with a Jira task
+        mock_client = MagicMock()
+
+        issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([issue_dict]),  # Initial import
+            iter([]),
+            iter([]),
+        ]
+
+        config = JiraConfig(
+            server_url="https://jira.example.com",
+            sync_metadata=JiraSyncMetadata(
+                server_url="https://jira.example.com",
+                last_history_sync=datetime.now().astimezone(),
+            ),
+        )
+
+        import_result = import_from_jira(
+            client=mock_client,
+            jql="key = TEST-1",
+            config=config,
+            project_name="Test Project",
+        )
+
+        # Now sync with a dependency link added that points to inaccessible issue
+        depends_link = {
+            "id": "1001",
+            "type": {
+                "id": "10001",
+                "name": "Depends",
+                "inward": "is depended on by",
+                "outward": "depends on",
+            },
+            "outwardIssue": {"id": "10002", "key": "INACCESSIBLE-DEP"},
+        }
+
+        updated_issue_dict = {
+            "id": "10001",
+            "key": "TEST-1",
+            "fields": {
+                "summary": "Test Issue Updated",
+                "description": "Test",
+                "issuetype": {"id": "10001", "name": "Story"},
+                "status": {"id": "1", "name": "Open"},
+                "assignee": None,
+                "parent": None,
+                "issuelinks": [depends_link],
+                "resolutiondate": None,
+                "worklog": None,
+                "timetracking": None,
+            },
+        }
+
+        mock_client.search.side_effect = [
+            iter([updated_issue_dict]),  # Sync fetch
+            iter([]),  # Children query
+            iter([]),  # History fetch
+        ]
+        mock_client.get_issue.side_effect = Exception("Not found")
+
+        sync_result = sync_from_jira(
+            project=import_result.project,
+            client=mock_client,
+            config=config,
+        )
+
+        # Should have warning about inaccessible dependency targets
+        inacc_warnings = [
+            w for w in sync_result.warnings if "Dependency targets" in w.message
+        ]
+        assert len(inacc_warnings) == 1
+        assert "INACCESSIBLE-DEP" in inacc_warnings[0].message
