@@ -38,6 +38,7 @@ from fluxx.simulation.scheduler import (
     StartTaskAction,
     detect_deadlock,
     get_eligible_workers,
+    get_incomplete_tasks,
     get_worker_in_progress_task_count,
     select_next_action,
 )
@@ -561,10 +562,11 @@ def run_single_sample(
         # No actions possible - check for deadlock
         if detect_deadlock(state):
             failed_sample = create_failed_sample(sample_id, state)
+            incomplete_count = len(get_incomplete_tasks(state))
             logger.debug(
                 "Sample %d failed (deadlock): %d tasks incomplete",
                 sample_id,
-                len(failed_sample.failed_tasks),
+                incomplete_count,
             )
             return failed_sample
 
@@ -576,10 +578,11 @@ def run_single_sample(
             # This should always be caught by detect_deadlock above,
             # but we handle it defensively in case of logic errors.
             failed_sample = create_failed_sample(sample_id, state)
+            incomplete_count = len(get_incomplete_tasks(state))
             logger.debug(
                 "Sample %d failed (no next event): %d tasks incomplete",
                 sample_id,
-                len(failed_sample.failed_tasks),
+                incomplete_count,
             )
             return failed_sample
 
