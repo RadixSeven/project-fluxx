@@ -1,5 +1,6 @@
 """Jira HTTP client with rate limiting and retry logic."""
 
+import logging
 import time
 from collections.abc import Iterator
 from threading import Lock
@@ -14,6 +15,8 @@ from tenacity import (
 )
 
 from fluxx.data.json_types import JsonObject, JsonValue
+
+logger = logging.getLogger(__name__)
 
 
 class JiraClientError(Exception):
@@ -86,7 +89,9 @@ class JiraClient:
                 now = time.time()
                 elapsed = now - self._last_request_time
                 if elapsed < self._min_interval:
-                    time.sleep(self._min_interval - elapsed)
+                    wait_time = self._min_interval - elapsed
+                    logger.debug("Rate limiting: waiting %.3f seconds", wait_time)
+                    time.sleep(wait_time)
                 self._last_request_time = time.time()
 
     def _make_request(
@@ -126,6 +131,7 @@ class JiraClient:
             self._wait_for_rate_limit()
 
             url = f"{self.server_url}{endpoint}"
+            logger.debug("HTTP %s %s", method, url)
             response = self._session.request(
                 method=method,
                 url=url,
@@ -135,19 +141,27 @@ class JiraClient:
 
             # Check for retryable errors
             if response.status_code in (429, 500, 502, 503, 504):
+                logger.debug(
+                    "Retryable HTTP error %d, will retry", response.status_code
+                )
                 raise _RetryableHTTPError(
                     f"HTTP {response.status_code}: {response.text}"
                 )
 
+            logger.debug("HTTP response: %d", response.status_code)
             return response
 
         try:
             response = _do_request()
         except (RetryError, _RetryableHTTPError) as e:
+            logger.debug(
+                "Request failed after %d retries: %s", self._max_retries, endpoint
+            )
             raise JiraClientError(
                 f"Request failed after {self._max_retries} retries"
             ) from e
         except requests.exceptions.ConnectionError as e:
+            logger.debug("Connection error for %s: %s", endpoint, e)
             raise JiraClientError(f"Connection error: {e}") from e
 
         # Check for non-retryable errors
@@ -208,6 +222,7 @@ class JiraClient:
         Raises:
             JiraClientError: If any request fails
         """
+        logger.debug("Search starting: jql=%s", jql)
         start_at = 0
 
         while True:
@@ -242,7 +257,14 @@ class JiraClient:
             total_raw = response.get("total", 0)
             total = total_raw if isinstance(total_raw, int) else 0
             start_at += issues_count
+            logger.debug(
+                "Search pagination: fetched %d issues, %d/%d total",
+                issues_count,
+                start_at,
+                total,
+            )
             if start_at >= total or issues_count == 0:
+                logger.debug("Search complete: %d total issues", start_at)
                 break
 
 

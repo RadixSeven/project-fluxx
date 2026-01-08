@@ -5,6 +5,7 @@ into Fluxx, coordinating the client, extraction, and distribution fitting
 components.
 """
 
+import logging
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -59,6 +60,8 @@ from fluxx.jira.models import (
     JiraIssueKey,
     JiraSyncMetadata,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -202,6 +205,7 @@ def fetch_all_issues_with_children(
     Returns:
         List of all fetched issues (deduplicated by key)
     """
+    logger.debug("Fetching issues with children for JQL: %s", initial_jql)
     if progress_callback:
         progress_callback("fetching_issues", 0, 0)
 
@@ -279,6 +283,7 @@ def fetch_all_issues_with_children(
         if new_issues_count == 0 and len(link_children) == 0:
             break
 
+    logger.debug("Fetched %d total issues with children", len(issues_by_key))
     return list(issues_by_key.values())
 
 
@@ -651,6 +656,7 @@ def import_from_jira(
     Raises:
         InsufficientDataError if no worklog has logged time
     """
+    logger.info("Starting Jira import: project_name=%s, jql=%s", project_name, jql)
     update_progress = generate_progress_updater(progress_callback)
 
     # Fetch all issues including children recursively
@@ -706,6 +712,12 @@ def import_from_jira(
         project_name=project_name,
     )
 
+    logger.info(
+        "Jira import complete: %d issues, %d history entries, %d warnings",
+        len(issues),
+        len(history_entries),
+        len(warnings),
+    )
     return ImportResult(
         project=project,
         warnings=warnings,
@@ -959,6 +971,11 @@ def fetch_history_entries(
     if not project_keys:
         return []
 
+    logger.debug(
+        "Fetching history for %d projects, last_sync=%s",
+        len(project_keys),
+        last_sync.isoformat() if last_sync else "None",
+    )
     if progress_callback:
         progress_callback("fetching_history", 0, 0)
 
@@ -990,7 +1007,9 @@ def fetch_history_entries(
 
     # Create history entries (reuse existing function with empty workers)
     # Note: _create_history_entries only includes DoneCompletion issues
-    return _create_history_entries(issues, {}, server_url, server_timezone)
+    entries = _create_history_entries(issues, {}, server_url, server_timezone)
+    logger.debug("Created %d history entries from %d issues", len(entries), len(issues))
+    return entries
 
 
 def merge_history_entries(
@@ -1338,6 +1357,7 @@ def sync_from_jira(
     Returns:
         SyncResult with the updated project and sync statistics
     """
+    logger.info("Starting Jira sync for server: %s", config.server_url)
     update_progress = generate_progress_updater(progress_callback)
     warnings: list[ImportWarningFluxx] = []
     total_updated = 0
@@ -1440,6 +1460,13 @@ def sync_from_jira(
 
     update_progress("sync_complete", len(issues), len(issues))
 
+    logger.info(
+        "Jira sync complete: updated=%d, created=%d, deleted=%d, history_added=%d",
+        total_updated,
+        total_created,
+        len(all_deleted_keys),
+        history_entries_added,
+    )
     return SyncResult(
         project=updated_project,
         updated_count=total_updated,

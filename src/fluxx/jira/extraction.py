@@ -5,6 +5,7 @@ We use "extract" rather than "map" to emphasize that we're converting
 part of the data from Jira's representation to Fluxx's representation.
 """
 
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -27,6 +28,8 @@ from fluxx.jira.api_types import (
     JiraWorklogEntry,
 )
 from fluxx.jira.models import JiraIssueKey, JiraReference
+
+logger = logging.getLogger(__name__)
 
 # Constants
 EPSILON_HOURS = 1e-6  # Minimum hours for zero-work completed tasks
@@ -360,17 +363,25 @@ def extract_completion(
 
     # Exhaustive case analysis - every combination is handled
     if not is_resolved and not has_worklogs:
+        logger.debug("Issue %s: not started (no worklogs, no resolution)", issue.key)
         return _extract_not_started(issue, workers)
 
     if not is_resolved and has_worklogs:
+        logger.debug(
+            "Issue %s: started (%d worklogs, no resolution)", issue.key, len(worklogs)
+        )
         return _extract_started(issue, worklogs, workers, server_timezone)
 
     if is_resolved and has_worklogs:
+        logger.debug(
+            "Issue %s: done with worklogs (%d worklogs)", issue.key, len(worklogs)
+        )
         return _extract_done_with_worklogs(issue, worklogs, workers, server_timezone)
 
     # is_resolved and not has_worklogs
     # Type narrowing: resolution_date is not None since is_resolved is True
     assert resolution_date is not None
+    logger.debug("Issue %s: done without worklogs", issue.key)
     return _extract_done_zero_work(resolution_date, server_timezone)
 
 
@@ -552,6 +563,9 @@ def build_hierarchy(
             ):
                 hierarchy[issue.key].parent_key = link.inward_issue.key
 
+    logger.debug(
+        "Built hierarchy: %d entries, %d warnings", len(hierarchy), len(warnings)
+    )
     return hierarchy, warnings
 
 
@@ -567,6 +581,7 @@ def extract_workers_with_no_hours(
     Returns:
         Dict mapping Jira user_id to Worker objects
     """
+    logger.debug("Extracting workers from %d issues", len(issues))
     workers: dict[str, Worker] = {}
 
     for issue in issues:
@@ -593,6 +608,7 @@ def extract_workers_with_no_hours(
                         hours_per_workday=8.0,  # Default
                     )
 
+    logger.debug("Extracted %d workers", len(workers))
     return workers
 
 
@@ -686,4 +702,11 @@ def extract_task(
         allowed_workers=completion_result.allowed_workers,
     )
 
+    logger.debug(
+        "Extracted task %s from issue %s: type=%s, completion=%s",
+        task.id,
+        issue.key,
+        issue.fields.issuetype.name,
+        type(completion_result.completion).__name__,
+    )
     return task
