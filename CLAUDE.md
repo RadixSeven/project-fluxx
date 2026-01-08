@@ -221,6 +221,63 @@ python -m fluxx
 fluxx
 ```
 
+## Debugging and Diagnostics
+
+### Command-Line Options
+
+Project Fluxx supports several CLI options for debugging and headless operation:
+
+```bash
+# Run headless simulation with 1000 samples
+python -m fluxx project.fluxx --run-simulation 1000
+
+# Export simulation results to JSON
+python -m fluxx project.fluxx --run-simulation 1000 --write-simulation-results-json results.json
+
+# Enable debug logging for detailed output
+python -m fluxx project.fluxx --run-simulation 100 --log-level DEBUG
+
+# Export Jira historical data to CSV
+python -m fluxx project.fluxx --write-historical-data-csv history.csv
+```
+
+### Log Levels
+
+Use `--log-level` to control verbosity:
+- `DEBUG`: Detailed internal state (task scheduling, worker assignment, Jira requests)
+- `INFO`: Major milestones (simulation start/end, import progress)
+- `WARNING`: Recoverable issues (default)
+- `ERROR`: Unrecoverable errors
+- `CRITICAL`: System failures
+
+### Debugging Workflows
+
+**Debug a simulation issue**:
+```bash
+# See all scheduling decisions
+python -m fluxx project.fluxx --run-simulation 10 --log-level DEBUG 2>&1 | grep scheduler
+
+# Export results for analysis
+python -m fluxx project.fluxx --run-simulation 1000 --write-simulation-results-json debug_output.json --log-level INFO
+```
+
+**Debug Jira import issues** (via GUI, but with logging):
+```bash
+# Run with debug logging to trace extraction
+python -m fluxx project.fluxx --log-level DEBUG 2>&1 | grep jira
+```
+
+### Logged Subsystems
+
+Key modules emit log messages:
+- `fluxx.simulation.engine`: Simulation lifecycle, sample progress
+- `fluxx.simulation.scheduler`: Task eligibility, worker assignment
+- `fluxx.simulation.state`: Worker state changes
+- `fluxx.simulation.distributions`: Duration sampling, rejection sampling
+- `fluxx.jira.client`: HTTP requests, rate limiting, pagination
+- `fluxx.jira.importer`: Import/sync progress
+- `fluxx.jira.extraction`: Data extraction decisions
+
 ## Common Pitfalls
 
 1. **ID Type Confusion**: Use the typed ID newtypes consistently. Don't pass a string where a `TaskId` is expected without explicitly converting. See [type_safety.md](type_safety.md) for details.
