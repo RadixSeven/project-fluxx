@@ -3934,15 +3934,16 @@ class TestCreateDummyTask:
         assert str(task.jira_reference.issue_key) == "CORE-123"
         assert task.jira_reference.server_url == "https://jira.example.com"
 
-    def test_creates_task_with_zero_duration(self) -> None:
-        """Dummy task has zero duration distribution."""
+    def test_creates_task_with_fallback_duration(self) -> None:
+        """Dummy task uses JiraDurationDistribution with no estimate (fallback)."""
         task = create_dummy_task(
             issue_key="CORE-123",
             referenced_from="OTHER-234",
             server_url="https://jira.example.com",
         )
-        # Triangular(0, 0, 0) effectively has no duration
-        assert task.duration_distribution is not None
+        # JiraDurationDistribution with no estimate falls back to historical data
+        assert isinstance(task.duration_distribution, JiraDurationDistribution)
+        assert task.duration_distribution.original_estimate_seconds is None
 
     def test_creates_task_with_dummy_issue_type(self) -> None:
         """Dummy task has 'Dummy' issue type."""

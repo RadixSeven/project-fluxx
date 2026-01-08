@@ -1382,7 +1382,7 @@ JiraIssueKey has a validator that it is of the form letters-numbers and is treat
 When an inaccessible reference is detected during import (from dependency links), a **dummy task** is created as a stand-in:
 - Title: "Dummy task for {issue_key}"
 - Description: "{issue_key} could not be imported but was referenced from {referencing_issue}, so this dummy task was created to act as a stand-in."
-- Duration: Minimal (essentially zero work)
+- Duration: Uses `JiraDurationDistribution` with no original estimate, so it falls back to the project's historical duration distribution during simulation
 - The `jira_reference` is still set, allowing future sync attempts
 
 During sync, inaccessible tasks generate warnings but do not fail the sync. Code that uses `JiraReference` should either:

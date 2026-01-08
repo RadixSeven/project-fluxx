@@ -35,7 +35,6 @@ from fluxx.data.models import (
     ProjectMetadata,
     Task,
     TaskId,
-    Triangular,
     Worker,
     WorkerId,
 )
@@ -570,8 +569,9 @@ def create_dummy_task(
         id=generate_task_id(),
         title=f"Dummy task for {issue_key}",
         description=description,
-        # Use a tiny duration since Triangular requires mode > min and max > mode
-        duration_distribution=Triangular(min=0.0, mode=0.001, max=0.002),
+        # Use JiraDurationDistribution with no estimate so it falls back to the
+        # project's historical duration distribution during simulation
+        duration_distribution=JiraDurationDistribution(),
         jira_reference=JiraReference(
             server_url=server_url,
             issue_key=jira_key,
