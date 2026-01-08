@@ -47,6 +47,7 @@ def test_main_no_args(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -70,6 +71,7 @@ def test_main_new_file_no_suffix(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         main()
 
@@ -97,6 +99,7 @@ def test_main_existing_file(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         main()
 
@@ -125,6 +128,7 @@ def test_main_bad_format_file(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         main()
 
@@ -150,6 +154,7 @@ def test_main_returns_app_exit_code(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -174,6 +179,7 @@ def test_main_create_project_error(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -206,6 +212,7 @@ def test_main_open_project_unexpected_error(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -311,6 +318,7 @@ def test_write_historical_data_csv_no_file_arg(
             write_historical_data_csv=str(output_file),
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -431,6 +439,7 @@ def test_main_with_csv_export(
             write_historical_data_csv=str(output_file),
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -495,6 +504,7 @@ def test_main_log_level_default(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=None,
+            write_simulation_results_json=None,
         )
         main()
 
@@ -515,6 +525,7 @@ def test_run_simulation_requires_file(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=10,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -537,6 +548,7 @@ def test_run_simulation_requires_positive_integer(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=0,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -559,6 +571,7 @@ def test_run_simulation_file_not_found(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=5,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -591,6 +604,7 @@ def test_run_simulation_no_workers(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=5,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -632,6 +646,7 @@ def test_run_simulation_success(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=5,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -691,6 +706,7 @@ def test_run_simulation_with_events_and_percentiles(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=10,
+            write_simulation_results_json=None,
         )
         result = main()
 
@@ -723,9 +739,88 @@ def test_run_simulation_file_format_error(
             write_historical_data_csv=None,
             log_level="INFO",
             run_simulation=5,
+            write_simulation_results_json=None,
         )
         result = main()
 
     assert result == 1
     captured = capsys.readouterr()
     assert "Error loading project" in captured.err
+
+
+# Tests for --write-simulation-results-json
+
+
+def test_write_simulation_results_json_requires_run_simulation(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --write-simulation-results-json requires --run-simulation."""
+    json_output = tmp_path / "results.json"
+
+    with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
+        mock_parse.return_value = MagicMock(
+            file=None,
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
+            write_simulation_results_json=str(json_output),
+        )
+        result = main()
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "--write-simulation-results-json requires --run-simulation" in captured.err
+
+
+def test_write_simulation_results_json_success(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --write-simulation-results-json exports results."""
+    from fluxx.data.models import Sample, SampleId, Worker, WorkerId
+
+    project_file = tmp_path / "project.fluxx"
+    json_output = tmp_path / "results.json"
+
+    # Create a mock project with workers
+    mock_project = MagicMock()
+    mock_project.workers = [
+        Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)
+    ]
+
+    # Create real Sample objects (Pydantic models) for proper serialization
+    mock_samples = [
+        Sample(sample_id=SampleId(i), events=[], failed_tasks=[]) for i in range(3)
+    ]
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.load_project", return_value=mock_project),
+        patch("fluxx.__main__.SimulationEngine") as mock_engine_class,
+    ):
+        mock_engine = MagicMock()
+        mock_engine.run.return_value = mock_samples
+        mock_engine_class.return_value = mock_engine
+
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=3,
+            write_simulation_results_json=str(json_output),
+        )
+        result = main()
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "Wrote simulation results to" in captured.out
+    assert json_output.exists()
+
+    # Verify JSON content is valid
+    import json
+
+    content = json.loads(json_output.read_text())
+    assert len(content) == 3

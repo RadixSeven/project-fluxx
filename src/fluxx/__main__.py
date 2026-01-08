@@ -106,12 +106,15 @@ def write_historical_data_csv(project_path: Path, output_path: Path) -> int:
     return 0
 
 
-def run_simulation(project_path: Path, num_samples: int) -> int:
+def run_simulation(
+    project_path: Path, num_samples: int, json_output_path: Path | None = None
+) -> int:
     """Run a headless simulation on a project file.
 
     Args:
         project_path: Path to the .fluxx project file
         num_samples: Number of simulation samples to run
+        json_output_path: Optional path to write JSON results
 
     Returns:
         Exit code (0 for success, 1 for error)
@@ -170,6 +173,17 @@ def run_simulation(project_path: Path, num_samples: int) -> int:
             print(f"  P90 completion: {completion_times[p90_idx]:.1f} hours")
             print(f"  P95 completion: {completion_times[p95_idx]:.1f} hours")
 
+    # Export JSON if requested
+    if json_output_path is not None:
+        from pydantic import TypeAdapter
+
+        from fluxx.data.models import Sample
+
+        adapter = TypeAdapter(list[Sample])
+        json_content = adapter.dump_json(samples, indent=2)
+        json_output_path.write_bytes(json_content)
+        print(f"Wrote simulation results to {json_output_path}")
+
     return 0
 
 
@@ -205,10 +219,23 @@ def main() -> int:
         metavar="N",
         help="Run N simulation samples headlessly and print summary statistics",
     )
+    parser.add_argument(
+        "--write-simulation-results-json",
+        metavar="FILE",
+        help="Export simulation results to JSON file (requires --run-simulation)",
+    )
     args = parser.parse_args()
 
     # Configure logging early
     configure_logging(args.log_level)
+
+    # Validate --write-simulation-results-json requires --run-simulation
+    if args.write_simulation_results_json is not None and args.run_simulation is None:
+        print(
+            "Error: --write-simulation-results-json requires --run-simulation",
+            file=sys.stderr,
+        )
+        return 1
 
     # Handle simulation mode
     if args.run_simulation is not None:
@@ -224,7 +251,12 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        return run_simulation(Path(args.file), args.run_simulation)
+        json_output = (
+            Path(args.write_simulation_results_json)
+            if args.write_simulation_results_json
+            else None
+        )
+        return run_simulation(Path(args.file), args.run_simulation, json_output)
 
     # Handle CSV export mode
     if args.write_historical_data_csv:
