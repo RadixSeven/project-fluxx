@@ -1189,6 +1189,131 @@ Each event records:
 - Lazy loading where appropriate
 - Efficient graph algorithms for dependency checking
 
+### 10.4 Command-Line Interface
+
+Project Fluxx provides command-line options for headless operation and debugging.
+
+**Basic Usage**:
+```bash
+# Launch GUI with a project file
+python -m fluxx project.fluxx
+
+# Create a new project at the specified path
+python -m fluxx new_project.fluxx  # Creates if doesn't exist
+```
+
+**Simulation Options**:
+```bash
+# Run headless simulation with N samples
+python -m fluxx project.fluxx --run-simulation 1000
+
+# Export simulation results to JSON
+python -m fluxx project.fluxx --run-simulation 1000 --write-simulation-results-json results.json
+```
+
+**Logging Options**:
+```bash
+# Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+python -m fluxx project.fluxx --log-level DEBUG
+
+# Combine with simulation for debugging
+python -m fluxx project.fluxx --run-simulation 100 --log-level DEBUG
+```
+
+**Data Export Options**:
+```bash
+# Export Jira historical data to CSV
+python -m fluxx project.fluxx --write-historical-data-csv history.csv
+```
+
+**Option Details**:
+
+| Option | Arguments | Description |
+|--------|-----------|-------------|
+| `file` | PATH | Project file to open or create |
+| `--run-simulation` | N | Run N simulation samples headlessly and exit |
+| `--write-simulation-results-json` | FILE | Export simulation results to JSON (requires `--run-simulation`) |
+| `--write-historical-data-csv` | FILE | Export Jira history entries to CSV and exit |
+| `--log-level` | LEVEL | Set logging verbosity (default: WARNING) |
+
+**Exit Codes**:
+- 0: Success
+- 1: Error (invalid arguments, file errors, simulation failures)
+- Note: argparse handles invalid argument errors with its own exit codes
+
+**Option Interactions**:
+- `--write-simulation-results-json` requires `--run-simulation`
+- `--run-simulation` requires a project file argument
+- `--write-historical-data-csv` requires a project file argument
+- When `--run-simulation` or `--write-historical-data-csv` is specified, the GUI is not launched
+
+### 10.5 Logging and Diagnostics
+
+Project Fluxx uses Python's standard `logging` module for diagnostic output.
+
+**Log Configuration**:
+- Output: stderr (to avoid mixing with data output on stdout)
+- Format: `%(asctime)s %(levelname)s [%(name)s] %(message)s`
+- Default level: WARNING (in GUI mode)
+- Configurable via `--log-level` CLI option
+
+**Log Levels**:
+
+| Level | Description | Use Cases |
+|-------|-------------|-----------|
+| DEBUG | Detailed internal state | Debugging simulation issues, Jira import problems |
+| INFO | Major milestones | Simulation start/complete, import progress |
+| WARNING | Recoverable issues | Missing optional data, fallback behavior used |
+| ERROR | Unrecoverable errors | File errors, validation failures |
+| CRITICAL | System failures | Unhandled exceptions |
+
+**Logged Subsystems**:
+
+**Simulation Engine** (`fluxx.simulation.engine`):
+- INFO: Simulation start (parameters), completion (timing, failure rate)
+- DEBUG: Sample start/complete, task start/complete, branch resolution
+
+**Scheduler** (`fluxx.simulation.scheduler`):
+- DEBUG: Eligible tasks, available workers, assignment decisions, deadlock detection
+
+**State Management** (`fluxx.simulation.state`):
+- DEBUG: Worker state changes (busy/idle), time advancement
+
+**Duration Sampling** (`fluxx.simulation.distributions`):
+- DEBUG: Rejection sampling iterations, exponential fallback
+
+**Jira Client** (`fluxx.jira.client`):
+- DEBUG: HTTP requests, rate limiting delays, retry attempts, pagination
+
+**Jira Import** (`fluxx.jira.importer`):
+- INFO: Import/sync start and completion with statistics
+- DEBUG: Issue processing, hierarchy building, history fetching
+
+**Jira Extraction** (`fluxx.jira.extraction`):
+- DEBUG: Worker extraction, task extraction, completion detection
+
+**Debugging Tips**:
+
+1. **Simulation Issues**: Run with `--log-level DEBUG` to see task scheduling decisions
+   ```bash
+   python -m fluxx project.fluxx --run-simulation 10 --log-level DEBUG 2>&1 | grep scheduler
+   ```
+
+2. **Jira Import Issues**: Enable DEBUG logging to trace data extraction
+   ```bash
+   python -m fluxx project.fluxx --log-level DEBUG 2>&1 | grep jira
+   ```
+
+3. **Export Results for Analysis**: Combine JSON export with logging
+   ```bash
+   python -m fluxx project.fluxx --run-simulation 1000 --write-simulation-results-json results.json --log-level INFO
+   ```
+
+**Security Considerations**:
+- Credentials and tokens are never logged
+- JQL queries are logged but not response bodies
+- File paths are logged for debugging
+
 ## 11. Jira Integration
 
 ### 11.1 Overview
