@@ -352,6 +352,14 @@ class StartedCompletion(BaseModel):
         default=0.0, description="Work-hours spent so far on this task"
     )
 
+    @field_validator("start_time")
+    @classmethod
+    def start_time_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that start_time has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("start_time must have timezone info")
+        return d
+
     @field_validator("hours_logged")
     @classmethod
     def hours_logged_non_negative(cls, v: float) -> float:
@@ -373,6 +381,14 @@ class DoneCompletion(BaseModel):
     hours_logged: float = Field(description="Total work-hours spent on this task")
     end_time: datetime = Field(description="When work finished (for Gantt charts)")
 
+    @field_validator("start_time")
+    @classmethod
+    def start_time_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that start_time has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("start_time must have timezone info")
+        return d
+
     @field_validator("hours_logged")
     @classmethod
     def hours_logged_positive(cls, v: float) -> float:
@@ -381,9 +397,18 @@ class DoneCompletion(BaseModel):
             raise ValueError("hours_logged must be positive for completed tasks")
         return v
 
+    @field_validator("end_time")
+    @classmethod
+    def end_time_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that end_time has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("end_time must have timezone info")
+        return d
+
     @model_validator(mode="after")
-    def end_after_start(self) -> "DoneCompletion":
-        """Validate that end_time is after start_time."""
+    def end_after_start_and_not_naive(self) -> "DoneCompletion":
+        """Validate that end_time is after start_time and that
+        end and start have timezones."""
         if self.end_time <= self.start_time:
             raise ValueError("end_time must be after start_time")
         return self
@@ -567,6 +592,14 @@ class DAGEvent(BaseModel):
         description="DAG version ID after this event"
     )
 
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that timestamp has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("timestamp must have timezone info")
+        return d
+
 
 class PersistentTask(BaseModel):
     """Persistent storage for task with all versions."""
@@ -631,6 +664,14 @@ class TaskEvent(BaseModel):
         description="Event-specific details",
     )
 
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that timestamp has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("timestamp must have timezone info")
+        return d
+
 
 class Sample(BaseModel):
     """Single simulation run sample."""
@@ -653,6 +694,14 @@ class Checkpoint(BaseModel):
     rng_state: list[Any] = Field(
         default_factory=list, description="RNG states for each parallel process"
     )
+
+    @field_validator("timestamp")
+    @classmethod
+    def timestamp_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that timestamp has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("timestamp must have timezone info")
+        return d
 
 
 class Simulation(BaseModel):
@@ -684,6 +733,14 @@ class Simulation(BaseModel):
         default=None, description="Last checkpoint for resuming"
     )
 
+    @field_validator("start_date")
+    @classmethod
+    def start_date_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that start_date has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("start_date must have timezone info")
+        return d
+
 
 # Project Container Models
 
@@ -694,6 +751,22 @@ class ProjectMetadata(BaseModel):
     name: str = Field(description="Project name")
     created: datetime = Field(description="When project was created")
     last_modified: datetime = Field(description="When project was last modified")
+
+    @field_validator("created")
+    @classmethod
+    def created_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that created has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("created must have timezone info")
+        return d
+
+    @field_validator("last_modified")
+    @classmethod
+    def last_modified_has_timezone(cls, d: datetime) -> datetime:
+        """Validate that last_modified has timezone info."""
+        if d.tzinfo is None:
+            raise ValueError("last_modified must have timezone info")
+        return d
 
 
 class Project(BaseModel):

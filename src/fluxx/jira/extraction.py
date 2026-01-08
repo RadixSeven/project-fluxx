@@ -78,7 +78,7 @@ def parse_jira_datetime(
     datetime_str: str,
     server_timezone: str = "UTC",
 ) -> datetime:
-    """Parse a Jira datetime string to a naive datetime object.
+    """Parse a Jira datetime string to a timezone-aware datetime object.
 
     Jira uses ISO 8601 format with various timezone representations:
     - 2024-01-15T10:00:00.000+0000 (positive offset)
@@ -92,9 +92,8 @@ def parse_jira_datetime(
             timezone info (e.g., 'America/New_York'). Defaults to 'UTC'.
 
     Returns:
-        Naive datetime for consistency with Fluxx models. The timezone-aware
-        datetime is first parsed, then the tzinfo is stripped. This preserves
-        the local time representation for display purposes.
+        Timezone-aware datetime. If the input string includes timezone info,
+        it is preserved. If not, the server_timezone is applied.
     """
     # Normalize the timezone format for datetime.fromisoformat()
     # Jira uses +0000 format, but fromisoformat needs +00:00
@@ -119,9 +118,7 @@ def parse_jira_datetime(
         tz = ZoneInfo(server_timezone)
         parsed = parsed.replace(tzinfo=tz)
 
-    # Convert to naive datetime by stripping timezone info
-    # This preserves the local time representation
-    return parsed.replace(tzinfo=None)
+    return parsed
 
 
 def _get_total_logged_seconds(worklogs: list[JiraWorklogEntry]) -> int:

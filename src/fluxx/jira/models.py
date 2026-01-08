@@ -151,6 +151,22 @@ class JiraDurationHistoryEntry(BaseModel):
         default=None, description="When the issue was resolved"
     )
 
+    @field_validator("created_datetime")
+    @classmethod
+    def created_datetime_has_timezone(cls, d: datetime | None) -> datetime | None:
+        """Validate that created_datetime has timezone info if present."""
+        if d is not None and d.tzinfo is None:
+            raise ValueError("created_datetime must have timezone info")
+        return d
+
+    @field_validator("resolved_datetime")
+    @classmethod
+    def resolved_datetime_has_timezone(cls, d: datetime | None) -> datetime | None:
+        """Validate that resolved_datetime has timezone info if present."""
+        if d is not None and d.tzinfo is None:
+            raise ValueError("resolved_datetime must have timezone info")
+        return d
+
 
 class JiraSyncMetadata(BaseModel):
     """Metadata about synchronization with a Jira server.

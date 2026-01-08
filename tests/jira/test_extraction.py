@@ -511,7 +511,7 @@ class TestParseDatetime:
         assert result.month == 1
         assert result.day == 15
         assert result.hour == 10
-        assert result.tzinfo is None  # Should be naive
+        assert result.tzinfo is not None  # Timezone is preserved
 
     def test_parse_datetime_with_negative_offset(self) -> None:
         """Parse datetime with negative timezone offset (-0500)."""
@@ -520,7 +520,7 @@ class TestParseDatetime:
         assert result.month == 1
         assert result.day == 15
         assert result.hour == 10  # Preserved as-is (not converted to UTC)
-        assert result.tzinfo is None
+        assert result.tzinfo is not None  # Timezone is preserved
 
     def test_parse_datetime_with_z_suffix(self) -> None:
         """Parse datetime with Z (UTC) suffix."""
@@ -538,11 +538,11 @@ class TestParseDatetime:
 
     def test_parse_datetime_without_timezone_uses_server_timezone(self) -> None:
         """Parse datetime without timezone uses server_timezone fallback."""
-        # When no timezone in string, server_timezone is applied then stripped
+        # When no timezone in string, server_timezone is applied
         result = parse_jira_datetime("2024-01-15T10:00:00", server_timezone="UTC")
         assert result.year == 2024
         assert result.hour == 10
-        assert result.tzinfo is None
+        assert result.tzinfo is not None  # Timezone is applied from server_timezone
 
     def test_parse_datetime_with_milliseconds_no_timezone(self) -> None:
         """Parse datetime with milliseconds but no timezone."""

@@ -285,6 +285,62 @@ class TestJiraDurationHistoryEntry:
         assert data["issue_key"]["project_key"] == "FHIR"
         assert data["issue_type"] == "Task"
 
+    def test_created_datetime_requires_timezone(self) -> None:
+        """Test that created_datetime rejects naive datetime."""
+        from datetime import UTC, datetime
+
+        import pytest
+
+        from fluxx.jira.models import JiraDurationHistoryEntry
+
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(
+            ValueError, match="created_datetime must have timezone info"
+        ):
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
+                issue_type="Bug",
+                created_datetime=naive_dt,
+            )
+
+    def test_resolved_datetime_requires_timezone(self) -> None:
+        """Test that resolved_datetime rejects naive datetime."""
+        from datetime import UTC, datetime
+
+        import pytest
+
+        from fluxx.jira.models import JiraDurationHistoryEntry
+
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(
+            ValueError, match="resolved_datetime must have timezone info"
+        ):
+            JiraDurationHistoryEntry(
+                server_url="https://jira.example.com",
+                issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
+                issue_type="Bug",
+                resolved_datetime=naive_dt,
+            )
+
+    def test_datetimes_accept_timezone_aware(self) -> None:
+        """Test that datetime fields accept timezone-aware datetimes."""
+        from datetime import UTC, datetime
+
+        from fluxx.jira.models import JiraDurationHistoryEntry
+
+        entry = JiraDurationHistoryEntry(
+            server_url="https://jira.example.com",
+            issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
+            issue_type="Bug",
+            created_datetime=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+            resolved_datetime=datetime(2024, 1, 2, 12, 0, tzinfo=UTC),
+        )
+        assert entry.created_datetime is not None
+        assert entry.created_datetime.tzinfo is not None
+        assert entry.resolved_datetime is not None
+        assert entry.resolved_datetime.tzinfo is not None
+
 
 class TestJiraSyncMetadata:
     """Tests for JiraSyncMetadata model."""

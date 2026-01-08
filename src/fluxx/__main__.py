@@ -206,7 +206,7 @@ def main() -> int:
         "--log-level",
         choices=sorted(LOG_LEVELS),
         default=DEFAULT_LOG_LEVEL,
-        type=str.upper,
+        type=lambda s: s.upper(),
         metavar="LEVEL",
         help=(
             f"Set logging verbosity (default: {DEFAULT_LOG_LEVEL}). "

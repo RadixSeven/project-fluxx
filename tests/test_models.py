@@ -952,3 +952,102 @@ class TestProjectJiraConfig:
         data = project.model_dump(mode="json")
         assert "jira_config" in data
         assert data["jira_config"]["server_url"] == "https://jira.example.com"
+
+
+class TestDatetimeTimezoneValidation:
+    """Tests for datetime timezone validation in models."""
+
+    def test_started_completion_start_time_requires_timezone(self) -> None:
+        """StartedCompletion.start_time rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="start_time must have timezone info"):
+            StartedCompletion(
+                assignee=WorkerId("w1"),
+                hours_logged=1.0,
+                start_time=naive_dt,
+            )
+
+    def test_done_completion_start_time_requires_timezone(self) -> None:
+        """DoneCompletion.start_time rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="start_time must have timezone info"):
+            DoneCompletion(
+                assignee=WorkerId("w1"),
+                hours_logged=1.0,
+                start_time=naive_dt,
+                end_time=datetime(2024, 1, 2, 12, 0, tzinfo=UTC),
+            )
+
+    def test_done_completion_end_time_requires_timezone(self) -> None:
+        """DoneCompletion.end_time rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 2, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="end_time must have timezone info"):
+            DoneCompletion(
+                assignee=WorkerId("w1"),
+                hours_logged=1.0,
+                start_time=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+                end_time=naive_dt,
+            )
+
+    def test_dag_event_timestamp_requires_timezone(self) -> None:
+        """DAGEvent.timestamp rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="timestamp must have timezone info"):
+            DAGEvent(
+                id=EventId("e1"),
+                event_type=EventType.NODE_CREATED,
+                timestamp=naive_dt,
+                resulting_dag_version=DAGVersionId("v1"),
+            )
+
+    def test_task_event_timestamp_requires_timezone(self) -> None:
+        """TaskEvent.timestamp rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="timestamp must have timezone info"):
+            TaskEvent(
+                node_id=TaskId("t1"),
+                event_type="start",
+                timestamp=naive_dt,
+            )
+
+    def test_checkpoint_timestamp_requires_timezone(self) -> None:
+        """Checkpoint.timestamp rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="timestamp must have timezone info"):
+            Checkpoint(
+                timestamp=naive_dt,
+                completed_samples=0,
+            )
+
+    def test_simulation_start_date_requires_timezone(self) -> None:
+        """Simulation.start_date rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="start_date must have timezone info"):
+            Simulation(
+                id=SimulationId("sim1"),
+                dag_version_id=DAGVersionId("v1"),
+                status=SimulationStatus.RUNNING,
+                start_date=naive_dt,
+                num_samples=100,
+                num_parallel_processes=1,
+            )
+
+    def test_project_metadata_created_requires_timezone(self) -> None:
+        """ProjectMetadata.created rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="created must have timezone info"):
+            ProjectMetadata(
+                name="Test",
+                created=naive_dt,
+                last_modified=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+            )
+
+    def test_project_metadata_last_modified_requires_timezone(self) -> None:
+        """ProjectMetadata.last_modified rejects naive datetime."""
+        naive_dt = datetime(2024, 1, 1, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+        with pytest.raises(ValueError, match="last_modified must have timezone info"):
+            ProjectMetadata(
+                name="Test",
+                created=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+                last_modified=naive_dt,
+            )
