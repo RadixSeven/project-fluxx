@@ -3,6 +3,7 @@
 import argparse
 import csv
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from fluxx.data.persistence import FileFormatError, VersionError, load_project
 from fluxx.gui.main_window import MainWindow
 from fluxx.logging_config import DEFAULT_LOG_LEVEL, LOG_LEVELS, configure_logging
+from fluxx.simulation.engine import SimulationEngine
 
 
 def write_historical_data_csv(project_path: Path, output_path: Path) -> int:
@@ -104,6 +106,73 @@ def write_historical_data_csv(project_path: Path, output_path: Path) -> int:
     return 0
 
 
+def run_simulation(project_path: Path, num_samples: int) -> int:
+    """Run a headless simulation on a project file.
+
+    Args:
+        project_path: Path to the .fluxx project file
+        num_samples: Number of simulation samples to run
+
+    Returns:
+        Exit code (0 for success, 1 for error)
+    """
+    try:
+        project = load_project(project_path)
+    except (FileFormatError, VersionError) as e:
+        print(f"Error loading project: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"Unexpected error loading project: {e}", file=sys.stderr)
+        return 1
+
+    # Get workers from project
+    workers = project.workers
+    if not workers:
+        print("Error: Project has no workers configured.", file=sys.stderr)
+        return 1
+
+    # Run simulation
+    engine = SimulationEngine(num_samples=num_samples, start_date=datetime.now(UTC))
+    samples = engine.run(project, workers)
+
+    # Calculate statistics
+    successful = [s for s in samples if not s.failed_tasks]
+    failed = [s for s in samples if s.failed_tasks]
+
+    # Print summary
+    print(f"Simulation complete: {len(samples)} samples")
+    print(
+        f"  Successful: {len(successful)} ({len(successful) / len(samples) * 100:.1f}%)"
+    )
+    print(f"  Failed: {len(failed)} ({len(failed) / len(samples) * 100:.1f}%)")
+
+    if successful:
+        # Calculate completion time statistics from successful samples
+        completion_times = []
+        for sample in successful:
+            complete_events = [e for e in sample.events if e.event_type == "complete"]
+            if complete_events:
+                last_complete = max(e.timestamp for e in complete_events)
+                # Calculate hours from start
+                start_time = min(
+                    e.timestamp for e in sample.events if e.event_type == "start"
+                )
+                hours = (last_complete - start_time).total_seconds() / 3600.0
+                completion_times.append(hours)
+
+        if completion_times:
+            completion_times.sort()
+            p50_idx = int(len(completion_times) * 0.5)
+            p90_idx = int(len(completion_times) * 0.9)
+            p95_idx = int(len(completion_times) * 0.95)
+
+            print(f"  P50 completion: {completion_times[p50_idx]:.1f} hours")
+            print(f"  P90 completion: {completion_times[p90_idx]:.1f} hours")
+            print(f"  P95 completion: {completion_times[p95_idx]:.1f} hours")
+
+    return 0
+
+
 def main() -> int:
     """Run the Project Fluxx application.
 
@@ -130,10 +199,32 @@ def main() -> int:
             f"Choices: {', '.join(sorted(LOG_LEVELS))}"
         ),
     )
+    parser.add_argument(
+        "--run-simulation",
+        type=int,
+        metavar="N",
+        help="Run N simulation samples headlessly and print summary statistics",
+    )
     args = parser.parse_args()
 
     # Configure logging early
     configure_logging(args.log_level)
+
+    # Handle simulation mode
+    if args.run_simulation is not None:
+        if not args.file:
+            print(
+                "Error: --run-simulation requires a .fluxx file argument",
+                file=sys.stderr,
+            )
+            return 1
+        if args.run_simulation < 1:
+            print(
+                "Error: --run-simulation requires a positive integer",
+                file=sys.stderr,
+            )
+            return 1
+        return run_simulation(Path(args.file), args.run_simulation)
 
     # Handle CSV export mode
     if args.write_historical_data_csv:

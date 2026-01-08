@@ -43,7 +43,10 @@ def test_main_no_args(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=None, write_historical_data_csv=None, log_level="INFO"
+            file=None,
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         result = main()
 
@@ -63,7 +66,10 @@ def test_main_new_file_no_suffix(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(new_file_base), write_historical_data_csv=None, log_level="INFO"
+            file=str(new_file_base),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         main()
 
@@ -87,7 +93,10 @@ def test_main_existing_file(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(existing_file), write_historical_data_csv=None, log_level="INFO"
+            file=str(existing_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         main()
 
@@ -112,7 +121,10 @@ def test_main_bad_format_file(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(bad_file), write_historical_data_csv=None, log_level="INFO"
+            file=str(bad_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         main()
 
@@ -134,7 +146,10 @@ def test_main_returns_app_exit_code(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=None, write_historical_data_csv=None, log_level="INFO"
+            file=None,
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         result = main()
 
@@ -155,7 +170,10 @@ def test_main_create_project_error(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(new_file), write_historical_data_csv=None, log_level="INFO"
+            file=str(new_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         result = main()
 
@@ -184,7 +202,10 @@ def test_main_open_project_unexpected_error(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(existing_file), write_historical_data_csv=None, log_level="INFO"
+            file=str(existing_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         result = main()
 
@@ -286,7 +307,10 @@ def test_write_historical_data_csv_no_file_arg(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=None, write_historical_data_csv=str(output_file), log_level="INFO"
+            file=None,
+            write_historical_data_csv=str(output_file),
+            log_level="INFO",
+            run_simulation=None,
         )
         result = main()
 
@@ -406,6 +430,7 @@ def test_main_with_csv_export(
             file=str(project_file),
             write_historical_data_csv=str(output_file),
             log_level="INFO",
+            run_simulation=None,
         )
         result = main()
 
@@ -466,8 +491,241 @@ def test_main_log_level_default(
         patch("fluxx.__main__.configure_logging") as mock_configure,
     ):
         mock_parse.return_value = MagicMock(
-            file=None, write_historical_data_csv=None, log_level="INFO"
+            file=None,
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=None,
         )
         main()
 
     mock_configure.assert_called_once_with("INFO")
+
+
+# Tests for --run-simulation
+
+
+def test_run_simulation_requires_file(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test that --run-simulation requires a file argument."""
+    with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
+        mock_parse.return_value = MagicMock(
+            file=None,
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=10,
+        )
+        result = main()
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "requires a .fluxx file argument" in captured.err
+
+
+def test_run_simulation_requires_positive_integer(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test that --run-simulation requires a positive integer."""
+    project_file = tmp_path / "project.fluxx"
+
+    with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=0,
+        )
+        result = main()
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "requires a positive integer" in captured.err
+
+
+def test_run_simulation_file_not_found(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --run-simulation with non-existent file."""
+    project_file = tmp_path / "nonexistent.fluxx"
+
+    with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=5,
+        )
+        result = main()
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "error" in captured.err.lower()
+
+
+def test_run_simulation_no_workers(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --run-simulation with project that has no workers."""
+
+    from fluxx.data.models import Project
+
+    project_file = tmp_path / "project.fluxx"
+
+    # Create a project with no workers
+    mock_project = MagicMock(spec=Project)
+    mock_project.workers = []
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.load_project", return_value=mock_project),
+    ):
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=5,
+        )
+        result = main()
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "no workers configured" in captured.err
+
+
+def test_run_simulation_success(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --run-simulation success."""
+    from fluxx.data.models import Worker, WorkerId
+
+    project_file = tmp_path / "project.fluxx"
+
+    # Create a mock project with workers
+    mock_project = MagicMock()
+    mock_project.workers = [
+        Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)
+    ]
+
+    # Create mock samples (successful)
+    mock_samples = [MagicMock(failed_tasks=[], events=[]) for _ in range(5)]
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.load_project", return_value=mock_project),
+        patch("fluxx.__main__.SimulationEngine") as mock_engine_class,
+    ):
+        mock_engine = MagicMock()
+        mock_engine.run.return_value = mock_samples
+        mock_engine_class.return_value = mock_engine
+
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=5,
+        )
+        result = main()
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "Simulation complete: 5 samples" in captured.out
+    assert "Successful: 5 (100.0%)" in captured.out
+
+
+def test_run_simulation_with_events_and_percentiles(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --run-simulation shows percentile statistics when events are present."""
+    from datetime import UTC, datetime, timedelta
+
+    from fluxx.data.models import Worker, WorkerId
+
+    project_file = tmp_path / "project.fluxx"
+
+    # Create a mock project with workers
+    mock_project = MagicMock()
+    mock_project.workers = [
+        Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0)
+    ]
+
+    # Create mock samples with events that have start and complete timestamps
+    base_time = datetime(2025, 1, 1, 9, 0, tzinfo=UTC)
+    mock_samples = []
+    for i in range(10):
+        start_event = MagicMock()
+        start_event.event_type = "start"
+        start_event.timestamp = base_time
+
+        complete_event = MagicMock()
+        complete_event.event_type = "complete"
+        # Each sample takes i+1 hours
+        complete_event.timestamp = base_time + timedelta(hours=i + 1)
+
+        sample = MagicMock()
+        sample.failed_tasks = []
+        sample.events = [start_event, complete_event]
+        mock_samples.append(sample)
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.load_project", return_value=mock_project),
+        patch("fluxx.__main__.SimulationEngine") as mock_engine_class,
+    ):
+        mock_engine = MagicMock()
+        mock_engine.run.return_value = mock_samples
+        mock_engine_class.return_value = mock_engine
+
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=10,
+        )
+        result = main()
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "Simulation complete: 10 samples" in captured.out
+    assert "Successful: 10 (100.0%)" in captured.out
+    assert "P50 completion" in captured.out
+    assert "P90 completion" in captured.out
+    assert "P95 completion" in captured.out
+
+
+def test_run_simulation_file_format_error(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock],
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Test --run-simulation with FileFormatError."""
+    project_file = tmp_path / "bad.fluxx"
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch(
+            "fluxx.__main__.load_project",
+            side_effect=FileFormatError("Bad format"),
+        ),
+    ):
+        mock_parse.return_value = MagicMock(
+            file=str(project_file),
+            write_historical_data_csv=None,
+            log_level="INFO",
+            run_simulation=5,
+        )
+        result = main()
+
+    assert result == 1
+    captured = capsys.readouterr()
+    assert "Error loading project" in captured.err
