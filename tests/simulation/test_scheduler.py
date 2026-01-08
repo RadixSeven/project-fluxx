@@ -29,6 +29,7 @@ from fluxx.data.models import (
     Worker,
     WorkerId,
 )
+from fluxx.jira.models import JiraIssueKey, JiraReference
 from fluxx.simulation.scheduler import (
     ResolveBranchAction,
     StartTaskAction,
@@ -36,8 +37,10 @@ from fluxx.simulation.scheduler import (
     are_all_workers_idle,
     are_tasks_remaining,
     detect_deadlock,
+    format_task_for_log,
     get_eligible_tasks,
     get_eligible_workers,
+    get_incomplete_tasks,
     get_unresolved_branches,
     get_worker_in_progress_task_count,
     has_existing_in_progress_tasks,
@@ -2130,3 +2133,236 @@ def test_get_eligible_workers_excludes_worker_with_in_progress_tasks(
     # Only w2 should be eligible (w1 has in-progress task)
     assert WorkerId("w1") not in eligible
     assert WorkerId("w2") in eligible
+
+
+# Tests for format_task_for_log
+
+
+def test_format_task_for_log_without_jira_reference() -> None:
+    """Test formatting a task without Jira reference."""
+    task = Task(
+        id=TaskId("task_123"),
+        title="Test Task",
+        description="A task without Jira reference",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    result = format_task_for_log(task)
+    assert result == "task_123"
+
+
+def test_format_task_for_log_with_jira_reference() -> None:
+    """Test formatting a task with Jira reference."""
+    task = Task(
+        id=TaskId("task_456"),
+        title="Test Task",
+        description="A task with Jira reference",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        jira_reference=JiraReference(
+            server_url="https://jira.example.com",
+            issue_key=JiraIssueKey(project_key="PROJ", issue_number=123),
+        ),
+    )
+
+    result = format_task_for_log(task)
+    assert result == "task_456 (PROJ-123)"
+
+
+# Tests for get_incomplete_tasks
+
+
+def test_get_incomplete_tasks_excludes_completed(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that get_incomplete_tasks excludes completed tasks."""
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Incomplete task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="Another incomplete task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task2},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Initially both tasks are incomplete
+    incomplete = get_incomplete_tasks(state)
+    assert len(incomplete) == 2
+    task_ids = [t.id for t in incomplete]
+    assert TaskId("t1") in task_ids
+    assert TaskId("t2") in task_ids
+
+    # Mark one task as completed - first start it, then complete it
+    estimated_completion = datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC)
+    state.start_task(TaskId("t1"), WorkerId("w1"), start_date, estimated_completion)
+    state.complete_task(TaskId("t1"), start_date)
+
+    # Now only one task should be incomplete
+    incomplete = get_incomplete_tasks(state)
+    assert len(incomplete) == 1
+    assert incomplete[0].id == TaskId("t2")
+
+
+def test_get_incomplete_tasks_excludes_parent_tasks(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that get_incomplete_tasks excludes parent tasks (with children)."""
+    child_task = Task(
+        id=TaskId("child"),
+        title="Child Task",
+        description="A child task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        parent_id=TaskId("parent"),
+    )
+
+    parent_task = Task(
+        id=TaskId("parent"),
+        title="Parent Task",
+        description="A parent task",
+        duration_distribution=None,  # Parent tasks don't need durations
+        children=[TaskId("child")],
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_child = PersistentTask(
+        id=PersistentObjectId("pt_child"),
+        versions={version_id: child_task},
+    )
+    persistent_parent = PersistentTask(
+        id=PersistentObjectId("pt_parent"),
+        versions={version_id: parent_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("child"): PersistentObjectId("pt_child"),
+            TaskId("parent"): PersistentObjectId("pt_parent"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt_child"): persistent_child,
+            PersistentObjectId("pt_parent"): persistent_parent,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Only the child task should be in incomplete (parent is excluded)
+    incomplete = get_incomplete_tasks(state)
+    assert len(incomplete) == 1
+    assert incomplete[0].id == TaskId("child")
+
+
+def test_get_incomplete_tasks_handles_missing_version(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that get_incomplete_tasks handles tasks without current version."""
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Task with current version",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    version_id = DAGVersionId("v1")
+    old_version_id = DAGVersionId("v0")
+
+    persistent_task_current = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+
+    # This task only exists in an old version
+    old_task = Task(
+        id=TaskId("t2"),
+        title="Old Task",
+        description="Task from old version",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+    persistent_task_old = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={old_version_id: old_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task_current,
+            PersistentObjectId("pt2"): persistent_task_old,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Only task1 should be returned (task2 has no current version)
+    incomplete = get_incomplete_tasks(state)
+    assert len(incomplete) == 1
+    assert incomplete[0].id == TaskId("t1")

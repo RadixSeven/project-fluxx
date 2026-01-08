@@ -724,6 +724,54 @@ def are_tasks_remaining(state: SimulationState) -> bool:
     return not state.all_tasks_completed()
 
 
+def get_incomplete_tasks(state: SimulationState) -> list[Task]:
+    """Get all tasks that are not yet completed.
+
+    Args:
+        state: Current simulation state
+
+    Returns:
+        List of incomplete tasks
+    """
+    incomplete: list[Task] = []
+
+    for _node_id, persistent_id in state.project.dag.node_map.items():
+        if persistent_id not in state.project.persistent_tasks:
+            continue
+
+        persistent_task = state.project.persistent_tasks[persistent_id]
+        current_version_id = state.project.dag.current_version_id
+
+        if current_version_id not in persistent_task.versions:
+            continue
+
+        task = persistent_task.versions[current_version_id]
+
+        # Skip parent tasks (they complete implicitly)
+        if len(task.children) > 0:
+            continue
+
+        # Include if not completed
+        if not state.is_task_completed(task.id):
+            incomplete.append(task)
+
+    return incomplete
+
+
+def format_task_for_log(task: Task) -> str:
+    """Format a task for logging, including Jira ID if available.
+
+    Args:
+        task: The task to format
+
+    Returns:
+        String representation like "task_id (JIRA-123)" or just "task_id"
+    """
+    if task.jira_reference is not None:
+        return f"{task.id} ({task.jira_reference.issue_key})"
+    return str(task.id)
+
+
 def detect_deadlock(state: SimulationState) -> bool:
     """Detect if simulation is in a deadlock state.
 
@@ -754,8 +802,13 @@ def detect_deadlock(state: SimulationState) -> bool:
     is_deadlocked = len(eligible_tasks) == 0 and len(eligible_branches) == 0
 
     if is_deadlocked:
+        incomplete_tasks = get_incomplete_tasks(state)
+        task_list = [format_task_for_log(t) for t in incomplete_tasks]
         logger.debug(
-            "Deadlock detected: workers idle, tasks remain, no eligible actions"
+            "Deadlock detected: workers idle, tasks remain, no eligible actions. "
+            "Incomplete tasks (%d): %s",
+            len(task_list),
+            ", ".join(task_list),
         )
 
     return is_deadlocked
