@@ -42,7 +42,9 @@ def test_main_no_args(
     monkeypatch.setattr(sys, "argv", ["fluxx"])
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
-        mock_parse.return_value = MagicMock(file=None, write_historical_data_csv=None)
+        mock_parse.return_value = MagicMock(
+            file=None, write_historical_data_csv=None, log_level="INFO"
+        )
         result = main()
 
     assert result == 0
@@ -61,7 +63,7 @@ def test_main_new_file_no_suffix(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(new_file_base), write_historical_data_csv=None
+            file=str(new_file_base), write_historical_data_csv=None, log_level="INFO"
         )
         main()
 
@@ -85,7 +87,7 @@ def test_main_existing_file(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(existing_file), write_historical_data_csv=None
+            file=str(existing_file), write_historical_data_csv=None, log_level="INFO"
         )
         main()
 
@@ -110,7 +112,7 @@ def test_main_bad_format_file(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(bad_file), write_historical_data_csv=None
+            file=str(bad_file), write_historical_data_csv=None, log_level="INFO"
         )
         main()
 
@@ -131,7 +133,9 @@ def test_main_returns_app_exit_code(
     monkeypatch.setattr(sys, "argv", ["fluxx"])
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
-        mock_parse.return_value = MagicMock(file=None, write_historical_data_csv=None)
+        mock_parse.return_value = MagicMock(
+            file=None, write_historical_data_csv=None, log_level="INFO"
+        )
         result = main()
 
     assert result == 42
@@ -151,7 +155,7 @@ def test_main_create_project_error(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(new_file), write_historical_data_csv=None
+            file=str(new_file), write_historical_data_csv=None, log_level="INFO"
         )
         result = main()
 
@@ -180,7 +184,7 @@ def test_main_open_project_unexpected_error(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=str(existing_file), write_historical_data_csv=None
+            file=str(existing_file), write_historical_data_csv=None, log_level="INFO"
         )
         result = main()
 
@@ -282,7 +286,7 @@ def test_write_historical_data_csv_no_file_arg(
 
     with patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse:
         mock_parse.return_value = MagicMock(
-            file=None, write_historical_data_csv=str(output_file)
+            file=None, write_historical_data_csv=str(output_file), log_level="INFO"
         )
         result = main()
 
@@ -399,9 +403,71 @@ def test_main_with_csv_export(
         patch("fluxx.__main__.load_project", return_value=mock_project),
     ):
         mock_parse.return_value = MagicMock(
-            file=str(project_file), write_historical_data_csv=str(output_file)
+            file=str(project_file),
+            write_historical_data_csv=str(output_file),
+            log_level="INFO",
         )
         result = main()
 
     assert result == 0
     assert output_file.exists()
+
+
+# Tests for --log-level
+
+
+def test_main_log_level_debug(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test main() with --log-level DEBUG."""
+    mock_app, mock_window, mock_msgbox = mock_qt
+    monkeypatch.setattr(sys, "argv", ["fluxx"])
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.configure_logging") as mock_configure,
+    ):
+        mock_parse.return_value = MagicMock(
+            file=None, write_historical_data_csv=None, log_level="DEBUG"
+        )
+        main()
+
+    mock_configure.assert_called_once_with("DEBUG")
+
+
+def test_main_log_level_warning(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test main() with --log-level WARNING."""
+    mock_app, mock_window, mock_msgbox = mock_qt
+    monkeypatch.setattr(sys, "argv", ["fluxx"])
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.configure_logging") as mock_configure,
+    ):
+        mock_parse.return_value = MagicMock(
+            file=None, write_historical_data_csv=None, log_level="WARNING"
+        )
+        main()
+
+    mock_configure.assert_called_once_with("WARNING")
+
+
+def test_main_log_level_default(
+    mock_qt: tuple[MagicMock, MagicMock, MagicMock], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test main() uses default log level INFO."""
+    mock_app, mock_window, mock_msgbox = mock_qt
+    monkeypatch.setattr(sys, "argv", ["fluxx"])
+
+    with (
+        patch("fluxx.__main__.argparse.ArgumentParser.parse_args") as mock_parse,
+        patch("fluxx.__main__.configure_logging") as mock_configure,
+    ):
+        mock_parse.return_value = MagicMock(
+            file=None, write_historical_data_csv=None, log_level="INFO"
+        )
+        main()
+
+    mock_configure.assert_called_once_with("INFO")

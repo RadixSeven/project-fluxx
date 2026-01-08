@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from fluxx.data.persistence import FileFormatError, VersionError, load_project
 from fluxx.gui.main_window import MainWindow
+from fluxx.logging_config import DEFAULT_LOG_LEVEL, LOG_LEVELS, configure_logging
 
 
 def write_historical_data_csv(project_path: Path, output_path: Path) -> int:
@@ -118,7 +119,21 @@ def main() -> int:
         metavar="OUTPUT",
         help="Export Jira historical data to CSV file and exit",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=sorted(LOG_LEVELS),
+        default=DEFAULT_LOG_LEVEL,
+        type=str.upper,
+        metavar="LEVEL",
+        help=(
+            f"Set logging verbosity (default: {DEFAULT_LOG_LEVEL}). "
+            f"Choices: {', '.join(sorted(LOG_LEVELS))}"
+        ),
+    )
     args = parser.parse_args()
+
+    # Configure logging early
+    configure_logging(args.log_level)
 
     # Handle CSV export mode
     if args.write_historical_data_csv:
