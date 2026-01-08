@@ -2366,3 +2366,254 @@ def test_get_incomplete_tasks_handles_missing_version(
     incomplete = get_incomplete_tasks(state)
     assert len(incomplete) == 1
     assert incomplete[0].id == TaskId("t1")
+
+
+# Tests for is_task_already_assigned_to_worker
+
+
+def test_is_task_already_assigned_to_worker_true() -> None:
+    """Test detecting when a task is already assigned to a specific worker."""
+    from fluxx.simulation.scheduler import is_task_already_assigned_to_worker
+
+    task = Task(
+        id=TaskId("t1"),
+        title="In Progress Task",
+        description="Task already started by worker",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=datetime(2024, 1, 1, tzinfo=UTC),
+            hours_logged=4.0,
+        ),
+    )
+
+    # Task is assigned to w1
+    assert is_task_already_assigned_to_worker(task, WorkerId("w1")) is True
+
+    # Task is not assigned to w2
+    assert is_task_already_assigned_to_worker(task, WorkerId("w2")) is False
+
+
+def test_is_task_already_assigned_to_worker_not_started() -> None:
+    """Test that unstarted tasks are not assigned to any worker."""
+    from fluxx.simulation.scheduler import is_task_already_assigned_to_worker
+
+    task = Task(
+        id=TaskId("t1"),
+        title="New Task",
+        description="Task not yet started",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        # No completion (defaults to NotStartedCompletion)
+    )
+
+    assert is_task_already_assigned_to_worker(task, WorkerId("w1")) is False
+    assert is_task_already_assigned_to_worker(task, WorkerId("w2")) is False
+
+
+# Tests for the bug fix: workers should be able to work on their own in-progress tasks
+
+
+def test_worker_can_work_on_own_in_progress_task(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that a worker with in-progress tasks CAN work on their own assigned tasks.
+
+    This is a regression test for a bug where workers with existing in-progress tasks
+    (from Jira) were blocked from ALL tasks, including tasks already assigned to them.
+    The fix allows workers to continue working on tasks they're already assigned to.
+    """
+    # Create an in-progress task assigned to w1
+    in_progress_task = Task(
+        id=TaskId("t1"),
+        title="In Progress Task",
+        description="Already started by w1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: in_progress_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Worker 1 has an in-progress task (from Jira)
+    assert has_existing_in_progress_tasks(WorkerId("w1"), state) is True
+
+    # Get eligible workers for the in-progress task itself
+    eligible = get_eligible_workers(in_progress_task, state)
+
+    # CRITICAL: Worker 1 should be eligible for their own in-progress task
+    # This is the bug fix - previously w1 would be excluded
+    assert WorkerId("w1") in eligible
+
+    # Worker 2 should NOT be eligible (task is assigned to w1, and w2 doesn't have
+    # the in-progress exception)
+    # Actually w2 doesn't have in-progress tasks, so they could work on it
+    # The point is w1 IS eligible for their own task
+    assert WorkerId("w2") in eligible  # w2 has no in-progress tasks
+
+
+def test_worker_blocked_from_new_tasks_when_has_in_progress(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test that workers with in-progress tasks are still blocked from NEW tasks.
+
+    This ensures the fix doesn't accidentally allow workers to take on new work
+    when they have existing in-progress tasks - they should only be allowed to
+    continue their own assigned tasks.
+    """
+    # Create an in-progress task assigned to w1
+    in_progress_task = Task(
+        id=TaskId("t1"),
+        title="In Progress Task",
+        description="Already started by w1",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    # Create a new task not assigned to anyone
+    new_task = Task(
+        id=TaskId("t2"),
+        title="New Task",
+        description="Not yet started",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        # No completion (NotStartedCompletion)
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: in_progress_task},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: new_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Worker 1 has an in-progress task
+    assert has_existing_in_progress_tasks(WorkerId("w1"), state) is True
+
+    # Get eligible workers for the NEW task (not assigned to w1)
+    eligible = get_eligible_workers(new_task, state)
+
+    # Worker 1 should NOT be eligible for the new task (they have in-progress work)
+    assert WorkerId("w1") not in eligible
+
+    # Worker 2 should be eligible (no in-progress tasks)
+    assert WorkerId("w2") in eligible
+
+
+def test_deadlock_avoided_when_worker_can_continue_own_tasks(
+    base_workers: list[Worker], start_date: datetime
+) -> None:
+    """Test deadlock avoided when workers can continue their own in-progress tasks.
+
+    This is the main scenario that was causing deadlocks: all remaining tasks are
+    in-progress and assigned to a single worker, but that worker was blocked because
+    they had in-progress tasks. With the fix, the worker should be able to continue
+    their own tasks, avoiding deadlock.
+    """
+    # Create in-progress task assigned to w1 (simulates Jira import)
+    in_progress_task = Task(
+        id=TaskId("t1"),
+        title="In Progress Task",
+        description="Already started by w1 from Jira",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            start_time=start_date,
+            hours_logged=4.0,
+        ),
+    )
+
+    version_id = DAGVersionId("v1")
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: in_progress_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # The in-progress task should be eligible to start (because w1 can work on it)
+    assert is_task_eligible(in_progress_task, state) is True
+
+    # Therefore, no deadlock should be detected
+    assert detect_deadlock(state) is False
+
+    # Get eligible tasks - should include the in-progress task
+    eligible = get_eligible_tasks(state)
+    assert len(eligible) == 1
+    assert eligible[0].id == TaskId("t1")

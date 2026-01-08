@@ -453,6 +453,22 @@ def has_existing_in_progress_tasks(worker_id: WorkerId, state: SimulationState) 
     return get_worker_in_progress_task_count(worker_id, state) > 0
 
 
+def is_task_already_assigned_to_worker(task: Task, worker_id: WorkerId) -> bool:
+    """Check if a task is already assigned to a specific worker (in-progress from Jira).
+
+    Args:
+        task: The task to check
+        worker_id: The worker ID to check
+
+    Returns:
+        True if the task has StartedCompletion with this worker as assignee
+    """
+    return (
+        isinstance(task.completion, StartedCompletion)
+        and task.completion.assignee == worker_id
+    )
+
+
 def get_eligible_workers(task: Task, state: SimulationState) -> list[WorkerId]:
     """Get list of workers eligible to work on a task.
 
@@ -460,7 +476,8 @@ def get_eligible_workers(task: Task, state: SimulationState) -> list[WorkerId]:
     1. They are not currently assigned to a task (available)
     2. They pass the allowed_workers whitelist (if it exists)
     3. They are not excluded due to excluded_worker_tasks constraints
-    4. They don't have existing in-progress tasks from project data
+    4. They don't have existing in-progress tasks from project data, UNLESS
+       this specific task is already assigned to them (in-progress from Jira)
 
     Args:
         task: The task to find workers for
@@ -472,21 +489,66 @@ def get_eligible_workers(task: Task, state: SimulationState) -> list[WorkerId]:
     eligible: list[WorkerId] = []
 
     available_workers = state.get_available_workers()
+    task_jira_key = (
+        task.jira_reference.issue_key if task.jira_reference is not None else None
+    )
+
+    logger.debug(
+        "Checking worker eligibility for task %s (%s): %d available workers",
+        task.id,
+        task_jira_key or "no Jira",
+        len(available_workers),
+    )
 
     for worker_id in available_workers:
         # Check whitelist
         if not is_worker_allowed_for_task(task, worker_id):
+            logger.debug(
+                "  Worker %s rejected: not in allowed_workers list for task %s",
+                worker_id,
+                task.id,
+            )
             continue
 
         # Check exclusions
         if is_worker_excluded_for_task(task, worker_id, state):
+            logger.debug(
+                "  Worker %s rejected: excluded due to excluded_worker_tasks for %s",
+                worker_id,
+                task.id,
+            )
             continue
 
         # Check for existing in-progress tasks from project data
+        # EXCEPTION: Allow workers to continue their own in-progress tasks
         if has_existing_in_progress_tasks(worker_id, state):
-            continue
+            if is_task_already_assigned_to_worker(task, worker_id):
+                logger.debug(
+                    "  Worker %s has in-progress tasks but is allowed for %s "
+                    "(already assigned to this task)",
+                    worker_id,
+                    task.id,
+                )
+            else:
+                in_progress_count = get_worker_in_progress_task_count(worker_id, state)
+                logger.debug(
+                    "  Worker %s rejected: has %d existing in-progress task(s) "
+                    "and is not assigned to task %s",
+                    worker_id,
+                    in_progress_count,
+                    task.id,
+                )
+                continue
 
         eligible.append(worker_id)
+
+    logger.debug(
+        "Task %s (%s): %d eligible workers: %s",
+        task.id,
+        task_jira_key or "no Jira",
+        len(eligible),
+        [str(w) for w in eligible],
+    )
 
     return eligible
 
