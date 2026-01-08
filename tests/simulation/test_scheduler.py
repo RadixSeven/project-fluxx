@@ -645,6 +645,61 @@ def test_is_task_eligible_no_workers(
     assert not is_task_eligible(task1, state)
 
 
+def test_is_task_eligible_started_completion_assignee_not_in_simulation(
+    start_date: datetime,
+) -> None:
+    """Test StartedCompletion task not eligible if assignee not in simulation."""
+    version_id = DAGVersionId("v1")
+
+    # Task with StartedCompletion assigned to worker not in simulation
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Started task",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w_unknown"),  # Worker not in simulation
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+    )
+
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    # Use only w1 and w2 in simulation - w_unknown is NOT included
+    workers = [
+        Worker(id=WorkerId("w1"), name="Worker 1", hours_per_workday=8.0),
+        Worker(id=WorkerId("w2"), name="Worker 2", hours_per_workday=8.0),
+    ]
+    state = SimulationState(project, start_date, workers)
+
+    task_from_state = state.get_task(TaskId("t1"))
+
+    # Task should not be eligible because assignee is not in simulation
+    assert not is_task_eligible(task_from_state, state)
+
+
 def test_get_eligible_tasks(
     simple_project: Project, base_workers: list[Worker], start_date: datetime
 ) -> None:

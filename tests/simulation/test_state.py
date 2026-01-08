@@ -585,3 +585,360 @@ def test_get_jira_sampling_context(start_date: datetime) -> None:
     # Get context second time - should return cached instance
     context2 = state.get_jira_sampling_context()
     assert context1 is context2  # Same object (cached)
+
+
+def test_add_pending_started_task(
+    simple_project: Project, base_workers: list[Worker]
+) -> None:
+    """Test adding pending started tasks for a worker."""
+    now = datetime.now(UTC)
+    state = SimulationState(simple_project, now, base_workers)
+    worker_id = WorkerId("w1")
+
+    # Initially no pending tasks
+    assert not state.has_pending_started_tasks(worker_id)
+    assert state.get_pending_started_task_count(worker_id) == 0
+
+    # Add a pending task
+    state.add_pending_started_task(worker_id, TaskId("t1"), 10.0)
+    assert state.has_pending_started_tasks(worker_id)
+    assert state.get_pending_started_task_count(worker_id) == 1
+
+    # Add another pending task
+    state.add_pending_started_task(worker_id, TaskId("t2"), 20.0)
+    assert state.get_pending_started_task_count(worker_id) == 2
+
+
+def test_get_next_pending_started_task(
+    simple_project: Project, base_workers: list[Worker]
+) -> None:
+    """Test getting the next pending started task."""
+    now = datetime.now(UTC)
+    state = SimulationState(simple_project, now, base_workers)
+    worker_id = WorkerId("w1")
+
+    # No pending tasks
+    assert state.get_next_pending_started_task(worker_id) is None
+
+    # Add tasks
+    state.add_pending_started_task(worker_id, TaskId("t1"), 10.0)
+    state.add_pending_started_task(worker_id, TaskId("t2"), 20.0)
+
+    # Get tasks in FIFO order
+    result = state.get_next_pending_started_task(worker_id)
+    assert result is not None
+    task_id, remaining = result
+    assert task_id == TaskId("t1")
+    assert remaining == 10.0
+
+    result = state.get_next_pending_started_task(worker_id)
+    assert result is not None
+    task_id, remaining = result
+    assert task_id == TaskId("t2")
+    assert remaining == 20.0
+
+    # No more tasks
+    assert state.get_next_pending_started_task(worker_id) is None
+    assert not state.has_pending_started_tasks(worker_id)
+
+
+def test_pending_started_tasks_per_worker(
+    simple_project: Project, base_workers: list[Worker]
+) -> None:
+    """Test that pending tasks are tracked per worker."""
+    now = datetime.now(UTC)
+    state = SimulationState(simple_project, now, base_workers)
+    worker1 = WorkerId("w1")
+    worker2 = WorkerId("w2")
+
+    # Add tasks for different workers
+    state.add_pending_started_task(worker1, TaskId("t1"), 10.0)
+    state.add_pending_started_task(worker2, TaskId("t2"), 20.0)
+    state.add_pending_started_task(worker1, TaskId("t3"), 30.0)
+
+    # Check counts per worker
+    assert state.get_pending_started_task_count(worker1) == 2
+    assert state.get_pending_started_task_count(worker2) == 1
+
+    # Get task for worker1 doesn't affect worker2
+    result = state.get_next_pending_started_task(worker1)
+    assert result is not None
+    assert result[0] == TaskId("t1")
+    assert state.get_pending_started_task_count(worker1) == 1
+    assert state.get_pending_started_task_count(worker2) == 1
+
+
+def test_initialize_completed_tasks_from_done_completion(
+    base_workers: list[Worker],
+) -> None:
+    """Test that DoneCompletion tasks are pre-initialized as completed."""
+    from fluxx.data.models import DoneCompletion
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+
+    # Task with DoneCompletion
+    done_task = Task(
+        id=TaskId("t_done"),
+        title="Done Task",
+        description="Already completed",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=DoneCompletion(
+            assignee=WorkerId("w1"),
+            start_time=datetime(2023, 12, 1, tzinfo=UTC),
+            end_time=datetime(2023, 12, 5, tzinfo=UTC),
+            hours_logged=32.0,
+        ),
+    )
+
+    # Normal pending task
+    pending_task = Task(
+        id=TaskId("t_pending"),
+        title="Pending Task",
+        description="Not started",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    persistent_done = PersistentTask(
+        id=PersistentObjectId("pt_done"),
+        versions={version_id: done_task},
+    )
+    persistent_pending = PersistentTask(
+        id=PersistentObjectId("pt_pending"),
+        versions={version_id: pending_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t_done"): PersistentObjectId("pt_done"),
+            TaskId("t_pending"): PersistentObjectId("pt_pending"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt_done"): persistent_done,
+            PersistentObjectId("pt_pending"): persistent_pending,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+
+    # Done task should be pre-initialized as completed
+    assert state.is_task_completed(TaskId("t_done"))
+    # Pending task should not be completed
+    assert not state.is_task_completed(TaskId("t_pending"))
+
+
+def test_get_started_completion_tasks_assignee_not_in_workers(
+    base_workers: list[Worker],
+) -> None:
+    """Test get_started_completion_tasks_by_worker skips tasks with unknown assignee."""
+    from fluxx.data.models import StartedCompletion
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+
+    # Task assigned to a worker not in the simulation
+    task = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Assigned to unknown worker",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("unknown_worker"),  # Not in base_workers
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+    )
+
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    tasks_by_worker = state.get_started_completion_tasks_by_worker()
+
+    # Task should be skipped because assignee is not in workers
+    assert WorkerId("unknown_worker") not in tasks_by_worker
+    assert len(tasks_by_worker) == 0
+
+
+def test_get_started_completion_tasks_unsatisfied_dependencies(
+    base_workers: list[Worker],
+) -> None:
+    """Test get_started_completion_tasks_by_worker skips tasks with unsatisfied deps."""
+    from fluxx.data.models import (
+        ConstraintType,
+        Dependency,
+        Endpoint,
+        StartedCompletion,
+    )
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+
+    # Prerequisite task (not completed)
+    prereq_task = Task(
+        id=TaskId("t_prereq"),
+        title="Prerequisite",
+        description="Must be completed first",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+    )
+
+    # Task that depends on prerequisite
+    dependent_task = Task(
+        id=TaskId("t_dependent"),
+        title="Dependent Task",
+        description="Has unsatisfied dependency",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+        dependencies=[
+            Dependency(
+                source_endpoint=Endpoint.START,
+                target_node_id=TaskId("t_prereq"),
+                target_endpoint=Endpoint.END,
+                constraint_type=ConstraintType.GREATER_EQUAL,
+            )
+        ],
+    )
+
+    persistent_prereq = PersistentTask(
+        id=PersistentObjectId("pt_prereq"),
+        versions={version_id: prereq_task},
+    )
+    persistent_dependent = PersistentTask(
+        id=PersistentObjectId("pt_dependent"),
+        versions={version_id: dependent_task},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t_prereq"): PersistentObjectId("pt_prereq"),
+            TaskId("t_dependent"): PersistentObjectId("pt_dependent"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt_prereq"): persistent_prereq,
+            PersistentObjectId("pt_dependent"): persistent_dependent,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    tasks_by_worker = state.get_started_completion_tasks_by_worker()
+
+    # Dependent task should be skipped because prerequisite is not completed
+    assert WorkerId("w1") not in tasks_by_worker
+
+
+def test_has_task_started_nonexistent_task(
+    simple_project: Project,
+    base_workers: list[Worker],
+    start_date: datetime,
+) -> None:
+    """Test has_task_started returns False for non-existent task."""
+    state = SimulationState(simple_project, start_date, base_workers)
+
+    # Task that doesn't exist
+    nonexistent_task = TaskId("t_nonexistent")
+
+    # Should return False without raising an error
+    assert not state.has_task_started(nonexistent_task)
+
+
+def test_get_started_completion_tasks_not_in_version(
+    base_workers: list[Worker],
+) -> None:
+    """Test get_started_completion_tasks_by_worker skips old-version tasks."""
+    from fluxx.data.models import StartedCompletion
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    old_version_id = DAGVersionId("v0")
+
+    # Task only in old version
+    task = Task(
+        id=TaskId("t1"),
+        title="Old Task",
+        description="Only in old version",
+        duration_distribution=Triangular(min=1.0, mode=2.0, max=3.0),
+        completion=StartedCompletion(
+            assignee=WorkerId("w1"),
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+    )
+
+    persistent_task = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={old_version_id: task},  # Only in old version
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,  # Current version is v1
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    tasks_by_worker = state.get_started_completion_tasks_by_worker()
+
+    # Task should be skipped because it's not in current version
+    assert len(tasks_by_worker) == 0

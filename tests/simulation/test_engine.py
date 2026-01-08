@@ -1462,3 +1462,568 @@ def test_start_task_time_splitting_multiple_in_progress_tasks(
     # With time-splitting, the completion time should be later than without
     # We can't test exact values easily, but we can verify the task started
     assert worker_state.available_time > start_date
+
+
+def test_initialize_started_tasks_single_task(base_workers: list[Worker]) -> None:
+    """Test initialize_started_tasks with a single StartedCompletion task."""
+    from fluxx.simulation.engine import initialize_started_tasks
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    # Task with StartedCompletion
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Started Task",
+        description="Already in progress",
+        completion=StartedCompletion(
+            assignee=worker_id,
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task1},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+    rng = np.random.default_rng(seed=42)
+
+    # Initialize started tasks
+    initialize_started_tasks(state, calendar, rng)
+
+    # Task should be in progress
+    assert state.is_task_in_progress(TaskId("t1"))
+
+    # Worker should be busy
+    worker_state = state.worker_states[worker_id]
+    assert worker_state.current_task == TaskId("t1")
+    assert worker_state.available_time > start_date
+
+    # No pending tasks (only one task)
+    assert not state.has_pending_started_tasks(worker_id)
+
+
+def test_initialize_started_tasks_multiple_tasks(base_workers: list[Worker]) -> None:
+    """Test initialize_started_tasks with multiple StartedCompletion tasks."""
+    from fluxx.simulation.engine import initialize_started_tasks
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    # Two tasks with StartedCompletion for same worker
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Started Task 1",
+        description="In progress",
+        completion=StartedCompletion(
+            assignee=worker_id,
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),  # Short
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Started Task 2",
+        description="Also in progress",
+        completion=StartedCompletion(
+            assignee=worker_id,
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+        duration_distribution=Triangular(min=20.0, mode=24.0, max=28.0),  # Long
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task2},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+    rng = np.random.default_rng(seed=42)
+
+    # Initialize started tasks
+    initialize_started_tasks(state, calendar, rng)
+
+    # One task should be in progress (the one that completes first)
+    in_progress_count = sum(
+        1 for tid in [TaskId("t1"), TaskId("t2")] if state.is_task_in_progress(tid)
+    )
+    assert in_progress_count == 1
+
+    # Worker should be busy
+    worker_state = state.worker_states[worker_id]
+    assert worker_state.current_task is not None
+    assert worker_state.available_time > start_date
+
+    # One task should be pending
+    assert state.has_pending_started_tasks(worker_id)
+    assert state.get_pending_started_task_count(worker_id) == 1
+
+
+def test_schedule_pending_started_task(base_workers: list[Worker]) -> None:
+    """Test scheduling a pending started task."""
+    from fluxx.simulation.engine import schedule_pending_started_task
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    # Create a simple task
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Task",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={TaskId("t1"): PersistentObjectId("pt1")},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={PersistentObjectId("pt1"): persistent_task1},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+
+    # Add a pending started task
+    state.add_pending_started_task(worker_id, TaskId("t1"), 8.0)  # 8 hours remaining
+
+    # Schedule it
+    result = schedule_pending_started_task(state, worker_id, calendar)
+    assert result is True
+
+    # Task should now be in progress
+    assert state.is_task_in_progress(TaskId("t1"))
+
+    # Worker should be busy
+    worker_state = state.worker_states[worker_id]
+    assert worker_state.current_task == TaskId("t1")
+    assert worker_state.available_time > start_date
+
+    # No more pending tasks
+    assert not state.has_pending_started_tasks(worker_id)
+
+
+def test_schedule_pending_started_task_no_pending(
+    base_workers: list[Worker],
+) -> None:
+    """Test schedule_pending_started_task when no pending tasks."""
+    from fluxx.simulation.engine import schedule_pending_started_task
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+
+    # No pending tasks
+    result = schedule_pending_started_task(state, worker_id, calendar)
+    assert result is False
+
+
+def test_process_task_completions_with_pending_tasks(
+    base_workers: list[Worker],
+) -> None:
+    """Test that process_task_completions schedules pending tasks."""
+    from fluxx.simulation.engine import process_task_completions
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    # Create tasks
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="First task",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="Second task",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task2},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+
+    # Manually set up state: t1 in progress, t2 pending
+    completion_time = start_date + timedelta(hours=8)
+    state.start_task(TaskId("t1"), worker_id, start_date, completion_time)
+    state.add_pending_started_task(worker_id, TaskId("t2"), 8.0)
+
+    # Advance time to when t1 completes
+    state.current_time = completion_time
+
+    # Process completions (should complete t1 and schedule t2)
+    process_task_completions(state, calendar)
+
+    # t1 should be completed
+    assert state.is_task_completed(TaskId("t1"))
+    assert not state.is_task_in_progress(TaskId("t1"))
+
+    # t2 should now be in progress
+    assert state.is_task_in_progress(TaskId("t2"))
+
+    # Worker should be working on t2
+    worker_state = state.worker_states[worker_id]
+    assert worker_state.current_task == TaskId("t2")
+
+
+def test_initialize_started_tasks_skips_empty_task_list(
+    base_workers: list[Worker],
+) -> None:
+    """Test initialize_started_tasks handles empty task list for a worker."""
+    from unittest.mock import patch
+
+    from fluxx.simulation.engine import initialize_started_tasks
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={},
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={},
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+    rng = np.random.default_rng(seed=42)
+
+    # Mock get_started_completion_tasks_by_worker to return empty list for a worker
+    # This tests the defensive "if not tasks: continue" path
+    with patch.object(
+        state, "get_started_completion_tasks_by_worker", return_value={worker_id: []}
+    ):
+        initialize_started_tasks(state, calendar, rng)
+
+    # No tasks should be in progress (empty list was skipped)
+    assert not state.in_progress_tasks
+
+
+def test_initialize_started_tasks_skips_non_started_completion(
+    base_workers: list[Worker],
+) -> None:
+    """Test initialize_started_tasks handles task without StartedCompletion."""
+    from unittest.mock import patch
+
+    from fluxx.data.models import NotStartedCompletion
+    from fluxx.simulation.engine import initialize_started_tasks
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    # Task with NotStartedCompletion (should be skipped)
+    task_not_started = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="Not started",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+        completion=NotStartedCompletion(),
+    )
+
+    # Task with StartedCompletion (should be processed)
+    task_started = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="Already started",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+        completion=StartedCompletion(
+            assignee=worker_id,
+            hours_logged=2.0,
+            start_time=datetime(2023, 12, 15, tzinfo=UTC),
+        ),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task_not_started},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task_started},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+    rng = np.random.default_rng(seed=42)
+
+    # Mock to return both tasks - task_not_started gets skipped,
+    # task_started gets processed. This tests the defensive type guard path.
+    with patch.object(
+        state,
+        "get_started_completion_tasks_by_worker",
+        return_value={worker_id: [task_not_started, task_started]},
+    ):
+        initialize_started_tasks(state, calendar, rng)
+
+    # Only task_started should be in progress (task_not_started was skipped)
+    assert state.is_task_in_progress(TaskId("t2"))
+    assert not state.is_task_in_progress(TaskId("t1"))
+
+
+def test_schedule_pending_started_task_updates_remaining_pending(
+    base_workers: list[Worker],
+) -> None:
+    """Test that schedule_pending_started_task updates remaining pending tasks."""
+    from fluxx.simulation.engine import schedule_pending_started_task
+
+    start_date = datetime(2024, 1, 1, 9, 0, tzinfo=UTC)
+    version_id = DAGVersionId("v1")
+    worker_id = WorkerId("w1")
+
+    # Create tasks
+    task1 = Task(
+        id=TaskId("t1"),
+        title="Task 1",
+        description="First task",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+    task2 = Task(
+        id=TaskId("t2"),
+        title="Task 2",
+        description="Second task",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+    task3 = Task(
+        id=TaskId("t3"),
+        title="Task 3",
+        description="Third task",
+        duration_distribution=Triangular(min=4.0, mode=8.0, max=12.0),
+    )
+
+    persistent_task1 = PersistentTask(
+        id=PersistentObjectId("pt1"),
+        versions={version_id: task1},
+    )
+    persistent_task2 = PersistentTask(
+        id=PersistentObjectId("pt2"),
+        versions={version_id: task2},
+    )
+    persistent_task3 = PersistentTask(
+        id=PersistentObjectId("pt3"),
+        versions={version_id: task3},
+    )
+
+    dag = DAG(
+        id=DAGId("dag1"),
+        current_version_id=version_id,
+        node_map={
+            TaskId("t1"): PersistentObjectId("pt1"),
+            TaskId("t2"): PersistentObjectId("pt2"),
+            TaskId("t3"): PersistentObjectId("pt3"),
+        },
+    )
+
+    metadata = ProjectMetadata(
+        name="Test Project",
+        created=datetime(2024, 1, 1, tzinfo=UTC),
+        last_modified=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    project = Project(
+        metadata=metadata,
+        dag=dag,
+        persistent_tasks={
+            PersistentObjectId("pt1"): persistent_task1,
+            PersistentObjectId("pt2"): persistent_task2,
+            PersistentObjectId("pt3"): persistent_task3,
+        },
+    )
+
+    state = SimulationState(project, start_date, base_workers)
+    calendar = WorkCalendar(start_date)
+
+    # Add 3 pending tasks: t1=10h, t2=20h, t3=30h
+    state.add_pending_started_task(worker_id, TaskId("t1"), 10.0)
+    state.add_pending_started_task(worker_id, TaskId("t2"), 20.0)
+    state.add_pending_started_task(worker_id, TaskId("t3"), 30.0)
+
+    # Schedule first pending task (t1 with 10h)
+    result = schedule_pending_started_task(state, worker_id, calendar)
+    assert result is True
+
+    # t1 should now be in progress
+    assert state.is_task_in_progress(TaskId("t1"))
+
+    # Remaining pending tasks should be updated:
+    # t2: 20h - 10h = 10h remaining
+    # t3: 30h - 10h = 20h remaining
+    assert state.get_pending_started_task_count(worker_id) == 2
+
+    # Get the updated remaining times
+    next_task = state.get_next_pending_started_task(worker_id)
+    assert next_task is not None
+    task_id, remaining = next_task
+    assert task_id == TaskId("t2")
+    assert remaining == 10.0  # 20h - 10h = 10h
+
+    next_task = state.get_next_pending_started_task(worker_id)
+    assert next_task is not None
+    task_id, remaining = next_task
+    assert task_id == TaskId("t3")
+    assert remaining == 20.0  # 30h - 10h = 20h

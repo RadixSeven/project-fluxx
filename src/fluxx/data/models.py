@@ -603,6 +603,7 @@ class TaskEventDetails(TypedDict, total=False):
 
     Different event types use different fields:
     - start: worker_id, estimated_duration, estimated_completion
+    - start (from Jira): also includes started_from_jira, time_split_factor
     - complete: worker_id
     - branch_resolved: chosen_world
     """
@@ -611,6 +612,8 @@ class TaskEventDetails(TypedDict, total=False):
     estimated_duration: float
     estimated_completion: str
     chosen_world: str
+    started_from_jira: bool
+    time_split_factor: int
 
 
 # Valid event types for simulation events

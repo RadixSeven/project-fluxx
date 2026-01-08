@@ -39,7 +39,6 @@ from fluxx.simulation.scheduler import (
     detect_deadlock,
     get_eligible_workers,
     get_incomplete_tasks,
-    get_worker_in_progress_task_count,
     select_next_action,
 )
 from fluxx.simulation.state import SimulationState
@@ -137,6 +136,195 @@ def sample_in_progress_task_remaining_duration(
     return total_duration - elapsed_hours
 
 
+def initialize_started_tasks(
+    state: SimulationState, calendar: WorkCalendar, rng: np.random.Generator
+) -> None:
+    """Initialize all StartedCompletion tasks at simulation start.
+
+    Workers with StartedCompletion tasks from Jira have their tasks scheduled
+    with proper time-splitting. Each task completes at its own time based on
+    its remaining work and the current time-split factor.
+
+    For workers with multiple StartedCompletion tasks:
+    - Sample remaining duration for each task
+    - Calculate when each completes with time-splitting (remaining * num_tasks)
+    - Schedule the task that completes first as current_task
+    - Store remaining tasks with updated remaining work (accounting for work
+      done while the first task was active)
+    - When first task completes, the next is scheduled with updated timing
+
+    Example with tasks A (14h) and B (28h), 7h/day worker:
+    - With 2-task split: A completes after 14*2=28 calendar hours (4 days)
+    - At that point, B has received 14h of work, so 14h remaining
+    - B then runs solo: completes after 14/7 = 2 more days (day 6 total)
+
+    Args:
+        state: Simulation state to initialize
+        calendar: Work calendar for time calculations
+        rng: Random number generator for duration sampling
+    """
+    tasks_by_worker = state.get_started_completion_tasks_by_worker()
+
+    for worker_id, tasks in tasks_by_worker.items():
+        if not tasks:
+            continue
+
+        worker_state = state.worker_states[worker_id]
+        num_tasks = len(tasks)
+
+        # Sample remaining duration for each task and pair with task
+        task_remaining: list[tuple[Task, float]] = []
+        for task in tasks:
+            completion = task.completion
+            if not isinstance(completion, StartedCompletion):
+                continue  # Type guard, should always be StartedCompletion
+            remaining = sample_in_progress_task_remaining_duration(
+                task, completion.hours_logged, rng, state
+            )
+            task_remaining.append((task, remaining))
+
+        # Sort by remaining hours (task that completes first comes first)
+        task_remaining.sort(key=lambda x: x[1])
+
+        # The first task (smallest remaining) completes first
+        first_task, first_remaining = task_remaining[0]
+
+        # With time-splitting, calendar time to complete first task
+        # = remaining_hours * num_tasks (since time is split equally)
+        calendar_hours_first = first_remaining * num_tasks
+
+        # Calculate completion time for first task
+        first_completion = add_work_hours(
+            state.current_time, calendar_hours_first, worker_state.hours_per_workday
+        )
+
+        # Schedule first task
+        state.in_progress_tasks.add(first_task.id)
+        worker_state.current_task = first_task.id
+        worker_state.available_time = first_completion
+
+        # Record start event for first task
+        event = TaskEvent(
+            node_id=first_task.id,
+            event_type="start",
+            timestamp=state.current_time,
+            details={
+                "worker_id": str(worker_id),
+                "estimated_completion": first_completion.isoformat(),
+                "started_from_jira": True,
+                "time_split_factor": num_tasks,
+            },
+        )
+        state.add_event(event)
+
+        logger.debug(
+            "Initialized StartedCompletion task %s for worker %s: "
+            "remaining=%.2f hrs, time_split=%d, completion=%s",
+            first_task.id,
+            worker_id,
+            first_remaining,
+            num_tasks,
+            first_completion.isoformat(),
+        )
+
+        # Store remaining tasks with updated remaining work
+        # While first task runs, each other task receives first_remaining hours of work
+        for task, remaining in task_remaining[1:]:
+            updated_remaining = remaining - first_remaining
+            state.add_pending_started_task(worker_id, task.id, updated_remaining)
+            logger.debug(
+                "Queued pending StartedCompletion task %s for worker %s: "
+                "original=%.2f hrs, after_split=%.2f hrs",
+                task.id,
+                worker_id,
+                remaining,
+                updated_remaining,
+            )
+
+
+def schedule_pending_started_task(
+    state: SimulationState, worker_id: WorkerId, calendar: WorkCalendar
+) -> bool:
+    """Schedule the next pending started task for a worker if available.
+
+    Called after a task completes to check if the worker has more
+    StartedCompletion tasks waiting to be scheduled.
+
+    Args:
+        state: Simulation state
+        worker_id: ID of the worker who just became available
+        calendar: Work calendar for time calculations
+
+    Returns:
+        True if a pending task was scheduled, False otherwise
+    """
+    pending = state.get_next_pending_started_task(worker_id)
+    if pending is None:
+        return False
+
+    task_id, remaining_hours = pending
+    worker_state = state.worker_states[worker_id]
+
+    # Get remaining pending count (for time-splitting)
+    pending_count = state.get_pending_started_task_count(worker_id)
+    num_tasks = pending_count + 1  # This task plus remaining pending
+
+    # Calculate calendar time with time-splitting
+    calendar_hours = remaining_hours * num_tasks
+
+    # Calculate completion time
+    completion_time = add_work_hours(
+        state.current_time, calendar_hours, worker_state.hours_per_workday
+    )
+
+    # Schedule this task
+    state.in_progress_tasks.add(task_id)
+    worker_state.current_task = task_id
+    worker_state.available_time = completion_time
+
+    # Record start event
+    event = TaskEvent(
+        node_id=task_id,
+        event_type="start",
+        timestamp=state.current_time,
+        details={
+            "worker_id": str(worker_id),
+            "estimated_completion": completion_time.isoformat(),
+            "started_from_jira": True,
+            "time_split_factor": num_tasks,
+        },
+    )
+    state.add_event(event)
+
+    logger.debug(
+        "Scheduled pending StartedCompletion task %s for worker %s: "
+        "remaining=%.2f hrs, time_split=%d, completion=%s",
+        task_id,
+        worker_id,
+        remaining_hours,
+        num_tasks,
+        completion_time.isoformat(),
+    )
+
+    # Update remaining pending tasks (they receive work while this task runs)
+    if pending_count > 0:
+        updated_pending: list[tuple[TaskId, float]] = []
+        while True:
+            next_pending = state.get_next_pending_started_task(worker_id)
+            if next_pending is None:
+                break
+            next_task_id, next_remaining = next_pending
+            # This task will receive remaining_hours of work while current runs
+            updated_remaining = next_remaining - remaining_hours
+            updated_pending.append((next_task_id, updated_remaining))
+
+        # Re-add with updated remaining hours
+        for next_task_id, next_remaining in updated_pending:
+            state.add_pending_started_task(worker_id, next_task_id, next_remaining)
+
+    return True
+
+
 # Worker assignment
 
 
@@ -178,9 +366,10 @@ def start_task(
     and samples remaining duration based on hours_logged. For new tasks, randomly
     selects a worker and samples full duration.
 
-    When a worker has multiple in-progress tasks, time is split equally between
-    them. The remaining duration is multiplied by the number of in-progress tasks
-    the worker has assigned.
+    Note: Time-splitting for multiple StartedCompletion tasks per worker is handled
+    at simulation initialization (initialize_started_tasks). Tasks that reach this
+    function with StartedCompletion status were not initialized (e.g., due to
+    unsatisfied dependencies at start) and are handled individually.
 
     Args:
         task: The task to start
@@ -191,22 +380,18 @@ def start_task(
     Raises:
         ValueError: If no eligible workers or task has no distribution
     """
-    # Check if task is already in progress
+    # Check if task is already in progress (StartedCompletion from Jira)
     if isinstance(task.completion, StartedCompletion):
         # Use existing assignee
         worker_id = task.completion.assignee
 
         # Sample remaining duration using hours already logged
+        # Note: No time-splitting applied here - that's handled at initialization
+        # for tasks with satisfied dependencies. This task wasn't initialized
+        # because its dependencies weren't satisfied at simulation start.
         duration_hours = sample_in_progress_task_remaining_duration(
             task, task.completion.hours_logged, rng, state
         )
-
-        # Apply time-splitting if worker has multiple in-progress tasks
-        # Count how many in-progress tasks this worker has from project data
-        in_progress_count = get_worker_in_progress_task_count(worker_id, state)
-        if in_progress_count > 1:
-            # Worker splits time equally between tasks, so each takes longer
-            duration_hours = duration_hours * in_progress_count
     else:
         # Select worker randomly
         worker_id = select_worker_for_task(task, state, rng)
@@ -285,16 +470,22 @@ def complete_task(
     state.add_event(event)
 
 
-def process_task_completions(state: SimulationState) -> None:
+def process_task_completions(
+    state: SimulationState, calendar: WorkCalendar | None = None
+) -> None:
     """Process all tasks that complete at the current simulation time.
+
+    Also schedules any pending StartedCompletion tasks for workers who
+    just completed a task.
 
     Args:
         state: Current simulation state
+        calendar: Work calendar (required to schedule pending started tasks)
     """
-    # Find tasks that complete at current time
-    tasks_to_complete: list[tuple[Task, datetime]] = []
+    # Find tasks that complete at current time, along with their workers
+    tasks_to_complete: list[tuple[Task, datetime, WorkerId]] = []
 
-    for _worker_id, worker_state in state.worker_states.items():
+    for worker_id, worker_state in state.worker_states.items():
         if worker_state.current_task is None:
             continue
 
@@ -303,14 +494,18 @@ def process_task_completions(state: SimulationState) -> None:
             task_id = worker_state.current_task
             try:
                 task = state.get_task(task_id)
-                tasks_to_complete.append((task, worker_state.available_time))
+                tasks_to_complete.append((task, worker_state.available_time, worker_id))
             except KeyError:
                 # Task not in current version, skip
                 continue
 
     # Complete all tasks
-    for task, completion_time in tasks_to_complete:
+    for task, completion_time, worker_id in tasks_to_complete:
         complete_task(task, state, completion_time)
+
+        # Schedule next pending started task for this worker if any
+        if calendar is not None:
+            schedule_pending_started_task(state, worker_id, calendar)
 
 
 # Branch resolution
@@ -537,10 +732,14 @@ def run_single_sample(
     state = SimulationState(project, start_date, workers)
     calendar = WorkCalendar(start_date)
 
+    # Initialize any StartedCompletion tasks as in-progress from the start
+    # This ensures workers with in-progress Jira tasks are properly "busy"
+    initialize_started_tasks(state, calendar, rng)
+
     # Main simulation loop - guaranteed to terminate (see docstring proof)
     while True:
         # Process any tasks that complete at current time
-        process_task_completions(state)
+        process_task_completions(state, calendar)
 
         # Check if all tasks completed
         if state.all_tasks_completed():

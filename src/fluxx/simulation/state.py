@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 
 from fluxx.data.models import (
     BranchId,
+    DoneCompletion,
     PossibleWorldId,
     Project,
+    StartedCompletion,
     Task,
     TaskEvent,
     TaskId,
@@ -64,6 +66,12 @@ class SimulationState:
         self.events: list[TaskEvent] = []
         self.failed_tasks: list[TaskId] = []
 
+        # Pre-populate completed_tasks from existing DoneCompletion states
+        # This ensures dependencies on done tasks are satisfied.
+        # NOTE: We do NOT pre-populate in_progress_tasks because those tasks
+        # still need to be scheduled and worked on in the simulation.
+        self._initialize_completed_tasks_from_completions()
+
         # Initialize worker states
         self.worker_states: dict[WorkerId, WorkerState] = {
             worker.id: WorkerState(
@@ -74,8 +82,44 @@ class SimulationState:
             for worker in workers
         }
 
+        # Track pending StartedCompletion tasks waiting to be scheduled
+        # Maps worker_id to list of (task_id, remaining_hours) tuples
+        # These are tasks that have been initialized but not yet scheduled
+        self._pending_started_tasks: dict[WorkerId, list[tuple[TaskId, float]]] = {}
+
         # Lazy-initialized Jira sampling context
         self._jira_sampling_context: JiraSamplingContext | None = None
+
+    def _initialize_completed_tasks_from_completions(self) -> None:
+        """Initialize completed_tasks from existing DoneCompletion states.
+
+        Tasks imported from Jira may already be done (DoneCompletion). This
+        method ensures those tasks are recognized as completed for dependency
+        checking purposes.
+
+        NOTE: We do NOT pre-populate in_progress_tasks for StartedCompletion
+        tasks here. Those tasks still need to be scheduled and worked on in
+        the simulation. The has_task_started() method checks the task's
+        completion status directly to handle dependencies on started tasks.
+        """
+        current_version_id = self.project.dag.current_version_id
+
+        for persistent_id in self.project.dag.node_map.values():
+            if persistent_id not in self.project.persistent_tasks:
+                continue
+
+            persistent_task = self.project.persistent_tasks[persistent_id]
+            if current_version_id not in persistent_task.versions:
+                continue
+
+            task = persistent_task.versions[current_version_id]
+            if isinstance(task.completion, DoneCompletion):
+                self.completed_tasks.add(task.id)
+                logger.debug(
+                    "Pre-initialized task %s (%s) as completed from DoneCompletion",
+                    task.id,
+                    task.title,
+                )
 
     def get_jira_sampling_context(self) -> JiraSamplingContext:
         """Get or build the Jira sampling context.
@@ -90,6 +134,65 @@ class SimulationState:
 
             self._jira_sampling_context = build_jira_sampling_context(self.project)
         return self._jira_sampling_context
+
+    def get_started_completion_tasks_by_worker(
+        self,
+    ) -> dict[WorkerId, list[Task]]:
+        """Get all StartedCompletion tasks grouped by their assignee.
+
+        Only includes tasks that:
+        - Have StartedCompletion status
+        - Are leaf tasks (no children)
+        - Have an assignee in the simulation's worker_states
+
+        Returns:
+            Dict mapping worker IDs to their StartedCompletion tasks
+        """
+        from fluxx.simulation.scheduler import are_all_dependencies_satisfied
+
+        tasks_by_worker: dict[WorkerId, list[Task]] = {}
+        current_version_id = self.project.dag.current_version_id
+
+        for persistent_id in self.project.dag.node_map.values():
+            if persistent_id not in self.project.persistent_tasks:
+                continue
+
+            persistent_task = self.project.persistent_tasks[persistent_id]
+            if current_version_id not in persistent_task.versions:
+                continue
+
+            task = persistent_task.versions[current_version_id]
+
+            # Must be a leaf task with StartedCompletion
+            if len(task.children) > 0:
+                continue
+            if not isinstance(task.completion, StartedCompletion):
+                continue
+
+            assignee = task.completion.assignee
+
+            # Assignee must be in the simulation
+            if assignee not in self.worker_states:
+                logger.debug(
+                    "Skipping StartedCompletion task %s: assignee %s not in simulation",
+                    task.id,
+                    assignee,
+                )
+                continue
+
+            # Dependencies must be satisfied for the task to be workable
+            if not are_all_dependencies_satisfied(task, self):
+                logger.debug(
+                    "Skipping StartedCompletion task %s: dependencies not satisfied",
+                    task.id,
+                )
+                continue
+
+            if assignee not in tasks_by_worker:
+                tasks_by_worker[assignee] = []
+            tasks_by_worker[assignee].append(task)
+
+        return tasks_by_worker
 
     def complete_task(self, task_id: TaskId, completion_time: datetime) -> None:
         """Mark a task as completed.
@@ -140,6 +243,67 @@ class SimulationState:
             task_id,
             estimated_completion.isoformat(),
         )
+
+    def add_pending_started_task(
+        self, worker_id: WorkerId, task_id: TaskId, remaining_hours: float
+    ) -> None:
+        """Add a task to the pending started tasks queue for a worker.
+
+        These are StartedCompletion tasks that have been initialized (duration
+        sampled) but not yet scheduled as the worker's current_task.
+
+        Args:
+            worker_id: ID of the worker
+            task_id: ID of the task
+            remaining_hours: Remaining work hours for this task
+        """
+        if worker_id not in self._pending_started_tasks:
+            self._pending_started_tasks[worker_id] = []
+        self._pending_started_tasks[worker_id].append((task_id, remaining_hours))
+
+    def get_next_pending_started_task(
+        self, worker_id: WorkerId
+    ) -> tuple[TaskId, float] | None:
+        """Get and remove the next pending started task for a worker.
+
+        Args:
+            worker_id: ID of the worker
+
+        Returns:
+            Tuple of (task_id, remaining_hours) or None if no pending tasks
+        """
+        if worker_id not in self._pending_started_tasks:
+            return None
+        pending = self._pending_started_tasks[worker_id]
+        if not pending:
+            return None
+        return pending.pop(0)
+
+    def has_pending_started_tasks(self, worker_id: WorkerId) -> bool:
+        """Check if a worker has pending started tasks.
+
+        Args:
+            worker_id: ID of the worker
+
+        Returns:
+            True if worker has pending started tasks
+        """
+        if worker_id not in self._pending_started_tasks:
+            return False
+        return len(self._pending_started_tasks[worker_id]) > 0
+
+    def get_pending_started_task_count(self, worker_id: WorkerId) -> int:
+        """Get the count of pending started tasks for a worker.
+
+        Args:
+            worker_id: ID of the worker
+
+        Returns:
+            Number of pending started tasks
+        """
+        if worker_id not in self._pending_started_tasks:
+            return 0
+        return len(self._pending_started_tasks[worker_id])
 
     def resolve_branch(
         self, branch_id: BranchId, chosen_world: PossibleWorldId
@@ -219,13 +383,28 @@ class SimulationState:
     def has_task_started(self, task_id: TaskId) -> bool:
         """Check if a task has started (either in progress or completed).
 
+        This includes tasks that:
+        1. Are currently in progress in the simulation
+        2. Have been completed in the simulation
+        3. Have StartedCompletion from Jira (already started before simulation)
+
         Args:
             task_id: ID of the task to check
 
         Returns:
             True if the task has started, False otherwise
         """
-        return self.is_task_in_progress(task_id) or self.is_task_completed(task_id)
+        if self.is_task_in_progress(task_id) or self.is_task_completed(task_id):
+            return True
+
+        # Also check if the task has StartedCompletion from Jira
+        # This handles the case where a task is already started in real life
+        # but hasn't been scheduled yet in the simulation
+        try:
+            task = self.get_task(task_id)
+            return isinstance(task.completion, StartedCompletion)
+        except KeyError:
+            return False
 
     def get_available_workers(self) -> list[WorkerId]:
         """Get list of workers that are currently available (idle).
@@ -313,7 +492,9 @@ class SimulationState:
                     if len(task.children) == 0 and self.is_task_reachable(task_id):
                         reachable_leaf_task_ids.add(task_id)
 
-        return reachable_leaf_task_ids == self.completed_tasks
+        # All reachable leaf tasks must be in completed_tasks
+        # (completed_tasks may contain additional tasks that became unreachable)
+        return reachable_leaf_task_ids.issubset(self.completed_tasks)
 
     def get_next_event_time(self) -> datetime | None:
         """Get the time of the next scheduled event (task completion).

@@ -422,15 +422,23 @@ def get_worker_in_progress_task_count(
             continue
 
         task = persistent_task.versions[current_version_id]
+
+        # Skip parent tasks - they are never executed directly
+        if len(task.children) > 0:
+            continue
+
         completion = task.completion
 
         # Check if this task is assigned to the worker, in progress (from project),
-        # and not already being processed in simulation
+        # and not already being processed in simulation.
+        # Also verify the task's dependencies are satisfied - tasks with unsatisfied
+        # dependencies shouldn't block the worker since they can't be worked on yet.
         if (
             isinstance(completion, StartedCompletion)
             and completion.assignee == worker_id
             and not state.is_task_in_progress(task.id)
             and not state.is_task_completed(task.id)
+            and are_all_dependencies_satisfied(task, state)
         ):
             count += 1
 
@@ -592,7 +600,18 @@ def is_task_eligible(task: Task, state: SimulationState) -> bool:
     if not are_all_dependencies_satisfied(task, state):
         return False
 
-    # Must have at least one eligible worker
+    # For tasks with StartedCompletion, the assignee must be available.
+    # start_task() will use the assignee directly, bypassing get_eligible_workers(),
+    # so we must check assignee availability here.
+    if isinstance(task.completion, StartedCompletion):
+        assignee = task.completion.assignee
+        worker_state = state.worker_states.get(assignee)
+        if worker_state is None:
+            return False
+        # Assignee must not be currently working on another task
+        return worker_state.current_task is None
+
+    # For new tasks, must have at least one eligible worker
     eligible_workers = get_eligible_workers(task, state)
     return bool(eligible_workers)
 
