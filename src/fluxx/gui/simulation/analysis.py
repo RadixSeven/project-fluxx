@@ -193,6 +193,7 @@ class TaskStatistics:
     task_title: str  # Human-readable task name
     occurrence_fraction: float  # 0.0 to 1.0
     time_statistics: TimeStatistics | None  # None if never occurred
+    jira_issue_key: str | None = None  # Jira issue key if linked (e.g., "CORE-123")
 
 
 @dataclass
@@ -465,6 +466,7 @@ def calculate_task_statistics(
     num_samples: int,
     percentile: float,
     task_titles: dict[TaskId, str],
+    jira_issue_keys: dict[TaskId, str] | None = None,
 ) -> dict[TaskId, TaskStatistics]:
     """Calculate statistics for all tasks across samples.
 
@@ -473,10 +475,13 @@ def calculate_task_statistics(
         num_samples: Total number of samples (for occurrence fraction)
         percentile: Percentile for inner markers (e.g., 90.0)
         task_titles: Mapping from task ID to human-readable task title
+        jira_issue_keys: Mapping from task ID to Jira issue key (optional)
 
     Returns:
         Dictionary mapping task ID to its statistics
     """
+    if jira_issue_keys is None:
+        jira_issue_keys = {}
     # Collect all time pairs for each task
     task_time_pairs: dict[TaskId, list[tuple[datetime, datetime]]] = {}
 
@@ -498,14 +503,16 @@ def calculate_task_statistics(
         else:
             time_stats = None
 
-        # Get task title, fallback to ID if not found
+        # Get task title and Jira issue key, fallback to ID if not found
         task_title = task_titles.get(task_id, str(task_id))
+        jira_issue_key = jira_issue_keys.get(task_id)
 
         result[task_id] = TaskStatistics(
             task_id=task_id,
             task_title=task_title,
             occurrence_fraction=occurrence_fraction,
             time_statistics=time_stats,
+            jira_issue_key=jira_issue_key,
         )
 
     return result
@@ -540,14 +547,19 @@ def extract_timeline_data(
     # Add parent task times
     add_parent_task_times(sample_times_list, project)
 
-    # Build task titles mapping from project
+    # Build task titles and Jira issue keys mapping from project
     all_tasks = get_all_tasks_from_project(project)
     task_titles = {task.id: task.title for task in all_tasks}
+    jira_issue_keys: dict[TaskId, str] = {
+        task.id: str(task.jira_reference.issue_key)
+        for task in all_tasks
+        if task.jira_reference is not None
+    }
 
     # Calculate statistics for all tasks
     num_samples = len(samples)
     task_statistics = calculate_task_statistics(
-        sample_times_list, num_samples, percentile, task_titles
+        sample_times_list, num_samples, percentile, task_titles, jira_issue_keys
     )
 
     # Find earliest and latest times for axis scaling

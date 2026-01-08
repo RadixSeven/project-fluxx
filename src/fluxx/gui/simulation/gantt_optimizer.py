@@ -33,6 +33,7 @@ class GanttVariantSchedule:
     start_time: datetime  # Absolute calendar time
     duration_hours: float  # Duration in calendar hours
     end_time: datetime  # Computed from start + duration
+    jira_issue_key: str | None = None  # Jira issue key if linked (e.g., "CORE-123")
 
 
 @dataclass
@@ -89,6 +90,11 @@ def _compute_parent_schedules(
                     parent_end - parent_start
                 ).total_seconds() / 3600
 
+                # Get Jira issue key if available
+                jira_issue_key: str | None = None
+                if parent_task.jira_reference is not None:
+                    jira_issue_key = str(parent_task.jira_reference.issue_key)
+
                 parent_variant_key = TaskVariantKey(parent_task.id, world_seq)
                 parent_schedules[parent_variant_key] = GanttVariantSchedule(
                     variant_key=parent_variant_key,
@@ -96,6 +102,7 @@ def _compute_parent_schedules(
                     start_time=parent_start,
                     duration_hours=parent_duration_hours,
                     end_time=parent_end,
+                    jira_issue_key=jira_issue_key,
                 )
 
     return parent_schedules
@@ -322,7 +329,9 @@ def optimize_gantt_schedule(
                 )
                 end_time = start_time + timedelta(hours=duration_hours)
 
-                task_title = statistics.task_statistics[variant].task_title
+                task_stats = statistics.task_statistics[variant]
+                task_title = task_stats.task_title
+                jira_issue_key = task_stats.jira_issue_key
 
                 variant_schedules[variant] = GanttVariantSchedule(
                     variant_key=variant,
@@ -330,6 +339,7 @@ def optimize_gantt_schedule(
                     start_time=start_time,
                     duration_hours=duration_hours,
                     end_time=end_time,
+                    jira_issue_key=jira_issue_key,
                 )
 
             # Compute parent task schedules from optimized children

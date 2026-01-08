@@ -3,10 +3,15 @@
 Displays optimized Gantt chart schedule per spec 8.1.
 """
 
+from __future__ import annotations
+
+import functools
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
+from matplotlib.backend_bases import MouseEvent
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -16,6 +21,10 @@ from fluxx.data.models import PossibleWorldId
 from fluxx.gui.simulation.analysis import DependencyInfo
 from fluxx.gui.simulation.gantt_analysis import TaskVariantKey, WorldSequence
 from fluxx.gui.simulation.gantt_optimizer import GanttSchedule, GanttVariantSchedule
+from fluxx.gui.simulation.label_utils import truncate_task_label
+
+if TYPE_CHECKING:
+    from matplotlib.text import Annotation
 
 
 def _compute_common_world_prefix(
@@ -179,9 +188,14 @@ class GanttChartWidget(QWidget):
         self.dependencies = dependencies
         self.world_titles = world_titles
 
+        # Store full labels for tooltips (populated during draw)
+        self._full_labels: list[str] = []
+        self._tooltip_annotation: Annotation | None = None
+
         self._create_widgets()
         self._create_layout()
         self._draw_gantt()
+        self._setup_hover_tooltips()
 
     def _create_widgets(self) -> None:
         """Create matplotlib figure and canvas."""
@@ -234,6 +248,7 @@ class GanttChartWidget(QWidget):
         # Create y-position mapping (task names on y-axis)
         y_positions: dict[TaskVariantKey, int] = {}
         task_labels: list[str] = []
+        self._full_labels = []
         for i, (variant_key, schedule) in enumerate(sorted_variants):
             y_positions[variant_key] = i
             # Include world sequence info in label if not empty (after stripping prefix)
@@ -244,10 +259,16 @@ class GanttChartWidget(QWidget):
                     self.world_titles.get(w, str(w)) for w in display_world_seq
                 ]
                 world_str = ", ".join(world_titles_list)
-                label = f"{schedule.task_title} ({world_str})"
+                base_label = f"{schedule.task_title} ({world_str})"
             else:
-                label = schedule.task_title
-            task_labels.append(label)
+                base_label = schedule.task_title
+
+            # Truncate label with Jira issue key prefix if available
+            truncated_label, full_label = truncate_task_label(
+                base_label, schedule.jira_issue_key
+            )
+            task_labels.append(truncated_label)
+            self._full_labels.append(full_label)
 
         # Draw task bars
         for variant_key, schedule in sorted_variants:
@@ -468,3 +489,70 @@ class GanttChartWidget(QWidget):
         self.error_label.show()
         self.canvas.hide()
         self.toolbar.hide()
+
+    def _setup_hover_tooltips(self) -> None:
+        """Set up hover tooltips for y-axis labels."""
+        # Create annotation for tooltip (hidden initially)
+        self._tooltip_annotation = self.ax.annotate(
+            "",
+            xy=(0, 0),
+            xytext=(10, 10),
+            textcoords="offset points",
+            bbox={
+                "boxstyle": "round,pad=0.3",
+                "facecolor": "lightyellow",
+                "alpha": 0.9,
+            },
+            fontsize=9,
+            visible=False,
+            zorder=100,
+        )
+
+        self.canvas.mpl_connect(
+            "motion_notify_event", functools.partial(_on_hover, self)
+        )
+
+
+def _on_hover(widget: GanttChartWidget, event: MouseEvent) -> None:
+    """Handle mouse motion to show/hide tooltips on y-axis labels.
+
+    Args:
+        widget: The GanttChartWidget instance
+        event: The matplotlib mouse event
+    """
+    if event.inaxes != widget.ax:
+        if widget._tooltip_annotation is not None:
+            widget._tooltip_annotation.set_visible(False)
+            widget.canvas.draw_idle()
+        return
+
+    # Check if mouse is near the y-axis (left side of plot)
+    # Get the axes bounding box in display coordinates
+    bbox = widget.ax.get_position()
+    fig_width = widget.figure.get_figwidth() * widget.figure.dpi
+
+    # Only show tooltip when hovering near the left edge (y-axis area)
+    if event.x is None or event.x > bbox.x0 * fig_width + 50:
+        if widget._tooltip_annotation is not None:
+            widget._tooltip_annotation.set_visible(False)
+            widget.canvas.draw_idle()
+        return
+
+    # Find the closest y-tick
+    if event.ydata is None:
+        return
+
+    y_pos = int(round(event.ydata))
+    if 0 <= y_pos < len(widget._full_labels):
+        full_label = widget._full_labels[y_pos]
+
+        if widget._tooltip_annotation is not None:
+            widget._tooltip_annotation.set_text(full_label)
+            # Position tooltip at the y-axis label position
+            widget._tooltip_annotation.xy = (widget.ax.get_xlim()[0], y_pos)
+            widget._tooltip_annotation.set_visible(True)
+            widget.canvas.draw_idle()
+    else:
+        if widget._tooltip_annotation is not None:
+            widget._tooltip_annotation.set_visible(False)
+            widget.canvas.draw_idle()

@@ -45,6 +45,7 @@ class GanttTaskStatistics:
     percentile_start_time: datetime  # Pth percentile start (calendar time)
     percentile_duration_hours: float  # Pth percentile duration (calendar hours)
     sample_count: int  # Number of samples with this variant
+    jira_issue_key: str | None = None  # Jira issue key if linked (e.g., "CORE-123")
 
 
 @dataclass
@@ -204,9 +205,14 @@ def extract_gantt_statistics(
                 variant_start_times[variant_key].append(start_time)
                 variant_end_times[variant_key].append(end_time)
 
-    # Get task titles from project
+    # Get task titles and Jira issue keys from project
     all_tasks = get_all_tasks_from_project(project)
     task_titles = {task.id: task.title for task in all_tasks}
+    jira_issue_keys: dict[TaskId, str] = {
+        task.id: str(task.jira_reference.issue_key)
+        for task in all_tasks
+        if task.jira_reference is not None
+    }
 
     # Compute percentile statistics for each variant
     task_statistics: dict[TaskVariantKey, GanttTaskStatistics] = {}
@@ -229,8 +235,9 @@ def extract_gantt_statistics(
             durations_hours, percentile
         )
 
-        # Get task title
+        # Get task title and Jira issue key
         task_title = task_titles.get(variant_key.task_id, str(variant_key.task_id))
+        jira_issue_key = jira_issue_keys.get(variant_key.task_id)
 
         task_statistics[variant_key] = GanttTaskStatistics(
             variant_key=variant_key,
@@ -238,6 +245,7 @@ def extract_gantt_statistics(
             percentile_start_time=percentile_start,
             percentile_duration_hours=percentile_duration,
             sample_count=len(start_times),
+            jira_issue_key=jira_issue_key,
         )
 
     # Compute project_start_date = min of all percentile start times
