@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -20,6 +21,8 @@ from fluxx.data.models import (
 
 if TYPE_CHECKING:
     from fluxx.simulation.distributions import JiraSamplingContext
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -102,6 +105,11 @@ class SimulationState:
         # Free up the worker
         for worker_state in self.worker_states.values():
             if worker_state.current_task == task_id:
+                logger.debug(
+                    "Worker %s now idle after completing task %s",
+                    worker_state.worker_id,
+                    task_id,
+                )
                 worker_state.current_task = None
                 worker_state.available_time = completion_time
                 break
@@ -125,6 +133,13 @@ class SimulationState:
         worker_state = self.worker_states[worker_id]
         worker_state.current_task = task_id
         worker_state.available_time = estimated_completion
+
+        logger.debug(
+            "Worker %s now busy with task %s until %s",
+            worker_id,
+            task_id,
+            estimated_completion.isoformat(),
+        )
 
     def resolve_branch(
         self, branch_id: BranchId, chosen_world: PossibleWorldId

@@ -1,5 +1,6 @@
 """Distribution sampling utilities for simulation."""
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -16,6 +17,8 @@ from fluxx.jira.distributions import (
     create_empirical_bins,
     find_empirical_bin_for_estimate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def convert_shifted_lognormal_params(
@@ -148,7 +151,8 @@ def sample_with_rejection(
     Returns:
         A sample >= min_value
     """
-    for _ in range(max_attempts):
+    attempts = 0
+    for attempts in range(1, max_attempts + 1):
         if isinstance(dist, ShiftedLognormal):
             sample = sample_shifted_lognormal(dist, rng)
         elif isinstance(dist, Triangular):
@@ -157,6 +161,12 @@ def sample_with_rejection(
             raise ValueError(f"Unknown distribution type: {type(dist)}")
 
         if sample >= min_value:
+            if attempts > 10:
+                logger.debug(
+                    "Rejection sampling took %d attempts for min_value=%.2f",
+                    attempts,
+                    min_value,
+                )
             return sample
 
     # Fallback: approximate conditional distribution of tail with exponential
@@ -164,6 +174,15 @@ def sample_with_rejection(
     mean_original = estimate_mean(dist)
     lambda_rate = 1.0 / mean_original
     tail_sample = rng.exponential(scale=1.0 / lambda_rate)
+
+    logger.debug(
+        "Rejection sampling exhausted after %d attempts, using exponential fallback: "
+        "min_value=%.2f, result=%.2f",
+        max_attempts,
+        min_value,
+        min_value + tail_sample,
+    )
+
     return min_value + tail_sample
 
 

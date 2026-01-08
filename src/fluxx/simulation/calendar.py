@@ -1,6 +1,9 @@
 """Calendar and work-time calculation utilities for simulation."""
 
+import logging
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 def is_weekend(dt: datetime) -> bool:

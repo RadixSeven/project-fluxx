@@ -5,6 +5,8 @@ including task execution, branch resolution, and time management. Functions are
 designed to be small and focused for easy testing.
 """
 
+import logging
+import time
 from datetime import UTC, datetime
 
 import numpy as np
@@ -40,6 +42,8 @@ from fluxx.simulation.scheduler import (
     select_next_action,
 )
 from fluxx.simulation.state import SimulationState
+
+logger = logging.getLogger(__name__)
 
 # Task duration sampling
 
@@ -220,6 +224,15 @@ def start_task(
     # Update state
     state.start_task(task.id, worker_id, start_time, completion_time)
 
+    logger.debug(
+        "Task %s started: worker=%s, duration=%.2f hrs, start=%s, completion=%s",
+        task.id,
+        worker_id,
+        duration_hours,
+        start_time.isoformat(),
+        completion_time.isoformat(),
+    )
+
     # Record start event
     event = TaskEvent(
         node_id=task.id,
@@ -253,6 +266,13 @@ def complete_task(
 
     # Update state
     state.complete_task(task.id, completion_time)
+
+    logger.debug(
+        "Task %s completed: worker=%s, time=%s",
+        task.id,
+        worker_id,
+        completion_time.isoformat(),
+    )
 
     # Record completion event
     event = TaskEvent(
@@ -339,8 +359,18 @@ def resolve_branch(
     # Use pre-chosen world if set, otherwise randomly choose
     if branch.chosen_world_id is not None:
         chosen_world_id = branch.chosen_world_id
+        logger.debug(
+            "Branch %s resolved to pre-chosen world %s",
+            branch.id,
+            chosen_world_id,
+        )
     else:
         chosen_world_id = choose_possible_world(branch, rng)
+        logger.debug(
+            "Branch %s resolved to randomly chosen world %s",
+            branch.id,
+            chosen_world_id,
+        )
 
     # Update state
     state.resolve_branch(branch.id, chosen_world_id)
@@ -500,6 +530,8 @@ def run_single_sample(
     Returns:
         Sample object containing all events and success status
     """
+    logger.debug("Sample %d starting", sample_id)
+
     # Initialize state
     state = SimulationState(project, start_date, workers)
     calendar = WorkCalendar(start_date)
@@ -511,6 +543,7 @@ def run_single_sample(
 
         # Check if all tasks completed
         if state.all_tasks_completed():
+            logger.debug("Sample %d completed successfully", sample_id)
             return create_successful_sample(sample_id, state)
 
         # Select next action (start task or resolve branch)
@@ -527,7 +560,13 @@ def run_single_sample(
 
         # No actions possible - check for deadlock
         if detect_deadlock(state):
-            return create_failed_sample(sample_id, state)
+            failed_sample = create_failed_sample(sample_id, state)
+            logger.debug(
+                "Sample %d failed (deadlock): %d tasks incomplete",
+                sample_id,
+                len(failed_sample.failed_tasks),
+            )
+            return failed_sample
 
         # Advance time to next event
         try:
@@ -536,7 +575,13 @@ def run_single_sample(
             # Defensive: No next event and no actions - deadlock
             # This should always be caught by detect_deadlock above,
             # but we handle it defensively in case of logic errors.
-            return create_failed_sample(sample_id, state)
+            failed_sample = create_failed_sample(sample_id, state)
+            logger.debug(
+                "Sample %d failed (no next event): %d tasks incomplete",
+                sample_id,
+                len(failed_sample.failed_tasks),
+            )
+            return failed_sample
 
 
 # SimulationEngine class (for convenience)
@@ -573,6 +618,14 @@ class SimulationEngine:
         Returns:
             List of Sample objects, one per simulation run
         """
+        logger.info(
+            "Simulation starting: num_samples=%d, start_date=%s, workers=%d",
+            self.num_samples,
+            self.start_date.isoformat(),
+            len(workers),
+        )
+        start_time = time.monotonic()
+
         samples: list[Sample] = []
 
         for i in range(self.num_samples):
@@ -581,5 +634,17 @@ class SimulationEngine:
 
             sample = run_single_sample(project, workers, self.start_date, i, rng)
             samples.append(sample)
+
+        elapsed = time.monotonic() - start_time
+        failed_count = sum(1 for s in samples if s.failed_tasks)
+        failure_rate = failed_count / len(samples) if samples else 0.0
+
+        logger.info(
+            "Simulation complete: elapsed=%.2fs, samples=%d, failed=%d (%.1f%%)",
+            elapsed,
+            len(samples),
+            failed_count,
+            failure_rate * 100,
+        )
 
         return samples

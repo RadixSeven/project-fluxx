@@ -5,6 +5,7 @@ which workers can be assigned, and detecting deadlock conditions. Functions are
 designed to be small and focused for easy testing.
 """
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -22,6 +23,8 @@ from fluxx.data.models import (
     type_explode_id,
 )
 from fluxx.simulation.state import SimulationState
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -662,6 +665,12 @@ def select_next_action(
     eligible_tasks = get_eligible_tasks(state)
     eligible_branches = get_eligible_branches(state)
 
+    logger.debug(
+        "Scheduling step: eligible_tasks=%d, eligible_branches=%d",
+        len(eligible_tasks),
+        len(eligible_branches),
+    )
+
     # Combine all possible actions
     actions: list[Action] = []
 
@@ -673,11 +682,19 @@ def select_next_action(
 
     # If no actions possible, return None
     if not actions:
+        logger.debug("No actions available, waiting for task completions")
         return None
 
     # Randomly select one action
     index = rng.integers(0, len(actions))
-    return actions[index]
+    selected = actions[index]
+
+    if isinstance(selected, StartTaskAction):
+        logger.debug("Selected action: start task %s", selected.task_id)
+    else:
+        logger.debug("Selected action: resolve branch %s", selected.branch_id)
+
+    return selected
 
 
 # Deadlock detection
@@ -734,4 +751,11 @@ def detect_deadlock(state: SimulationState) -> bool:
     eligible_tasks = get_eligible_tasks(state)
     eligible_branches = get_eligible_branches(state)
 
-    return len(eligible_tasks) == 0 and len(eligible_branches) == 0
+    is_deadlocked = len(eligible_tasks) == 0 and len(eligible_branches) == 0
+
+    if is_deadlocked:
+        logger.debug(
+            "Deadlock detected: workers idle, tasks remain, no eligible actions"
+        )
+
+    return is_deadlocked
