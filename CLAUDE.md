@@ -293,3 +293,5 @@ Key modules emit log messages:
 6. **Strenuously avoid using `Any` or `cast`**: The type system in this codebase is designed to be complete. If you think you need `Any` or `cast`, you're likely misunderstanding the types. See [type_safety.md](type_safety.md) and the above section on Static Analysis (and policy exceptions) for more details.
 
 7. **Use `JsonObject`/`JsonValue` for JSON data**: Never use `dict[str, Any]` for JSON data. Import `JsonObject` and `JsonValue` from `fluxx.data.json_types` instead. These provide proper recursive type definitions for JSON structures without using `Any`.
+
+8. **Inaccessible JiraReferences**: A `JiraReference` may refer to an issue the user cannot access (due to permissions, project restrictions, etc.). Code using `JiraReference` should not assume the referenced issue is accessible. The importer creates dummy tasks for inaccessible dependency targets, and sync warns about inaccessible tasks rather than failing.

@@ -1374,6 +1374,22 @@ JiraReference {
 
 JiraIssueKey has a validator that it is of the form letters-numbers and is treated for type safety.
 
+**Inaccessible References**: A `JiraReference` may refer to a Jira issue that the user cannot access (e.g., due to permission changes, project restrictions, or issues in projects the user cannot view). This can occur when:
+- A dependency target issue is in a restricted project
+- The user's Jira permissions change after import
+- An issue is moved to a project the user cannot access
+
+When an inaccessible reference is detected during import (from dependency links), a **dummy task** is created as a stand-in:
+- Title: "Dummy task for {issue_key}"
+- Description: "{issue_key} could not be imported but was referenced from {referencing_issue}, so this dummy task was created to act as a stand-in."
+- Duration: Minimal (essentially zero work)
+- The `jira_reference` is still set, allowing future sync attempts
+
+During sync, inaccessible tasks generate warnings but do not fail the sync. Code that uses `JiraReference` should either:
+1. Not depend on the referenced issue being accessible
+2. Handle inaccessibility gracefully with appropriate fallback behavior
+3. Operate on data already fetched and stored locally (e.g., simulation uses stored task data, not live Jira data)
+
 Added to Task schema:
 ```
 Task {
