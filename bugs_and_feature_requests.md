@@ -1,3 +1,21 @@
 - The import strips the time zone info from the Jira datetimes. Return the normal datetimes. This code should never use naive datetime objects.
+- To give more estimates for longer timelines (not present once an issue has been fully broken dowon into child tasks), we could record a history for parent tasks that are closed and whose child tasks are all closed. Sum the original estimates of all child tasks and store those in a history entry. Mark that entry with a field like "estimate_source": "from summing children". This is now a required field. Migrate old version to "estimate_source": "from original estimate field". We won't use this new information yet - it will allow excluding this data from more sophisticated models that would be corrupted by it. But it needs to be present now for future applications to use it.
+- Make ticket ordering deterministic based on "rank". When extracting Jira issues, also extract `rank`.
+    - Rank will be an optional field
+    - When two tasks or branches can start at the same time
+      - Choose the one with the lower rank if they both have rank
+      - If only one has rank, choose the one with the rank
+      - If both have no rank, sort by the title alphabetically
+      - If they have the same title, sort by the node ID.
+      - I believe no two nodes in the same version of the same DAG can have the
+        same node ID.
+    - Rank should be available in the editor pane
+      - No rank shows as blank
+      - Typing a number sets the rank.
+      - Typing a non-number will revert to blank when the field loses focus
+    - Rank should be a normal float
+      - When pulled from Jira, it will be an integer
+      - NaN, +Inf, -Inf are not valid ranks.
+    - DAG List view allows sorting by rank and displays the rank in the summary
 - Ensure that the simulation of a → branch(possible_1 50%, possible_2 50%), possible_1 → b1, possible_2 → b2, b1→c1, c1→d2, b2→c2, c2→d2, a→e, e→d1, e→f, f→d2 does not fail. Samples should have assignments for (a, e, f, b1, c1, and branch=possible_1) or (a, e, f, b2, c2, and branch=possible2)
 - We need to take care of the case where a task has multiple dependencies in different possible worlds. When adding a dependency on a task that depends on one or more possible worlds (even indirectly), specify whether (a) the current node should also have a dependency on those possible worlds (the default) or (b) the dependency should be ignored in possible worlds where the task does not occur. This is necessary because otherwise the DAG would fail in possible worlds where the dependent task does not occur. If a possible world "Child" depends on another possible world "Parent", the node depending on it does not need a dependency on "Parent". This implies that dependencies directly on possible worlds don't trigger this check. As far as representation, we should store this choice for each dependency. When adding a dependency to a task, we need to see whether all other tasks, if they had their dependencies added now with the same choice would need a new dependency. If so, we add it. This search can be optimized by looking only "downstream" and not propagating across dependencies whose source is a branch (since their descendants will be "Child" possible worlds and mask the "Parent") and not propagating across dependencies that ignore possible worlds. If all of a node's dependencies that propagate possible world dependencies depend on the same set of possible worlds (a very common case), then it does not need any additional possible world dependencies. It has them implicitly. Test case: a → branch(possible_1, possible_2), possible_1 → b1, possible_2 → b2, b1→c1, b2→c2, a→d, d→d2, b1→d2, d2→e, d→d3
