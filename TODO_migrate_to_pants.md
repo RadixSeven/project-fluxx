@@ -13,7 +13,8 @@ Everything else (linting, type checking, coverage verification, running the app)
 | Task | Tool | Environment |
 |------|------|-------------|
 | Running tests | Pants | Pants-managed (hermetic) |
-| Coverage verification (90% GUI, 100% other) | make (existing) | venv |
+| Coverage generation | Pants (`--test-use-coverage`) | Pants-managed (hermetic) |
+| Coverage verification (90% GUI, 100% other) | make (reads Pants output) | venv |
 | Linting (ruff) | make (existing) | venv |
 | Type checking (mypy) | make (existing) | venv |
 | Running the application | `fluxx` (existing) | venv |
@@ -56,7 +57,12 @@ Pants uses its own hermetic environment for testing, which provides:
    args = ["--no-header", "-vv"]
    env_vars = ["QT_QPA_PLATFORM=offscreen"]
    execution_slot_var = "TEST_EXECUTION_SLOT"
+
+   [coverage-py]
+   report = ["json"]
    ```
+
+   Coverage data will be written to `dist/coverage/python/coverage.json` when tests are run with `--test-use-coverage`.
 
 2. **Run initial bootstrap**
    ```bash
@@ -92,10 +98,12 @@ Pants requires `BUILD` files to define targets. Create minimal files for source 
    python_sources()
    ```
 
-5. **Create `stubs/BUILD`**
+5. **Create `stubs/BUILD`** (and subdirectories as needed)
    ```python
    python_sources()
    ```
+
+   The `stubs/` directory contains mypy type stubs. Create additional BUILD files in subdirectories if they exist, each containing `python_sources()`.
 
 6. **Create `tests/BUILD`**
    ```python
@@ -103,17 +111,26 @@ Pants requires `BUILD` files to define targets. Create minimal files for source 
    ```
 
 7. **Create BUILD files for test subdirectories**
+
+   Test directories (containing `test_*.py` files):
    - `tests/simulation/BUILD`
-   - `tests/simulation/fixtures/BUILD`
    - `tests/gui/BUILD`
    - `tests/gui/simulation/BUILD`
    - `tests/gui/jira/BUILD`
    - `tests/jira/BUILD`
-   - `tests/jira/fixtures/BUILD`
 
    Each containing:
    ```python
    python_tests()
+   ```
+
+   Fixtures directories (containing helper modules/data, not tests):
+   - `tests/simulation/fixtures/BUILD`
+   - `tests/jira/fixtures/BUILD`
+
+   Each containing:
+   ```python
+   python_sources()
    ```
 
 8. **Create `BUILD`** in repo root (reads dependencies from pyproject.toml)
@@ -187,8 +204,10 @@ Pants requires `BUILD` files to define targets. Create minimal files for source 
     # Pants
     .pants.d/
     .pids/
-    locks/
+    dist/
     ```
+
+    Note: `locks/` should be **committed** to version control to ensure reproducible builds across machines.
 
 17. **Update CLAUDE.md** with pants test commands:
     ```markdown
@@ -200,6 +219,11 @@ Pants requires `BUILD` files to define targets. Create minimal files for source 
 
 18. **You (human) update make `test` target** to call pants instead of pytest directly
 
+19. **You (human) update make coverage targets** to use Pants coverage output
+    - Run tests with coverage: `./pants test --test-use-coverage ::`
+    - Coverage JSON is written to `dist/coverage/python/coverage.json`
+    - Update `make coverage` and `make verify-coverage` to read from this location
+
 ## Commands After Migration
 
 ```bash
@@ -210,7 +234,10 @@ Pants requires `BUILD` files to define targets. Create minimal files for source 
 ./pants test tests/test_models.py
 ./pants test tests/simulation::
 
-# Full validation with coverage (make - unchanged, uses venv)
+# Run tests with coverage (generates dist/coverage/python/coverage.json)
+./pants test --test-use-coverage ::
+
+# Full validation with coverage (make - reads Pants coverage output)
 make all_checks
 
 # Run the app (unchanged, uses venv)
@@ -227,8 +254,8 @@ make all_checks
 
 ## What Stays the Same
 
-- `make all_checks` for full validation (uses venv)
-- Coverage thresholds enforced by make (90% GUI, 100% other)
+- `make all_checks` for full validation
+- Coverage thresholds enforced by make (90% GUI, 100% other) - now reads from Pants coverage output
 - Linting and formatting via make/ruff (uses venv)
 - Type checking via make/mypy (uses venv)
 - Running `fluxx` and other entry points from venv
@@ -238,19 +265,20 @@ make all_checks
 ## Validation Checklist
 
 - [ ] `./pants test ::` passes all tests
-- [ ] Lock file generated successfully
+- [ ] Lock file generated and committed successfully
 - [ ] Second run with no changes is instant (cached)
 - [ ] Changes to source files trigger only dependent tests
-- [ ] `make all_checks` still works for full validation
+- [ ] `./pants test --test-use-coverage ::` generates `dist/coverage/python/coverage.json`
+- [ ] `make all_checks` still works for full validation (reads Pants coverage output)
 
 ## Rollback Plan
 
 If Pants causes issues:
 1. Remove `pants.toml` and all `BUILD` files
-2. Remove `locks/` directory
-3. Remove `.pants.d/` and `.pids/` directories
+2. Remove `locks/` directory (and remove from git)
+3. Remove `.pants.d/`, `.pids/`, and `dist/` directories
 4. Remove Pants entries from `.gitignore`
-5. Revert make test target to call pytest directly
+5. Revert make test and coverage targets to call pytest directly
 
 ## Keeping Dependencies in Sync
 
