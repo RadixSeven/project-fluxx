@@ -32,3 +32,5 @@ extra_env_vars = ["QT_QPA_PLATFORM=offscreen"]
 
 [coverage-py]
 report = ["json"]
+# Only measure coverage for src/ and .claude/hooks/, not tests/
+#filter = ["fluxx", ".claude/hooks"]
