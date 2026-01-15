@@ -24,13 +24,14 @@
             to fix the missing items. These missing item fixes will be recorded in step (10.b) below.
         iii. For each truly impossible item, add a list item (which may have sub-points under it) to `completed_bugs_and_feature_requests.md`. The new list item and its sub-points must
             1. Be a sub-list of a placeholder list item `- PLACEHOLDER: Impossible items while executing <plan filename>`
+               (if the placeholder already exists, add the new item as an additional sub-item.)
             2. Give the filename of the plan with the impossible item and which item was impossible. The repetition
                of the filename is needed because the placeholder will be replaced by the original request once
-               the request is terminated.
+               the request is completed.
             3. Give the latest commit containing a version of the plan with the impossible item
             4. Summarize what was planned, why it is impossible, the solutions that were tried, and what will be done
                instead to come as close to resolving the original item from `bugs_and_feature_requests.md`
-        iv. Revise the plan to substitute what will be done instead (from 10.a.iii.3 above) for each impossible step.
+        iv. Revise the plan to substitute what will be done instead (from 10.a.iii.4 above) for each impossible step.
             Do not assume readers know of the specification of the impossible step, since you are substituting
             a possible step for the impossible step and the impossible step will thus no longer be in the plan
             document. In the substitute step, explain what is being done and the motivation and why it was impossible
