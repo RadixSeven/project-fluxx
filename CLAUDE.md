@@ -62,7 +62,7 @@ Pants provides incremental testing - only tests affected by changed files are re
   $(python -c "import tomllib; t=tomllib.load(open('pyproject.toml','rb')); print(' '.join(f'\"{d}\"' for d in t['project']['dependencies'] + t['project']['optional-dependencies']['dev']))")
 ```
 
-Note: The lockfile targets Linux only (PySide6 doesn't have universal wheels). Add `"PySide6>=6.6.0,<6.10"` constraint to ensure manylinux_2_28 compatibility.
+Note: The lockfile targets Linux only (PySide6 doesn't have universal wheels). Add `"PySide6>=6.6.0,<6.10"` constraint to ensure manylinux_2_28 (glibc 2.28) compatibility.
 
 ### Code Quality
 ```bash
