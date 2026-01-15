@@ -380,6 +380,94 @@ def test_group_and_sort_variants_multiple_worlds() -> None:
     assert dividers[1] == 3  # Divider after world_a task
 
 
+def test_group_and_sort_variants_tiebreak_by_end_time() -> None:
+    """Test that tasks with same start time are sorted by end time."""
+    project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+    empty_seq: WorldSequence = ()
+
+    # Three tasks with same start time but different end times
+    task1 = TaskVariantKey(TaskId("task1"), empty_seq)
+    task2 = TaskVariantKey(TaskId("task2"), empty_seq)
+    task3 = TaskVariantKey(TaskId("task3"), empty_seq)
+
+    schedules = {
+        task1: GanttVariantSchedule(
+            variant_key=task1,
+            task_title="Task 1",
+            start_time=project_start,  # Same start
+            duration_hours=3.0,
+            end_time=project_start + timedelta(hours=3),  # Latest end
+        ),
+        task2: GanttVariantSchedule(
+            variant_key=task2,
+            task_title="Task 2",
+            start_time=project_start,  # Same start
+            duration_hours=1.0,
+            end_time=project_start + timedelta(hours=1),  # Earliest end
+        ),
+        task3: GanttVariantSchedule(
+            variant_key=task3,
+            task_title="Task 3",
+            start_time=project_start,  # Same start
+            duration_hours=2.0,
+            end_time=project_start + timedelta(hours=2),  # Middle end
+        ),
+    }
+
+    sorted_variants, dividers = _group_and_sort_variants(schedules)
+
+    # Should be sorted by end time when start times are equal
+    assert len(sorted_variants) == 3
+    assert sorted_variants[0][0] == task2  # Earliest end (1hr)
+    assert sorted_variants[1][0] == task3  # Middle end (2hr)
+    assert sorted_variants[2][0] == task1  # Latest end (3hr)
+    assert dividers == []
+
+
+def test_group_and_sort_variants_tiebreak_by_title() -> None:
+    """Test that tasks with same start and end time are sorted by title."""
+    project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)
+    empty_seq: WorldSequence = ()
+
+    # Three tasks with same start and end times, different titles
+    task1 = TaskVariantKey(TaskId("task1"), empty_seq)
+    task2 = TaskVariantKey(TaskId("task2"), empty_seq)
+    task3 = TaskVariantKey(TaskId("task3"), empty_seq)
+
+    schedules = {
+        task1: GanttVariantSchedule(
+            variant_key=task1,
+            task_title="Zebra Task",  # Last alphabetically
+            start_time=project_start,
+            duration_hours=2.0,
+            end_time=project_start + timedelta(hours=2),
+        ),
+        task2: GanttVariantSchedule(
+            variant_key=task2,
+            task_title="Alpha Task",  # First alphabetically
+            start_time=project_start,
+            duration_hours=2.0,
+            end_time=project_start + timedelta(hours=2),
+        ),
+        task3: GanttVariantSchedule(
+            variant_key=task3,
+            task_title="Middle Task",  # Middle alphabetically
+            start_time=project_start,
+            duration_hours=2.0,
+            end_time=project_start + timedelta(hours=2),
+        ),
+    }
+
+    sorted_variants, dividers = _group_and_sort_variants(schedules)
+
+    # Should be sorted alphabetically by title when start and end times are equal
+    assert len(sorted_variants) == 3
+    assert sorted_variants[0][0] == task2  # "Alpha Task"
+    assert sorted_variants[1][0] == task3  # "Middle Task"
+    assert sorted_variants[2][0] == task1  # "Zebra Task"
+    assert dividers == []
+
+
 def test_gantt_widget_with_world_sequence_grouping(qtbot: QtBot) -> None:
     """Test that Gantt widget groups tasks by world sequence with dividers."""
     project_start = datetime(2024, 1, 1, 9, 0, 0, tzinfo=UTC)

@@ -143,9 +143,11 @@ def _group_and_sort_variants(
             (variant_key, schedule)
         )
 
-    # Sort each group by start time
+    # Sort each group by start time, then end time, then title (for determinism)
     for world_seq in variants_by_world_seq:
-        variants_by_world_seq[world_seq].sort(key=lambda item: item[1].start_time)
+        variants_by_world_seq[world_seq].sort(
+            key=lambda item: (item[1].start_time, item[1].end_time, item[1].task_title)
+        )
 
     # Flatten into final sorted list and track divider positions
     sorted_variants: list[tuple[TaskVariantKey, GanttVariantSchedule]] = []
