@@ -49,7 +49,20 @@
 12. Since we passed step 10, we know that the plan was successfully executed (step 9 confirmed that no items were missed
     and step 10 would have iterated if the review indicated missing plan elements) and that the fix works except for
     impossible parts of the request (step 7). Remove the plan file that corresponds to the first item on the list `bugs_and_feature_requests.md`.
-13. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. If there were impossible items related to this new item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. If there is no placeholder then the moved item will be a new item.
-14. Commit the changes to the plan (its deletion), the changes to `bugs_and_feature_requests.md` and the changes to `completed_bugs_and_feature_requests.md` (which may involve its creation).
-15. If there are no more items in `bugs_and_feature_requests.md`, stop.
-16. Otherwise, go back to step 1 to take care of the first item.
+13. Check for files matching the pattern `bugs_and_feature_requests_*.md` where `*` is a number
+    (e.g., `bugs_and_feature_requests_01.md`, `bugs_and_feature_requests_2.md`). These files allow the user to add
+    new items while the executor is working. The user follows a safe creation pattern: create the file under a
+    temporary name (not matching the pattern), write the contents, then rename it to match the pattern. Once renamed,
+    the user must not modify the file. If any such files exist:
+    a. Sort them by their numeric suffix (numerically, so `_2` comes before `_10` and `_011` comes after `_10`).
+    b. Append the contents of each file, in sorted order, to the end of `bugs_and_feature_requests.md`.
+    c. Delete the numbered files after their contents have been appended.
+14. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. If there were impossible items related to this new item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. If there is no placeholder then the moved item will be a new item.
+15. Commit the changes to the plan (its deletion), the changes to `bugs_and_feature_requests.md`,
+    the changes to `completed_bugs_and_feature_requests.md` (which may involve its creation),
+    and the deletion of any numbered files merged in step 13.
+16. If there are no more items in `bugs_and_feature_requests.md`:
+    a. Check for numbered files as in step 13. If any exist, merge them per step 13, commit the changes
+       to `bugs_and_feature_requests.md` and the deletion of the numbered files, then continue to step 17.
+    b. Otherwise (there are no numbered files and no items in `bugs_and_feature_requests.md`), stop.
+17. Go back to step 1 to take care of the first item.
