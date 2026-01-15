@@ -5,7 +5,7 @@
 4. Commit the improved plan file.
 5. Execute the plan in the plan file.
 6. Run `source venv/bin/activate && pre-commit` and `source venv/bin/activate && make all_checks`, fixing problems they surface until they both pass.
-7. Verify that the fix works (When iterating a request where impossible items were identified in step 10, do not require that the fix has addressed parts of the request that were marked as impossible - since that is probably impossible.)
+7. Verify that the fix works (When iterating a request where impossible items were identified in a previous iteration that included step 10, do not require that the fix has addressed parts of the request that were marked as impossible - since that is probably impossible.)
 8. Commit the changes made by following the plan.
 9. Thoroughly and systematically review the plan and the original item on the list from `bugs_and_feature_requests.md` to see if any aspects were missed (even review items marked as completed - they may have been marked in error).
 10. If any aspects were missed:
@@ -59,7 +59,54 @@
     a. Sort them by their numeric suffix (numerically, so `_2` comes before `_10` and `_011` comes after `_10`).
     b. Append the contents of each file, in sorted order, to the end of `bugs_and_feature_requests.md`.
     c. Delete the numbered files after their contents have been appended.
-14. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. If there were impossible items related to this completed item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. If there is no placeholder then the moved item will be a new item. (Step 1 defines "the first item")
+14. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. (Step 1 defines "the first item")
+    a. If there were impossible items related to this completed item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. (See below for details of the "replacement".)
+        i. If the moved item is a parent with children, then the parent will replace the placeholder and the children
+           will be merged with the placeholder as explained below.
+            1. The merged item will have two children "ORIGINAL_CHILDREN" and "IMPOSSIBLE_CHILDREN"
+            2. The original children of the moved item will be children of "ORIGINAL_CHILDREN"
+            3. The children of the placeholder will become children of "IMPOSSIBLE_CHILDREN"
+            4. Example of merging:
+               a. If the moved item was:
+                  - First task PLAN_FILE: TODO_first_task.md
+                       - First task, first child
+                       - Second child of the first task
+               b. And `completed_bugs_and_feature_requests.md` held
+                  - Some task PLAN_FILE: TODO_some_task.md
+                  - PLACEHOLDER: Impossible items while executing TODO_first_task.md
+                      - Impossible task 1 first line
+                          - Impossible task 1 first sub item
+                      - Impossible task 2 first line
+                          - Impossible task 2 first sub item
+                          - Impossible task 2 second sub item
+               c. Then the resulting `completed_bugs_and_feature_requests.md` after merging would be:
+                  - Some task PLAN_FILE: TODO_some_task.md
+                  - First task PLAN_FILE: TODO_first_task.md
+                      - ORIGINAL_CHILDREN
+                           - First task, first child
+                           - Second child of the first task
+                      - IMPOSSIBLE_CHILDREN:
+                          - Impossible task 1 first line
+                              - Impossible task 1 first sub item
+                          - Impossible task 2 first line
+                              - Impossible task 2 first sub item
+                              - Impossible task 2 second sub item
+        ii. If the moved item has no children, then the merged item will have one child "IMPOSSIBLE_CHILDREN". The children of the placeholder will become children of "IMPOSSIBLE_CHILDREN".
+            1. Example of merging.
+               a. If the moved item was:
+                  - First task PLAN_FILE: TODO_first_task.md
+               b. If the `completed_bugs_and_feature_requests.md` started the same as the one from (14.a.i.4.b).
+               c. Then the resulting `completed_bugs_and_feature_requests.md` after merging would be:
+                  - Some task PLAN_FILE: TODO_some_task.md
+                  - First task PLAN_FILE: TODO_first_task.md
+                      - IMPOSSIBLE_CHILDREN:
+                          - Impossible task 1 first line
+                              - Impossible task 1 first sub item
+                          - Impossible task 2 first line
+                              - Impossible task 2 first sub item
+                              - Impossible task 2 second sub item
+    b. If there is no placeholder then the moved item will be a new item, keeping its children (if any).
+    c. In both cases (placeholder or no placeholder), the move should preserve the PLAN_FILE annotation in the completed item despite its having been deleted. Readers will be able to retrieve the plan file from `git` for reference.
 15. Commit the changes to the plan (its deletion), the changes to `bugs_and_feature_requests.md`,
     the changes to `completed_bugs_and_feature_requests.md` (which may involve its creation),
     and the deletion of any numbered files merged in step 13.
