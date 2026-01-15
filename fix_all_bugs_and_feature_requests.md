@@ -1,4 +1,4 @@
-1. Make a plan to fix or enact the first item on the list `bugs_and_feature_requests.md`. `bugs_and_feature_requests.md` is a Markdown list and "the first item" refers to the first item and its children. Put the plan in an appropriately named `TODO_*.md` file. (There are other TODO_*.md files to give you an idea of what you might name it.) Add the plan file name to the end of the list item the plan addresses in the format `PLAN_FILE: TODO_file_name_here.md`. (If the list item we're addressing has children, add the `PLAN_FILE` annotation to the end of the parent). Adding the plan file name will enable you to remember it later. (To simplify the language, we'll call resolving the issue "fixing" it in future steps and the changes needed to resolve it will be called "the fix.")
+1. Make a plan to fix or enact the first item on the list `bugs_and_feature_requests.md`. `bugs_and_feature_requests.md` is a Markdown list and "the first item" refers to the first item and its children. Put the plan in an appropriately named `TODO_*.md` file. (There are other TODO_*.md files to give you an idea of what you might name it.) Add the plan file name to the end of the list item the plan addresses in the format `PLAN_FILE: TODO_file_name_here.md`. (If the list item we're addressing has children, add the `PLAN_FILE` annotation to the end of the parent). Adding the plan file name will enable you to remember it later. (To simplify the language, we'll call resolving the issue "fixing" it in future steps and the changes needed to resolve it will be called "the fix."). The first item should not have child list elements named `__ORIGINAL_CHILDREN__` or `__IMPOSSIBLE_CHILDREN__`.
 2. Commit the draft.
 3. Start a sub-agent to review the plan file (which may be a partly completed plan on which you are iterating)
    and incorporate the sub-agent's feedback.
@@ -63,9 +63,9 @@
     a. If there were impossible items related to this completed item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. (See below for details of the "replacement".)
         i. If the moved item is a parent with children, then the parent will replace the placeholder and the children
            will be merged with the placeholder as explained below.
-            1. The merged item will have two children "ORIGINAL_CHILDREN" and "IMPOSSIBLE_CHILDREN"
-            2. The original children of the moved item will be children of "ORIGINAL_CHILDREN"
-            3. The children of the placeholder will become children of "IMPOSSIBLE_CHILDREN"
+            1. The merged item will have two children "__ORIGINAL_CHILDREN__" and "__IMPOSSIBLE_CHILDREN__"
+            2. The original children of the moved item will be children of "__ORIGINAL_CHILDREN__"
+            3. The children of the placeholder will become children of "__IMPOSSIBLE_CHILDREN__"
             4. Example of merging:
                a. If the moved item was:
                   - First task PLAN_FILE: TODO_first_task.md
@@ -82,16 +82,16 @@
                c. Then the resulting `completed_bugs_and_feature_requests.md` after merging would be:
                   - Some task PLAN_FILE: TODO_some_task.md
                   - First task PLAN_FILE: TODO_first_task.md
-                      - ORIGINAL_CHILDREN
+                      - __ORIGINAL_CHILDREN__
                            - First task, first child
                            - Second child of the first task
-                      - IMPOSSIBLE_CHILDREN:
+                      - __IMPOSSIBLE_CHILDREN__
                           - Impossible task 1 first line
                               - Impossible task 1 first sub item
                           - Impossible task 2 first line
                               - Impossible task 2 first sub item
                               - Impossible task 2 second sub item
-        ii. If the moved item has no children, then the merged item will have one child "IMPOSSIBLE_CHILDREN". The children of the placeholder will become children of "IMPOSSIBLE_CHILDREN".
+        ii. If the moved item has no children, then the merged item will have one child "__IMPOSSIBLE_CHILDREN__". The children of the placeholder will become children of "__IMPOSSIBLE_CHILDREN__".
             1. Example of merging.
                a. If the moved item was:
                   - First task PLAN_FILE: TODO_first_task.md
@@ -99,7 +99,7 @@
                c. Then the resulting `completed_bugs_and_feature_requests.md` after merging would be:
                   - Some task PLAN_FILE: TODO_some_task.md
                   - First task PLAN_FILE: TODO_first_task.md
-                      - IMPOSSIBLE_CHILDREN:
+                      - __IMPOSSIBLE_CHILDREN__
                           - Impossible task 1 first line
                               - Impossible task 1 first sub item
                           - Impossible task 2 first line
