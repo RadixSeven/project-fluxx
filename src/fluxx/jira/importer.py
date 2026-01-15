@@ -17,6 +17,7 @@ from fluxx.data.id_generation import (
     generate_event_id,
     generate_task_id,
 )
+from fluxx.data.migration import CURRENT_VERSION
 from fluxx.data.models import (
     DAG,
     BranchId,
@@ -58,6 +59,7 @@ from fluxx.jira.extraction import (
     parse_jira_datetime,
 )
 from fluxx.jira.models import (
+    EstimateSource,
     JiraConfig,
     JiraDurationHistoryEntry,
     JiraIssueKey,
@@ -462,6 +464,7 @@ def _create_history_entries(
     workers: dict[str, Worker],
     server_url: str,
     server_timezone: str,
+    exclude_keys: set[str] | None = None,
 ) -> list[JiraDurationHistoryEntry]:
     """Create history entries from completed issues.
 
@@ -472,6 +475,8 @@ def _create_history_entries(
         workers: Worker map from Jira user_id to Worker
         server_url: Jira server URL
         server_timezone: Server timezone for datetime parsing
+        exclude_keys: Optional set of issue keys to exclude (used to skip parent
+            issues which are handled separately)
 
     Returns:
         List of history entries for completed issues
@@ -479,6 +484,10 @@ def _create_history_entries(
     entries: list[JiraDurationHistoryEntry] = []
 
     for issue in issues:
+        # Skip excluded issues (parents are handled separately)
+        if exclude_keys and issue.key in exclude_keys:
+            continue
+
         # Extract completion to determine if done
         workers_by_id: dict[str, WorkerId] = {}
         for jira_id, w in workers.items():
@@ -534,6 +543,288 @@ def _create_history_entries(
                 story_points=issue.fields.story_points,
                 created_datetime=created_dt,
                 resolved_datetime=resolved_dt,
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
+            )
+        )
+
+    return entries
+
+
+def _is_issue_done(issue: JiraIssueResponse, server_timezone: str) -> bool:
+    """Check if an issue is completed (has DoneCompletion).
+
+    Args:
+        issue: The Jira issue to check
+        server_timezone: Server timezone for datetime parsing
+
+    Returns:
+        True if the issue is done, False otherwise
+    """
+    completion_result = extract_completion(issue, {}, server_timezone)
+    return isinstance(completion_result.completion, DoneCompletion)
+
+
+def _compute_descendant_estimate(
+    issue_key: str,
+    issues_by_key: dict[str, JiraIssueResponse],
+    children_by_parent: dict[str, list[str]],
+    server_timezone: str,
+) -> int | None:
+    """Recursively compute the summed estimate for an issue and its descendants.
+
+    Per Decision 1 in the plan: If a child has no estimate, check if it has
+    children and recursively compute their sum. If a leaf has no estimate,
+    return None to indicate this parent cannot have a summed estimate.
+
+    Args:
+        issue_key: The issue key to compute estimate for
+        issues_by_key: Map of issue key to issue response
+        children_by_parent: Map of parent key to list of child keys
+        server_timezone: Server timezone for datetime parsing
+
+    Returns:
+        The summed estimate in seconds, or None if any leaf lacks an estimate
+    """
+    issue = issues_by_key.get(issue_key)
+    if issue is None:
+        return None
+
+    # Get this issue's own estimate
+    own_estimate: int | None = None
+    if issue.fields.timetracking:
+        own_estimate = issue.fields.timetracking.original_estimate_seconds
+
+    # Get children for this issue
+    child_keys = children_by_parent.get(issue_key, [])
+
+    if not child_keys:
+        # Leaf node - return its own estimate (may be None)
+        return own_estimate
+
+    # This is a parent - sum children's estimates recursively
+    total = 0
+    for child_key in child_keys:
+        child_estimate = _compute_descendant_estimate(
+            child_key, issues_by_key, children_by_parent, server_timezone
+        )
+        if child_estimate is None:
+            # A descendant lacks an estimate - cannot compute sum
+            return None
+        total += child_estimate
+
+    return total
+
+
+def _compute_descendant_logged_time(
+    issue_key: str,
+    issues_by_key: dict[str, JiraIssueResponse],
+    children_by_parent: dict[str, list[str]],
+) -> int | None:
+    """Recursively compute the summed logged time for an issue and its descendants.
+
+    Args:
+        issue_key: The issue key to compute logged time for
+        issues_by_key: Map of issue key to issue response
+        children_by_parent: Map of parent key to list of child keys
+
+    Returns:
+        The summed logged time in seconds, or None if any descendant lacks logged time
+    """
+    issue = issues_by_key.get(issue_key)
+    if issue is None:
+        return None
+
+    # Get this issue's own logged time
+    own_logged: int | None = None
+    if issue.fields.worklog and issue.fields.worklog.worklogs:
+        own_logged = sum(w.time_spent_seconds for w in issue.fields.worklog.worklogs)
+
+    # Get children for this issue
+    child_keys = children_by_parent.get(issue_key, [])
+
+    if not child_keys:
+        # Leaf node - return its own logged time (may be None)
+        return own_logged
+
+    # This is a parent - sum children's logged time recursively
+    total = own_logged if own_logged is not None else 0
+    for child_key in child_keys:
+        child_logged = _compute_descendant_logged_time(
+            child_key, issues_by_key, children_by_parent
+        )
+        if child_logged is None:
+            # A descendant lacks logged time - return None per spec
+            return None
+        total += child_logged
+
+    return total
+
+
+def _all_descendants_done(
+    issue_key: str,
+    issues_by_key: dict[str, JiraIssueResponse],
+    children_by_parent: dict[str, list[str]],
+    server_timezone: str,
+) -> bool:
+    """Check if all descendants of an issue are done.
+
+    Args:
+        issue_key: The issue key to check descendants for
+        issues_by_key: Map of issue key to issue response
+        children_by_parent: Map of parent key to list of child keys
+        server_timezone: Server timezone for datetime parsing
+
+    Returns:
+        True if all descendants are done, False otherwise
+    """
+    child_keys = children_by_parent.get(issue_key, [])
+
+    for child_key in child_keys:
+        child_issue = issues_by_key.get(child_key)
+        if child_issue is None:
+            # Child not in our issue set - consider it not done
+            return False
+
+        if not _is_issue_done(child_issue, server_timezone):
+            return False
+
+        # Recursively check grandchildren
+        if not _all_descendants_done(
+            child_key, issues_by_key, children_by_parent, server_timezone
+        ):
+            return False
+
+    return True
+
+
+def _create_parent_history_entries(
+    issues: list[JiraIssueResponse],
+    hierarchy: dict[str, HierarchyEntry],
+    workers: dict[str, Worker],
+    server_url: str,
+    server_timezone: str,
+) -> list[JiraDurationHistoryEntry]:
+    """Create history entries for parent issues with summed child estimates.
+
+    This enables historical data collection for parent tasks by summing the
+    original estimates of their closed child tasks.
+
+    Per Decision 3: If parent has own estimate > 0, use that. Otherwise,
+    recursively compute sum of descendants' estimates.
+
+    Args:
+        issues: All Jira issues
+        hierarchy: Map of issue_key -> HierarchyEntry with parent info
+        workers: Worker map from Jira user_id to Worker
+        server_url: Jira server URL
+        server_timezone: Server timezone for datetime parsing
+
+    Returns:
+        List of history entries for parent issues with summed estimates
+    """
+    entries: list[JiraDurationHistoryEntry] = []
+
+    # Build lookup structures
+    issues_by_key: dict[str, JiraIssueResponse] = {issue.key: issue for issue in issues}
+
+    # Build parent -> children mapping from hierarchy
+    children_by_parent: dict[str, list[str]] = defaultdict(list)
+    for issue_key, entry in hierarchy.items():
+        if entry.parent_key:
+            children_by_parent[entry.parent_key].append(issue_key)
+
+    # Find all parent keys (issues that have children)
+    parent_keys = set(children_by_parent.keys())
+
+    for parent_key in parent_keys:
+        parent_issue = issues_by_key.get(parent_key)
+        if parent_issue is None:
+            # Parent not in our issue set
+            continue
+
+        # Check if parent is done
+        if not _is_issue_done(parent_issue, server_timezone):
+            continue
+
+        # Check if ALL children (recursively) are done
+        if not _all_descendants_done(
+            parent_key, issues_by_key, children_by_parent, server_timezone
+        ):
+            continue
+
+        # Determine estimate source and value (per Decision 3)
+        parent_own_estimate: int | None = None
+        if parent_issue.fields.timetracking:
+            parent_own_estimate = (
+                parent_issue.fields.timetracking.original_estimate_seconds
+            )
+
+        estimate_source: EstimateSource
+        final_estimate: int | None
+
+        if parent_own_estimate is not None and parent_own_estimate > 0:
+            # Parent has its own estimate - use it
+            estimate_source = EstimateSource.FROM_ORIGINAL_ESTIMATE
+            final_estimate = parent_own_estimate
+        else:
+            # Compute sum from children recursively
+            summed_estimate = _compute_descendant_estimate(
+                parent_key, issues_by_key, children_by_parent, server_timezone
+            )
+            if summed_estimate is None:
+                # A leaf descendant lacks an estimate - skip this parent
+                continue
+            estimate_source = EstimateSource.FROM_SUMMING_CHILDREN
+            final_estimate = summed_estimate
+
+        # Compute summed logged time for all descendants
+        total_logged_time = _compute_descendant_logged_time(
+            parent_key, issues_by_key, children_by_parent
+        )
+
+        # Determine the primary worker (from parent issue's worklogs)
+        worker_jira_id: str | None = None
+        if parent_issue.fields.worklog and parent_issue.fields.worklog.worklogs:
+            logged_by_worker: dict[str, int] = defaultdict(int)
+            for wlog in parent_issue.fields.worklog.worklogs:
+                logged_by_worker[wlog.author.user_id] += wlog.time_spent_seconds
+            if logged_by_worker:
+                worker_jira_id = max(
+                    logged_by_worker, key=lambda k: logged_by_worker[k]
+                )
+
+        # Get remaining estimate from parent
+        remaining_estimate: int | None = None
+        if parent_issue.fields.timetracking:
+            remaining_estimate = (
+                parent_issue.fields.timetracking.remaining_estimate_seconds
+            )
+
+        # Parse datetime fields
+        created_dt = None
+        if parent_issue.fields.created:
+            naive_dt = parse_jira_datetime(parent_issue.fields.created, server_timezone)
+            created_dt = naive_dt.replace(tzinfo=UTC)
+        resolved_dt = None
+        if parent_issue.fields.resolutiondate:
+            naive_dt = parse_jira_datetime(
+                parent_issue.fields.resolutiondate, server_timezone
+            )
+            resolved_dt = naive_dt.replace(tzinfo=UTC)
+
+        entries.append(
+            JiraDurationHistoryEntry(
+                server_url=server_url,
+                issue_key=JiraIssueKey.from_string(parent_key),
+                original_estimate_seconds=final_estimate,
+                worker_jira_id=worker_jira_id,
+                issue_type=parent_issue.fields.issuetype.name,
+                total_logged_time_seconds=total_logged_time,
+                remaining_estimate_seconds=remaining_estimate,
+                story_points=parent_issue.fields.story_points,
+                created_datetime=created_dt,
+                resolved_datetime=resolved_dt,
+                estimate_source=estimate_source,
             )
         )
 
@@ -805,7 +1096,7 @@ def _build_project(
     # Build project
     now = datetime.now().astimezone()
     project = Project(
-        version="1.3",
+        version=CURRENT_VERSION,
         metadata=ProjectMetadata(
             name=project_name,
             created=now,
@@ -1215,7 +1506,7 @@ def fetch_history_entries(
     # Build JQL for completed issues
     jql = build_history_jql(project_keys, last_sync)
 
-    # Fields needed for history entries (minimal set)
+    # Fields needed for history entries (including parent for hierarchy)
     history_fields = [
         "summary",
         "issuetype",
@@ -1223,6 +1514,9 @@ def fetch_history_entries(
         "resolutiondate",
         "worklog",
         "timetracking",
+        "parent",
+        "customfield_12202",  # Epic Link field
+        "issuelinks",  # For parent/child links
     ]
 
     # Fetch issues
@@ -1238,10 +1532,35 @@ def fetch_history_entries(
     if progress_callback:
         progress_callback("processing_history", len(issues), len(issues))
 
-    # Create history entries (reuse existing function with empty workers)
+    # Build hierarchy to identify parent/child relationships
+    hierarchy, _warnings = build_hierarchy(issues)
+
+    # Identify parent keys (issues that have children)
+    children_by_parent: dict[str, list[str]] = defaultdict(list)
+    for issue_key, entry in hierarchy.items():
+        if entry.parent_key:
+            children_by_parent[entry.parent_key].append(issue_key)
+    parent_keys = set(children_by_parent.keys())
+
+    # Create history entries for non-parent issues
     # Note: _create_history_entries only includes DoneCompletion issues
-    entries = _create_history_entries(issues, {}, server_url, server_timezone)
-    logger.debug("Created %d history entries from %d issues", len(entries), len(issues))
+    leaf_entries = _create_history_entries(
+        issues, {}, server_url, server_timezone, exclude_keys=parent_keys
+    )
+
+    # Create history entries for parent issues with summed estimates
+    parent_entries = _create_parent_history_entries(
+        issues, hierarchy, {}, server_url, server_timezone
+    )
+
+    entries = leaf_entries + parent_entries
+    logger.debug(
+        "Created %d history entries (%d leaf, %d parent) from %d issues",
+        len(entries),
+        len(leaf_entries),
+        len(parent_entries),
+        len(issues),
+    )
     return entries
 
 

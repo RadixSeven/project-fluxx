@@ -532,6 +532,7 @@ def test_get_jira_sampling_context(start_date: datetime) -> None:
     """Test get_jira_sampling_context returns context and caches it."""
     from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
     from fluxx.jira.models import (
+        EstimateSource,
         JiraConfig,
         JiraDurationHistoryEntry,
         JiraIssueKey,
@@ -567,6 +568,7 @@ def test_get_jira_sampling_context(start_date: datetime) -> None:
                         total_logged_time_seconds=7200,
                         worker_jira_id="user1",
                         issue_type="Story",
+                        estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                     ),
                 ],
             ),

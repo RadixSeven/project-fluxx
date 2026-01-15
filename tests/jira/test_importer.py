@@ -49,11 +49,16 @@ from fluxx.jira.importer import (
     ImportWarningFluxx,
     InaccessibleIssue,
     SyncResult,
+    _all_descendants_done,
     _build_duration_distribution,
     _build_project,
     _collect_all_worklogs,
+    _compute_descendant_estimate,
+    _compute_descendant_logged_time,
     _create_history_entries,
+    _create_parent_history_entries,
     _find_referencing_issue,
+    _is_issue_done,
     _update_parent_relationships,
     build_children_jql,
     build_history_jql,
@@ -72,6 +77,7 @@ from fluxx.jira.importer import (
     sync_from_jira,
 )
 from fluxx.jira.models import (
+    EstimateSource,
     JiraConfig,
     JiraDurationHistoryEntry,
     JiraIssueKey,
@@ -235,6 +241,528 @@ class TestCreateHistoryEntries:
         assert entry.created_datetime == datetime(2024, 1, 10, 9, 0, 0, tzinfo=UTC)
         # Check resolved datetime (UTC-aware)
         assert entry.resolved_datetime == datetime(2024, 1, 20, 16, 0, 0, tzinfo=UTC)
+        # Check estimate_source
+        assert entry.estimate_source == EstimateSource.FROM_ORIGINAL_ESTIMATE
+
+
+class TestCreateHistoryEntriesEstimateSource:
+    """Tests for estimate_source field in _create_history_entries."""
+
+    def test_individual_issue_gets_from_original_estimate(self) -> None:
+        """Individual issues (no children) get FROM_ORIGINAL_ESTIMATE."""
+        worklog = make_worklog(time_seconds=7200)
+        issue = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,
+        )
+
+        result = _create_history_entries([issue], {}, "https://jira.example.com", "UTC")
+
+        assert len(result) == 1
+        assert result[0].estimate_source == EstimateSource.FROM_ORIGINAL_ESTIMATE
+
+    def test_excluded_keys_are_skipped(self) -> None:
+        """Issues in exclude_keys set are not included."""
+        worklog = make_worklog(time_seconds=7200)
+        issue1 = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+        issue2 = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+
+        result = _create_history_entries(
+            [issue1, issue2],
+            {},
+            "https://jira.example.com",
+            "UTC",
+            exclude_keys={"TEST-1"},
+        )
+
+        assert len(result) == 1
+        assert str(result[0].issue_key) == "TEST-2"
+
+
+class TestParentHistoryEntryCreation:
+    """Tests for _create_parent_history_entries."""
+
+    def test_parent_with_own_estimate_uses_original(self) -> None:
+        """Parent with own estimate > 0 uses FROM_ORIGINAL_ESTIMATE."""
+        worklog = make_worklog(time_seconds=3600)
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=28800,  # 8 hours
+            created="2024-01-10T09:00:00.000+0000",  # Include created date
+        )
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,  # 4 hours
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 1
+        entry = result[0]
+        assert str(entry.issue_key) == "TEST-1"
+        assert entry.original_estimate_seconds == 28800  # Uses own estimate
+        assert entry.estimate_source == EstimateSource.FROM_ORIGINAL_ESTIMATE
+        # Verify datetime parsing
+        assert entry.created_datetime == datetime(2024, 1, 10, 9, 0, 0, tzinfo=UTC)
+        assert entry.resolved_datetime == datetime(2024, 1, 20, 12, 0, 0, tzinfo=UTC)
+
+    def test_parent_without_estimate_sums_children(self) -> None:
+        """Parent without own estimate sums children's estimates."""
+        worklog = make_worklog(time_seconds=3600)
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=None,  # No own estimate
+        )
+        child1 = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,  # 4 hours
+            parent_key="TEST-1",
+        )
+        child2 = make_issue(
+            key="TEST-3",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=7200,  # 2 hours
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+            "TEST-3": HierarchyEntry(issue_key="TEST-3", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child1, child2], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 1
+        entry = result[0]
+        assert str(entry.issue_key) == "TEST-1"
+        assert entry.original_estimate_seconds == 21600  # 4 + 2 = 6 hours
+        assert entry.estimate_source == EstimateSource.FROM_SUMMING_CHILDREN
+
+    def test_parent_with_zero_estimate_sums_children(self) -> None:
+        """Parent with estimate = 0 sums children's estimates."""
+        worklog = make_worklog(time_seconds=3600)
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=0,  # Zero estimate
+        )
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 1
+        assert result[0].original_estimate_seconds == 14400
+        assert result[0].estimate_source == EstimateSource.FROM_SUMMING_CHILDREN
+
+    def test_parent_with_open_child_gets_no_entry(self) -> None:
+        """Parent with open (not done) children gets no entry."""
+        worklog = make_worklog(time_seconds=3600)
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=28800,
+        )
+        child = make_issue(
+            key="TEST-2",
+            # No resolution_date - child is open
+            worklogs=[worklog],
+            original_estimate_seconds=14400,
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 0
+
+    def test_parent_not_done_gets_no_entry(self) -> None:
+        """Open parent gets no entry even if children are done."""
+        worklog = make_worklog(time_seconds=3600)
+        parent = make_issue(
+            key="TEST-1",
+            # No resolution_date - parent is open
+            worklogs=[worklog],
+            original_estimate_seconds=28800,
+        )
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=14400,
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 0
+
+    def test_leaf_missing_estimate_skips_parent(self) -> None:
+        """Parent is skipped if leaf child has no estimate."""
+        worklog = make_worklog(time_seconds=3600)
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=None,  # No own estimate
+        )
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=None,  # No estimate!
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 0
+
+    def test_multilevel_hierarchy_sums_all_descendants(self) -> None:
+        """Multi-level hierarchy sums grandchildren correctly."""
+        worklog = make_worklog(time_seconds=3600)
+        grandparent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-25T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=None,
+        )
+        parent = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-22T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=None,  # Intermediate has no estimate
+            parent_key="TEST-1",
+        )
+        child1 = make_issue(
+            key="TEST-3",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=7200,  # 2 hours
+            parent_key="TEST-2",
+        )
+        child2 = make_issue(
+            key="TEST-4",
+            resolution_date="2024-01-21T12:00:00.000+0000",
+            worklogs=[worklog],
+            original_estimate_seconds=3600,  # 1 hour
+            parent_key="TEST-2",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+            "TEST-3": HierarchyEntry(issue_key="TEST-3", parent_key="TEST-2"),
+            "TEST-4": HierarchyEntry(issue_key="TEST-4", parent_key="TEST-2"),
+        }
+
+        result = _create_parent_history_entries(
+            [grandparent, parent, child1, child2],
+            hierarchy,
+            {},
+            "https://jira.example.com",
+            "UTC",
+        )
+
+        # Both grandparent and parent should get entries
+        assert len(result) == 2
+
+        # Find entries by key
+        entries_by_key = {str(e.issue_key): e for e in result}
+
+        # Parent (TEST-2) sums its children: 2 + 1 = 3 hours
+        assert entries_by_key["TEST-2"].original_estimate_seconds == 10800
+        assert (
+            entries_by_key["TEST-2"].estimate_source
+            == EstimateSource.FROM_SUMMING_CHILDREN
+        )
+
+        # Grandparent (TEST-1) sums all descendants: 2 + 1 = 3 hours
+        assert entries_by_key["TEST-1"].original_estimate_seconds == 10800
+        assert (
+            entries_by_key["TEST-1"].estimate_source
+            == EstimateSource.FROM_SUMMING_CHILDREN
+        )
+
+    def test_logged_time_summed_when_all_have_it(self) -> None:
+        """total_logged_time_seconds is summed when all descendants have it."""
+        parent_worklog = make_worklog(time_seconds=1800)  # 0.5 hours on parent
+        child_worklog = make_worklog(time_seconds=7200)  # 2 hours on child
+
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[parent_worklog],
+            original_estimate_seconds=None,
+        )
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[child_worklog],
+            original_estimate_seconds=14400,
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 1
+        # Total = parent (0.5h) + child (2h) = 2.5h = 9000 seconds
+        assert result[0].total_logged_time_seconds == 9000
+
+    def test_logged_time_none_when_child_missing(self) -> None:
+        """total_logged_time_seconds is None if any descendant lacks it."""
+        parent_worklog = make_worklog(time_seconds=1800)
+
+        parent = make_issue(
+            key="TEST-1",
+            resolution_date="2024-01-20T12:00:00.000+0000",
+            worklogs=[parent_worklog],
+            original_estimate_seconds=None,
+        )
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-19T12:00:00.000+0000",
+            worklogs=[],  # No worklogs!
+            original_estimate_seconds=14400,
+            parent_key="TEST-1",
+        )
+
+        hierarchy = {
+            "TEST-1": HierarchyEntry(issue_key="TEST-1", parent_key=None),
+            "TEST-2": HierarchyEntry(issue_key="TEST-2", parent_key="TEST-1"),
+        }
+
+        result = _create_parent_history_entries(
+            [parent, child], hierarchy, {}, "https://jira.example.com", "UTC"
+        )
+
+        assert len(result) == 1
+        assert result[0].total_logged_time_seconds is None
+
+
+class TestIsIssueDone:
+    """Tests for _is_issue_done helper."""
+
+    def test_done_issue_returns_true(self) -> None:
+        """Resolved issue returns True."""
+        worklog = make_worklog(time_seconds=3600)
+        issue = make_issue(
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+        assert _is_issue_done(issue, "UTC") is True
+
+    def test_open_issue_returns_false(self) -> None:
+        """Open issue returns False."""
+        issue = make_issue()
+        assert _is_issue_done(issue, "UTC") is False
+
+
+class TestComputeDescendantEstimate:
+    """Tests for _compute_descendant_estimate helper."""
+
+    def test_leaf_with_estimate(self) -> None:
+        """Leaf node returns its own estimate."""
+        issue = make_issue(key="TEST-1", original_estimate_seconds=7200)
+        issues_by_key = {"TEST-1": issue}
+        children_by_parent: dict[str, list[str]] = {}
+
+        result = _compute_descendant_estimate(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result == 7200
+
+    def test_leaf_without_estimate(self) -> None:
+        """Leaf node without estimate returns None."""
+        issue = make_issue(key="TEST-1", original_estimate_seconds=None)
+        issues_by_key = {"TEST-1": issue}
+        children_by_parent: dict[str, list[str]] = {}
+
+        result = _compute_descendant_estimate(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result is None
+
+    def test_parent_sums_children(self) -> None:
+        """Parent sums children's estimates."""
+        parent = make_issue(key="TEST-1", original_estimate_seconds=None)
+        child1 = make_issue(key="TEST-2", original_estimate_seconds=3600)
+        child2 = make_issue(key="TEST-3", original_estimate_seconds=7200)
+
+        issues_by_key = {"TEST-1": parent, "TEST-2": child1, "TEST-3": child2}
+        children_by_parent = {"TEST-1": ["TEST-2", "TEST-3"]}
+
+        result = _compute_descendant_estimate(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result == 10800
+
+    def test_issue_not_in_lookup_returns_none(self) -> None:
+        """Returns None if issue key is not in issues_by_key."""
+        issues_by_key: dict[str, JiraIssueResponse] = {}
+        children_by_parent: dict[str, list[str]] = {}
+
+        result = _compute_descendant_estimate(
+            "NONEXISTENT-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result is None
+
+
+class TestComputeDescendantLoggedTime:
+    """Tests for _compute_descendant_logged_time helper."""
+
+    def test_issue_not_in_lookup_returns_none(self) -> None:
+        """Returns None if issue key is not in issues_by_key."""
+        issues_by_key: dict[str, JiraIssueResponse] = {}
+        children_by_parent: dict[str, list[str]] = {}
+
+        result = _compute_descendant_logged_time(
+            "NONEXISTENT-1", issues_by_key, children_by_parent
+        )
+        assert result is None
+
+
+class TestAllDescendantsDone:
+    """Tests for _all_descendants_done helper."""
+
+    def test_all_children_done(self) -> None:
+        """Returns True if all children are done."""
+        worklog = make_worklog(time_seconds=3600)
+        child1 = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+        child2 = make_issue(
+            key="TEST-3",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+
+        issues_by_key = {"TEST-2": child1, "TEST-3": child2}
+        children_by_parent = {"TEST-1": ["TEST-2", "TEST-3"]}
+
+        result = _all_descendants_done(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result is True
+
+    def test_one_child_open(self) -> None:
+        """Returns False if any child is open."""
+        worklog = make_worklog(time_seconds=3600)
+        child1 = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+        child2 = make_issue(key="TEST-3")  # Open
+
+        issues_by_key = {"TEST-2": child1, "TEST-3": child2}
+        children_by_parent = {"TEST-1": ["TEST-2", "TEST-3"]}
+
+        result = _all_descendants_done(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result is False
+
+    def test_child_not_in_lookup_returns_false(self) -> None:
+        """Returns False if child is not in issues_by_key."""
+        issues_by_key: dict[str, JiraIssueResponse] = {}
+        children_by_parent = {"TEST-1": ["NONEXISTENT-2"]}
+
+        result = _all_descendants_done(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result is False
+
+    def test_grandchild_open_returns_false(self) -> None:
+        """Returns False if any grandchild is open."""
+        worklog = make_worklog(time_seconds=3600)
+        child = make_issue(
+            key="TEST-2",
+            resolution_date="2024-01-15T12:00:00.000+0000",
+            worklogs=[worklog],
+        )
+        grandchild = make_issue(key="TEST-3")  # Open grandchild
+
+        issues_by_key = {"TEST-2": child, "TEST-3": grandchild}
+        children_by_parent = {"TEST-1": ["TEST-2"], "TEST-2": ["TEST-3"]}
+
+        result = _all_descendants_done(
+            "TEST-1", issues_by_key, children_by_parent, "UTC"
+        )
+        assert result is False
 
 
 class TestBuildDurationDistribution:
@@ -892,6 +1420,7 @@ class TestExtractRawEstimateData:
             total_logged_time_seconds=3600,
             worker_jira_id="user1",
             issue_type="Story",
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
 
         result = extract_raw_estimate_data([entry])
@@ -908,6 +1437,7 @@ class TestExtractRawEstimateData:
                 total_logged_time_seconds=1800,
                 worker_jira_id=None,
                 issue_type="Bug",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             ),
             JiraDurationHistoryEntry(
                 server_url="https://jira.example.com",
@@ -916,6 +1446,7 @@ class TestExtractRawEstimateData:
                 total_logged_time_seconds=None,
                 worker_jira_id=None,
                 issue_type="Task",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             ),
         ]
 
@@ -3378,6 +3909,7 @@ class TestMergeHistoryEntries:
                 server_url="https://jira.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-1"),
                 issue_type="Story",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
         result = merge_history_entries(existing, [])
@@ -3391,6 +3923,7 @@ class TestMergeHistoryEntries:
                 server_url="https://jira.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-2"),
                 issue_type="Bug",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
         result = merge_history_entries([], new)
@@ -3405,6 +3938,7 @@ class TestMergeHistoryEntries:
                 issue_key=JiraIssueKey.from_string("CORE-1"),
                 issue_type="Story",
                 total_logged_time_seconds=3600,  # Old value
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
         new = [
@@ -3413,6 +3947,7 @@ class TestMergeHistoryEntries:
                 issue_key=JiraIssueKey.from_string("CORE-1"),
                 issue_type="Story",
                 total_logged_time_seconds=7200,  # Updated value
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
 
@@ -3428,11 +3963,13 @@ class TestMergeHistoryEntries:
                 server_url="https://jira.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-1"),
                 issue_type="Story",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             ),
             JiraDurationHistoryEntry(
                 server_url="https://jira.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-2"),
                 issue_type="Bug",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             ),
         ]
         new = [
@@ -3440,6 +3977,7 @@ class TestMergeHistoryEntries:
                 server_url="https://jira.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-3"),
                 issue_type="Task",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
 
@@ -3456,6 +3994,7 @@ class TestMergeHistoryEntries:
                 server_url="https://jira1.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-1"),
                 issue_type="Story",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
         new = [
@@ -3463,6 +4002,7 @@ class TestMergeHistoryEntries:
                 server_url="https://jira2.example.com",
                 issue_key=JiraIssueKey.from_string("CORE-1"),
                 issue_type="Story",
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
         ]
 
@@ -3554,6 +4094,7 @@ class TestSyncHistoryUpdates:
             issue_type="Story",
             original_estimate_seconds=14400,  # 4 hours
             total_logged_time_seconds=18000,  # 5 hours
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
 
         issue_dict = {

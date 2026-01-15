@@ -10,9 +10,22 @@ Import it from fluxx.data.models directly.
 
 import re
 from datetime import datetime
+from enum import Enum
 from typing import Annotated
 
 from pydantic import BaseModel, Field, field_validator
+
+
+class EstimateSource(str, Enum):
+    """Source of the estimate for a history entry.
+
+    This tracks how the original_estimate_seconds value was derived,
+    enabling future filtering/analysis of estimate accuracy by source.
+    """
+
+    FROM_ORIGINAL_ESTIMATE = "from original estimate field"
+    FROM_SUMMING_CHILDREN = "from summing children"
+
 
 # Project key pattern: starts with uppercase letter, followed by uppercase letters,
 # digits, or underscores. Minimum 2 characters.
@@ -150,6 +163,7 @@ class JiraDurationHistoryEntry(BaseModel):
     resolved_datetime: datetime | None = Field(
         default=None, description="When the issue was resolved"
     )
+    estimate_source: EstimateSource = Field(description="How the estimate was derived")
 
     @field_validator("created_datetime")
     @classmethod

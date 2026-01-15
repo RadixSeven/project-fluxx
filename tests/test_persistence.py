@@ -15,6 +15,7 @@ from fluxx.data import (
     load_project,
     save_project,
 )
+from fluxx.data.migration import CURRENT_VERSION
 from fluxx.data.models import (
     DAG,
     Branch,
@@ -45,6 +46,7 @@ def sample_project() -> Generator[Project]:
     worker = Worker(id=WorkerId("w1"), name="Alice", hours_per_workday=8.0)
 
     yield Project(
+        version=CURRENT_VERSION,
         metadata=metadata,
         dag=dag,
         workers=[worker],

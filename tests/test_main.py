@@ -11,6 +11,7 @@ import pytest
 from fluxx.__main__ import main, write_historical_data_csv
 from fluxx.data.persistence import FileFormatError
 from fluxx.jira.models import (
+    EstimateSource,
     JiraConfig,
     JiraDurationHistoryEntry,
     JiraIssueKey,
@@ -249,6 +250,7 @@ def test_write_historical_data_csv_success(tmp_path: Path) -> None:
                     remaining_estimate_seconds=3600,  # 1 hour
                     created_datetime=datetime(2025, 1, 1, 12, 0, tzinfo=UTC),
                     resolved_datetime=datetime(2025, 1, 2, 12, 0, tzinfo=UTC),
+                    estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                 ),
                 JiraDurationHistoryEntry(
                     server_url="https://jira.example.com",
@@ -261,6 +263,7 @@ def test_write_historical_data_csv_success(tmp_path: Path) -> None:
                     remaining_estimate_seconds=None,
                     created_datetime=None,
                     resolved_datetime=None,
+                    estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                 ),
             ],
         ),
@@ -422,6 +425,7 @@ def test_main_with_csv_export(
                     issue_type="Story",
                     original_estimate_seconds=14400,
                     total_logged_time_seconds=18000,
+                    estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                 ),
             ],
         ),

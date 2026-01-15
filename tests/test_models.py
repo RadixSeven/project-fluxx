@@ -881,6 +881,7 @@ class TestProjectJiraConfig:
     def test_project_with_jira_config(self) -> None:
         """Test project with jira_config."""
         from fluxx.jira.models import (
+            EstimateSource,
             JiraConfig,
             JiraDurationHistoryEntry,
             JiraIssueKey,
@@ -901,6 +902,7 @@ class TestProjectJiraConfig:
             issue_key=JiraIssueKey(project_key="FHIR", issue_number=100),
             issue_type="Story",
             original_estimate_seconds=28800,
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         sync_metadata = JiraSyncMetadata(
             server_url="https://jira.example.com",

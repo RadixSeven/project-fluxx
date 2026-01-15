@@ -12,6 +12,7 @@ from fluxx.data.migration import (
     migrate_1_0_to_1_1,
     migrate_1_1_to_1_2,
     migrate_1_2_to_1_3,
+    migrate_1_3_to_1_4,
     migrate_project_data,
 )
 
@@ -439,3 +440,194 @@ class TestMigrateV12ToV13:
         assert isinstance(charlie, dict)
         assert charlie["jira_user_id"] == "charlie_id"
         assert "jira_account_id" not in charlie
+
+
+class TestMigrateV13ToV14:
+    """Tests for migrate_1_3_to_1_4 function."""
+
+    def test_updates_version(self) -> None:
+        """Migration updates version to 1.4."""
+        json_data: JsonObject = {
+            "version": "1.3",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_3_to_1_4(json_data)
+        assert result["version"] == "1.4"
+
+    def test_adds_estimate_source_to_history_entries(self) -> None:
+        """Migration adds estimate_source to existing history entries."""
+        json_data: JsonObject = {
+            "version": "1.3",
+            "workers": [],
+            "persistent_tasks": {},
+            "jira_config": {
+                "server_url": "https://jira.example.com",
+                "sync_metadata": {
+                    "server_url": "https://jira.example.com",
+                    "last_history_sync": "2024-01-15T10:30:00+00:00",
+                    "history_entries": [
+                        {
+                            "server_url": "https://jira.example.com",
+                            "issue_key": {"project_key": "TEST", "issue_number": 1},
+                            "issue_type": "Story",
+                            "original_estimate_seconds": 3600,
+                        },
+                        {
+                            "server_url": "https://jira.example.com",
+                            "issue_key": {"project_key": "TEST", "issue_number": 2},
+                            "issue_type": "Bug",
+                        },
+                    ],
+                },
+            },
+        }
+        result = migrate_1_3_to_1_4(json_data)
+
+        jira_config = result["jira_config"]
+        assert isinstance(jira_config, dict)
+        sync_metadata = jira_config["sync_metadata"]
+        assert isinstance(sync_metadata, dict)
+        history_entries = sync_metadata["history_entries"]
+        assert isinstance(history_entries, list)
+        assert len(history_entries) == 2
+
+        # Both entries should have estimate_source set
+        entry1 = history_entries[0]
+        assert isinstance(entry1, dict)
+        assert entry1["estimate_source"] == "from original estimate field"
+
+        entry2 = history_entries[1]
+        assert isinstance(entry2, dict)
+        assert entry2["estimate_source"] == "from original estimate field"
+
+    def test_empty_history_entries_migrates_without_error(self) -> None:
+        """Migration handles empty history_entries list."""
+        json_data: JsonObject = {
+            "version": "1.3",
+            "workers": [],
+            "persistent_tasks": {},
+            "jira_config": {
+                "server_url": "https://jira.example.com",
+                "sync_metadata": {
+                    "server_url": "https://jira.example.com",
+                    "last_history_sync": "2024-01-15T10:30:00+00:00",
+                    "history_entries": [],
+                },
+            },
+        }
+        result = migrate_1_3_to_1_4(json_data)
+        assert result["version"] == "1.4"
+        jira_config = result["jira_config"]
+        assert isinstance(jira_config, dict)
+        sync_metadata = jira_config["sync_metadata"]
+        assert isinstance(sync_metadata, dict)
+        assert sync_metadata["history_entries"] == []
+
+    def test_missing_jira_config_migrates_without_error(self) -> None:
+        """Migration handles projects without jira_config."""
+        json_data: JsonObject = {
+            "version": "1.3",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_1_3_to_1_4(json_data)
+        assert result["version"] == "1.4"
+        # jira_config should remain absent
+        assert "jira_config" not in result
+
+    def test_already_migrated_entries_unchanged(self) -> None:
+        """Migration doesn't overwrite existing estimate_source values."""
+        json_data: JsonObject = {
+            "version": "1.3",
+            "workers": [],
+            "persistent_tasks": {},
+            "jira_config": {
+                "server_url": "https://jira.example.com",
+                "sync_metadata": {
+                    "server_url": "https://jira.example.com",
+                    "last_history_sync": "2024-01-15T10:30:00+00:00",
+                    "history_entries": [
+                        {
+                            "server_url": "https://jira.example.com",
+                            "issue_key": {"project_key": "TEST", "issue_number": 1},
+                            "issue_type": "Story",
+                            "estimate_source": "from summing children",
+                        },
+                    ],
+                },
+            },
+        }
+        result = migrate_1_3_to_1_4(json_data)
+
+        jira_config = result["jira_config"]
+        assert isinstance(jira_config, dict)
+        sync_metadata = jira_config["sync_metadata"]
+        assert isinstance(sync_metadata, dict)
+        history_entries = sync_metadata["history_entries"]
+        assert isinstance(history_entries, list)
+
+        # Existing estimate_source should be preserved
+        entry = history_entries[0]
+        assert isinstance(entry, dict)
+        assert entry["estimate_source"] == "from summing children"
+
+    def test_migrate_from_1_3_to_current(self) -> None:
+        """Migrating from 1.3 should update to current version."""
+        json_data: JsonObject = {
+            "version": "1.3",
+            "workers": [],
+            "persistent_tasks": {},
+        }
+        result = migrate_project_data(json_data)
+        assert result["version"] == CURRENT_VERSION
+
+    def test_migrate_chain_1_0_to_current_with_jira_config(self) -> None:
+        """Migrating from 1.0 with jira config should chain through all migrations."""
+        json_data: JsonObject = {
+            "version": "1.2",
+            "workers": [
+                {
+                    "id": "w1",
+                    "name": "Alice",
+                    "hours_per_workday": 8.0,
+                    "jira_account_id": "alice_id",
+                }
+            ],
+            "persistent_tasks": {},
+            "jira_config": {
+                "server_url": "https://jira.example.com",
+                "sync_metadata": {
+                    "server_url": "https://jira.example.com",
+                    "last_history_sync": "2024-01-15T10:30:00+00:00",
+                    "history_entries": [
+                        {
+                            "server_url": "https://jira.example.com",
+                            "issue_key": {"project_key": "TEST", "issue_number": 1},
+                            "issue_type": "Story",
+                        },
+                    ],
+                },
+            },
+        }
+        result = migrate_project_data(json_data)
+        assert result["version"] == CURRENT_VERSION
+
+        # Check worker migration happened (1.2->1.3)
+        workers = result["workers"]
+        assert isinstance(workers, list)
+        worker = workers[0]
+        assert isinstance(worker, dict)
+        assert "jira_user_id" in worker
+        assert "jira_account_id" not in worker
+
+        # Check history entry has estimate_source (1.3->1.4)
+        jira_config = result["jira_config"]
+        assert isinstance(jira_config, dict)
+        sync_metadata = jira_config["sync_metadata"]
+        assert isinstance(sync_metadata, dict)
+        history_entries = sync_metadata["history_entries"]
+        assert isinstance(history_entries, list)
+        entry = history_entries[0]
+        assert isinstance(entry, dict)
+        assert entry["estimate_source"] == "from original estimate field"

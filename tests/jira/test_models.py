@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from fluxx.jira.models import (
+    EstimateSource,
     JiraIssueKey,
     JiraReference,
 )
@@ -214,6 +215,44 @@ class TestJiraReference:
         assert len(ref_set) == 1
 
 
+class TestEstimateSource:
+    """Tests for EstimateSource enum."""
+
+    def test_from_original_estimate_value(self) -> None:
+        """Test FROM_ORIGINAL_ESTIMATE enum value."""
+        assert (
+            EstimateSource.FROM_ORIGINAL_ESTIMATE.value
+            == "from original estimate field"
+        )
+
+    def test_from_summing_children_value(self) -> None:
+        """Test FROM_SUMMING_CHILDREN enum value."""
+        assert EstimateSource.FROM_SUMMING_CHILDREN.value == "from summing children"
+
+    def test_enum_is_str_subclass(self) -> None:
+        """Test that EstimateSource is a str subclass, so values are string-like."""
+        # Since EstimateSource inherits from str, instances are string values
+        assert isinstance(EstimateSource.FROM_ORIGINAL_ESTIMATE, str)
+        assert isinstance(EstimateSource.FROM_SUMMING_CHILDREN, str)
+        # And the value attribute is what we expect
+        assert (
+            EstimateSource.FROM_ORIGINAL_ESTIMATE.value
+            == "from original estimate field"
+        )
+        assert EstimateSource.FROM_SUMMING_CHILDREN.value == "from summing children"
+
+    def test_enum_from_string(self) -> None:
+        """Test that enum can be created from string values."""
+        assert (
+            EstimateSource("from original estimate field")
+            == EstimateSource.FROM_ORIGINAL_ESTIMATE
+        )
+        assert (
+            EstimateSource("from summing children")
+            == EstimateSource.FROM_SUMMING_CHILDREN
+        )
+
+
 class TestJiraDurationHistoryEntry:
     """Tests for JiraDurationHistoryEntry model."""
 
@@ -228,6 +267,7 @@ class TestJiraDurationHistoryEntry:
             worker_jira_id="user123",
             issue_type="Story",
             total_logged_time_seconds=14400,
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         assert entry.server_url == "https://jira.example.com"
         assert entry.issue_key.project_key == "FHIR"
@@ -235,6 +275,22 @@ class TestJiraDurationHistoryEntry:
         assert entry.worker_jira_id == "user123"
         assert entry.issue_type == "Story"
         assert entry.total_logged_time_seconds == 14400
+        assert entry.estimate_source == EstimateSource.FROM_ORIGINAL_ESTIMATE
+
+    def test_estimate_source_required(self) -> None:
+        """Test that estimate_source field is required."""
+        from fluxx.jira.models import JiraDurationHistoryEntry
+
+        # Use model_validate with dict to test Pydantic validation at runtime
+        # (direct constructor call would fail mypy static check)
+        with pytest.raises(ValidationError, match="estimate_source"):
+            JiraDurationHistoryEntry.model_validate(
+                {
+                    "server_url": "https://jira.example.com",
+                    "issue_key": {"project_key": "TEST", "issue_number": 1},
+                    "issue_type": "Bug",
+                }
+            )
 
     def test_history_entry_optional_fields(self) -> None:
         """Test that some fields are optional."""
@@ -244,6 +300,7 @@ class TestJiraDurationHistoryEntry:
             server_url="https://jira.example.com",
             issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
             issue_type="Bug",
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         assert entry.original_estimate_seconds is None
         assert entry.worker_jira_id is None
@@ -259,12 +316,14 @@ class TestJiraDurationHistoryEntry:
             issue_key=JiraIssueKey(project_key="FHIR", issue_number=123),
             issue_type="Story",
             original_estimate_seconds=3600,
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         entry2 = JiraDurationHistoryEntry(
             server_url="https://jira.example.com",
             issue_key=JiraIssueKey(project_key="FHIR", issue_number=123),
             issue_type="Story",
             original_estimate_seconds=7200,  # Different value
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         # They represent the same issue even with different estimate values
         assert entry1.server_url == entry2.server_url
@@ -279,11 +338,13 @@ class TestJiraDurationHistoryEntry:
             issue_key=JiraIssueKey(project_key="FHIR", issue_number=123),
             issue_type="Task",
             original_estimate_seconds=3600,
+            estimate_source=EstimateSource.FROM_SUMMING_CHILDREN,
         )
         data = entry.model_dump()
         assert data["server_url"] == "https://jira.example.com"
         assert data["issue_key"]["project_key"] == "FHIR"
         assert data["issue_type"] == "Task"
+        assert data["estimate_source"] == "from summing children"
 
     def test_created_datetime_requires_timezone(self) -> None:
         """Test that created_datetime rejects naive datetime."""
@@ -302,6 +363,7 @@ class TestJiraDurationHistoryEntry:
                 issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
                 issue_type="Bug",
                 created_datetime=naive_dt,
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
 
     def test_resolved_datetime_requires_timezone(self) -> None:
@@ -321,6 +383,7 @@ class TestJiraDurationHistoryEntry:
                 issue_key=JiraIssueKey(project_key="TEST", issue_number=1),
                 issue_type="Bug",
                 resolved_datetime=naive_dt,
+                estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
             )
 
     def test_datetimes_accept_timezone_aware(self) -> None:
@@ -335,6 +398,7 @@ class TestJiraDurationHistoryEntry:
             issue_type="Bug",
             created_datetime=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
             resolved_datetime=datetime(2024, 1, 2, 12, 0, tzinfo=UTC),
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         assert entry.created_datetime is not None
         assert entry.created_datetime.tzinfo is not None
@@ -356,6 +420,7 @@ class TestJiraSyncMetadata:
             server_url="https://jira.example.com",
             issue_key=JiraIssueKey(project_key="FHIR", issue_number=123),
             issue_type="Story",
+            estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
         )
         metadata = JiraSyncMetadata(
             server_url="https://jira.example.com",

@@ -14,6 +14,7 @@ from fluxx.data.models import (
     Triangular,
 )
 from fluxx.jira.models import (
+    EstimateSource,
     JiraConfig,
     JiraDurationHistoryEntry,
     JiraIssueKey,
@@ -231,6 +232,7 @@ def make_history_entry(
         total_logged_time_seconds=actual_seconds,
         worker_jira_id="user1",
         issue_type="Story",
+        estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
     )
 
 

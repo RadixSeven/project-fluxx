@@ -234,6 +234,7 @@ def test_sample_task_duration_jira_distribution() -> None:
     from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
     from fluxx.data.models import JiraDurationDistribution
     from fluxx.jira.models import (
+        EstimateSource,
         JiraConfig,
         JiraDurationHistoryEntry,
         JiraIssueKey,
@@ -268,6 +269,7 @@ def test_sample_task_duration_jira_distribution() -> None:
                         total_logged_time_seconds=7200,
                         worker_jira_id="user1",
                         issue_type="Story",
+                        estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                     ),
                     JiraDurationHistoryEntry(
                         server_url="https://jira.example.com",
@@ -276,6 +278,7 @@ def test_sample_task_duration_jira_distribution() -> None:
                         total_logged_time_seconds=5400,
                         worker_jira_id="user1",
                         issue_type="Story",
+                        estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                     ),
                 ],
             ),
@@ -320,6 +323,7 @@ def test_sample_in_progress_jira_distribution() -> None:
     from fluxx.data.id_generation import generate_dag_id, generate_dag_version_id
     from fluxx.data.models import JiraDurationDistribution
     from fluxx.jira.models import (
+        EstimateSource,
         JiraConfig,
         JiraDurationHistoryEntry,
         JiraIssueKey,
@@ -354,6 +358,7 @@ def test_sample_in_progress_jira_distribution() -> None:
                         total_logged_time_seconds=14400,  # 4h
                         worker_jira_id="user1",
                         issue_type="Story",
+                        estimate_source=EstimateSource.FROM_ORIGINAL_ESTIMATE,
                     ),
                 ],
             ),

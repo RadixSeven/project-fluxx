@@ -8,10 +8,10 @@ from datetime import UTC, datetime, timedelta
 from fluxx.data.json_types import JsonObject
 
 # Current version of the file format
-CURRENT_VERSION = "1.3"
+CURRENT_VERSION = "1.4"
 
 # Versions we can migrate from
-SUPPORTED_VERSIONS = ["1.0", "1.1", "1.2", "1.3"]
+SUPPORTED_VERSIONS = ["1.0", "1.1", "1.2", "1.3", "1.4"]
 
 
 class MigrationError(Exception):
@@ -51,6 +51,10 @@ def migrate_project_data(json_data: JsonObject) -> JsonObject:
 
     if version == "1.2":
         json_data = migrate_1_2_to_1_3(json_data)
+        version = "1.3"
+
+    if version == "1.3":
+        json_data = migrate_1_3_to_1_4(json_data)
 
     return json_data
 
@@ -214,5 +218,34 @@ def migrate_1_2_to_1_3(json_data: JsonObject) -> JsonObject:
 
     # Update version
     json_data["version"] = "1.3"
+
+    return json_data
+
+
+def migrate_1_3_to_1_4(json_data: JsonObject) -> JsonObject:
+    """Migrate from version 1.3 to 1.4.
+
+    Changes:
+    - Adds estimate_source field to JiraDurationHistoryEntry
+      (required field, defaults to "from original estimate field" for existing entries)
+
+    Args:
+        json_data: Project data in version 1.3 format
+
+    Returns:
+        Project data in version 1.4 format
+    """
+    jira_config = json_data.get("jira_config")
+    if isinstance(jira_config, dict):
+        sync_metadata = jira_config.get("sync_metadata")
+        if isinstance(sync_metadata, dict):
+            history_entries = sync_metadata.get("history_entries", [])
+            if isinstance(history_entries, list):
+                for entry in history_entries:
+                    if isinstance(entry, dict) and "estimate_source" not in entry:
+                        entry["estimate_source"] = "from original estimate field"
+
+    # Update version
+    json_data["version"] = "1.4"
 
     return json_data
