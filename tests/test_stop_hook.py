@@ -80,6 +80,107 @@ class TestGetCurrentRepoState:
         # Should still return a valid hash
         assert len(state) == 64
 
+    def test_handles_subprocess_exception_for_git_rev_parse(self) -> None:
+        """Should handle exception when git rev-parse subprocess fails."""
+        with patch("subprocess.run", side_effect=OSError("Command not found")):
+            state = stop_check.get_current_repo_state(Path("/tmp"))
+            # Should still return a valid hash (empty content hashed)
+            assert len(state) == 64
+
+    def test_includes_untracked_file_contents(self, tmp_path: Path) -> None:
+        """Should include untracked file contents in state hash."""
+        # Create a fake git repo structure
+        untracked_file = tmp_path / "untracked.txt"
+        untracked_file.write_text("untracked content")
+
+        # Mock git commands to simulate untracked files
+        def mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            result = MagicMock()
+            if "rev-parse" in cmd:
+                result.returncode = 0
+                result.stdout = "abc123"
+            elif "diff" in cmd:
+                result.returncode = 0
+                result.stdout = ""
+            elif "ls-files" in cmd:
+                result.returncode = 0
+                result.stdout = "untracked.txt"
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            state = stop_check.get_current_repo_state(tmp_path)
+            assert len(state) == 64
+
+    def test_handles_nonexistent_untracked_file(self, tmp_path: Path) -> None:
+        """Should skip untracked files that don't exist."""
+
+        def mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            result = MagicMock()
+            if "rev-parse" in cmd:
+                result.returncode = 0
+                result.stdout = "abc123"
+            elif "diff" in cmd:
+                result.returncode = 0
+                result.stdout = ""
+            elif "ls-files" in cmd:
+                result.returncode = 0
+                result.stdout = "nonexistent.txt"
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            # nonexistent.txt doesn't exist, so is_file() returns False
+            state = stop_check.get_current_repo_state(tmp_path)
+            assert len(state) == 64
+
+    def test_handles_exception_reading_untracked_file_content(
+        self, tmp_path: Path
+    ) -> None:
+        """Should handle exception when read_text fails on untracked file."""
+        # Create a file that exists but will fail to read
+        untracked_file = tmp_path / "unreadable.txt"
+        untracked_file.write_text("content")
+
+        def mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            result = MagicMock()
+            if "rev-parse" in cmd:
+                result.returncode = 0
+                result.stdout = "abc123"
+            elif "diff" in cmd:
+                result.returncode = 0
+                result.stdout = ""
+            elif "ls-files" in cmd:
+                result.returncode = 0
+                result.stdout = "unreadable.txt"
+            return result
+
+        with (
+            patch("subprocess.run", side_effect=mock_run),
+            patch.object(Path, "is_file", return_value=True),
+            patch.object(Path, "read_text", side_effect=PermissionError("denied")),
+        ):
+            state = stop_check.get_current_repo_state(tmp_path)
+            assert len(state) == 64
+
+    def test_handles_exception_in_diff_block(self) -> None:
+        """Should handle exception in the diff/untracked block."""
+        # First call succeeds (rev-parse), second raises exception
+        call_count = 0
+
+        def mock_run(cmd: list[str], **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:  # rev-parse
+                result = MagicMock()
+                result.returncode = 0
+                result.stdout = "abc123"
+                return result
+            else:  # diff or ls-files
+                raise OSError("Git error")
+
+        with patch("subprocess.run", side_effect=mock_run):
+            state = stop_check.get_current_repo_state(Path("/tmp"))
+            assert len(state) == 64
+
 
 class TestGetSavedState:
     """Test get_saved_state function."""
@@ -99,6 +200,15 @@ class TestGetSavedState:
         ):
             result = stop_check.get_saved_state()
             assert result == expected
+
+    def test_returns_none_when_read_fails(self) -> None:
+        """Should return None if reading state file raises an exception."""
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "read_text", side_effect=PermissionError("denied")),
+        ):
+            result = stop_check.get_saved_state()
+            assert result is None
 
 
 class TestSaveCurrentState:
@@ -251,19 +361,22 @@ def test_returns_existing_venv_path(tmp_path: Path) -> None:
 class TestEnsureVenv:
     """Test ensure_venv function."""
 
-    def test_creates_venv_if_missing(self) -> None:
-        """Should attempt to create venv if missing."""
+    def test_notifies_user_when_activate_missing(self, tmp_path: Path) -> None:
+        """Should notify user if venv exists but activate script is missing."""
+        # Create venv directory without activate script
+        venv_path = tmp_path / "venv"
+        venv_path.mkdir()
+        (venv_path / "bin").mkdir()
+        # Don't create activate script
+
         with (
-            patch.object(Path, "exists", return_value=False),
-            patch.object(stop_check, "run_command") as mock_run,
+            patch.object(stop_check, "notify_user_and_stop") as mock_notify,
         ):
-            mock_run.return_value = MagicMock(returncode=0)
-            with patch.object(
-                Path, "exists", side_effect=[False, True]
-            ):  # venv missing, then activate exists
-                # This will fail because of Path mocking complexity,
-                # so we test the simpler case
-                pass
+            mock_notify.side_effect = SystemExit(0)
+            with pytest.raises(SystemExit):
+                stop_check.ensure_venv(tmp_path)
+            mock_notify.assert_called_once()
+            assert "activate" in mock_notify.call_args[0][0].lower()
 
     def test_notifies_user_on_venv_creation_failure(self) -> None:
         """Should notify user if venv creation fails."""
