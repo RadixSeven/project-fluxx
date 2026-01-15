@@ -1,11 +1,11 @@
-1. Make a plan to fix or enact the first item on the list `bugs_and_feature_requests.md`; put the plan in an appropriately named `TODO_*.md` file. (There are other TODO_*.md files to give you an idea of what you might name it.) Remember the name. (To simplify the language, we'll call resolving the issue "fixing" it in future steps and the changes needed to resolve it will be called "the fix.")
+1. Make a plan to fix or enact the first item on the list `bugs_and_feature_requests.md`. `bugs_and_feature_requests.md` is a Markdown list and "the first item" refers to the first item and its children. Put the plan in an appropriately named `TODO_*.md` file. (There are other TODO_*.md files to give you an idea of what you might name it.) Add the plan file name to the end of the list item the plan addresses in the format `PLAN_FILE: TODO_file_name_here.md`. (If the list item we're addressing has children, add the `PLAN_FILE` annotation to the end of the parent). Adding the plan file name will enable you to remember it later. (To simplify the language, we'll call resolving the issue "fixing" it in future steps and the changes needed to resolve it will be called "the fix.")
 2. Commit the draft.
 3. Start a sub-agent to review the plan file (which may be a partly completed plan on which you are iterating)
    and incorporate the sub-agent's feedback.
 4. Commit the improved plan file.
 5. Execute the plan in the plan file.
 6. Run `source venv/bin/activate && pre-commit` and `source venv/bin/activate && make all_checks`, fixing problems they surface until they both pass.
-7. Verify that the fix works (except for impossible parts of the request)
+7. Verify that the fix works (When iterating a request where impossible items were identified in step 10, do not require that the fix has addressed parts of the request that were marked as impossible - since that is probably impossible.)
 8. Commit the changes made by following the plan.
 9. Thoroughly and systematically review the plan and the original item on the list from `bugs_and_feature_requests.md` to see if any aspects were missed (even review items marked as completed - they may have been marked in error).
 10. If any aspects were missed:
@@ -44,20 +44,22 @@
        review the plan including the updated steps, which will be followed by step 5 to execute the plan. Both the
        reviewer and the executor need an up-to-date view of the progress in the plan.
     d. Commit the updated plan.
-    e. Go back to step 3. (The new review is intentional.)
+    e. If the user created STOP_FIXES in the current directory, stop.
+    f. Go back to step 3. (The new review is intentional.)
 11. If the user created STOP_FIXES in the current directory, stop.
 12. Since we passed step 10, we know that the plan was successfully executed (step 9 confirmed that no items were missed
     and step 10 would have iterated if the review indicated missing plan elements) and that the fix works except for
-    impossible parts of the request (step 7). Remove the plan file that corresponds to the first item on the list `bugs_and_feature_requests.md`.
+    impossible parts of the request (step 7). Remove the plan file that corresponds to the first item on the list `bugs_and_feature_requests.md` (step 1 defines "the first item").
 13. Check for files matching the pattern `bugs_and_feature_requests_*.md` where `*` is a number
     (e.g., `bugs_and_feature_requests_01.md`, `bugs_and_feature_requests_2.md`). These files allow the user to add
     new items while the executor is working. The user follows a safe creation pattern: create the file under a
     temporary name (not matching the pattern), write the contents, then rename it to match the pattern. Once renamed,
-    the user must not modify the file. If any such files exist:
+    the user must not modify the file. Users will never edit `bugs_and_feature_requests.md` while the executor is
+    running. If any files matching the pattern `bugs_and_feature_requests_*.md` where `*` is a number exist:
     a. Sort them by their numeric suffix (numerically, so `_2` comes before `_10` and `_011` comes after `_10`).
     b. Append the contents of each file, in sorted order, to the end of `bugs_and_feature_requests.md`.
     c. Delete the numbered files after their contents have been appended.
-14. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. If there were impossible items related to this new item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. If there is no placeholder then the moved item will be a new item.
+14. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. If there were impossible items related to this completed item, there will be a placeholder of the form `- PLACEHOLDER: Impossible items while executing <plan filename>`, then the moved item will replace this placeholder rather than being a new item. If there is no placeholder then the moved item will be a new item. (Step 1 defines "the first item")
 15. Commit the changes to the plan (its deletion), the changes to `bugs_and_feature_requests.md`,
     the changes to `completed_bugs_and_feature_requests.md` (which may involve its creation),
     and the deletion of any numbered files merged in step 13.
