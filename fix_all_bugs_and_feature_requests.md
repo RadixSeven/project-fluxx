@@ -1,6 +1,6 @@
-1. Make a plan to fix or enact the first item on the list `bugs_and_feature_requests.md` put the plan in an appropriately named `TODO_*.md` file. (There are other TODO_*.md files to give you an idea of what you might name it.) Remember the name. (To simplify the language, we'll call resolving the issue "fixing" it in future steps and the changes needed to resolve it will be called "the fix.")
+1. Make a plan to fix or enact the first item on the list `bugs_and_feature_requests.md`; put the plan in an appropriately named `TODO_*.md` file. (There are other TODO_*.md files to give you an idea of what you might name it.) Remember the name. (To simplify the language, we'll call resolving the issue "fixing" it in future steps and the changes needed to resolve it will be called "the fix.")
 2. Commit the draft.
-3. Start a sub-agent to review the file (which may be a partly completed plan on which you are iterating)
+3. Start a sub-agent to review the plan file (which may be a partly completed plan on which you are iterating)
    and incorporate the sub-agent's feedback.
 4. Commit the improved plan file.
 5. Execute the plan in the plan file.
@@ -21,7 +21,7 @@
            were able to execute the defensive code.
         ii. If the item is not really impossible or there are things you haven't tried that might work, don't treat
             it as an impossible item. Instead, treat the steps to remedy it or that you haven't tried as ways
-            to fix the missing items. These missing item fixes will recorded in step (10.b) below.
+            to fix the missing items. These missing item fixes will be recorded in step (10.b) below.
         iii. For each truly impossible item, add a list item (which may have sub-points under it) to `completed_bugs_and_feature_requests.md`. The new list item and its sub-points must
             1. Give the filename of the plan with the impossible item and which item was impossible. 
             2. Give the latest commit containing a version of the plan with the impossible item
@@ -42,10 +42,10 @@
     d. Commit the updated plan.
     e. Go back to step 3. (The new review is intentional.)
 11. If the user created STOP_FIXES in the current directory, stop.
-12. Since we passed step 10, we know that the plan was successfully executed (step 9 verified this and step 10 would
-    have iterated if the review indicated missing plan elements) and that the fix works except for impossible parts of
-    the request (step 7). Remove the plan file that corresponds to the first item on the list `bugs_and_feature_requests.md`.
-13. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`.
+12. Since we passed step 10, we know that the plan was successfully executed (step 9 confirmed that no items were missed
+    and step 10 would have iterated if the review indicated missing plan elements) and that the fix works except for
+    impossible parts of the request (step 7). Remove the plan file that corresponds to the first item on the list `bugs_and_feature_requests.md`.
+13. Move the first item on the list `bugs_and_feature_requests.md` to `completed_bugs_and_feature_requests.md` (you may have to create `completed_bugs_and_feature_requests.md`.) That item should no longer appear in `bugs_and_feature_requests.md` but should appear in `completed_bugs_and_feature_requests.md`. Impossible items related to this new item should be made into sub-items to clarify to readers what was and wasn't done in completing the request.
 14. Commit the changes to the plan (its deletion), the changes to `bugs_and_feature_requests.md` and the changes to `completed_bugs_and_feature_requests.md` (which may involve its creation).
 15. If there are no more items in `bugs_and_feature_requests.md`, stop.
 16. Otherwise, go back to step 1 to take care of the first item.
