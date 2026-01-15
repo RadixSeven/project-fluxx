@@ -1,4 +1,3 @@
-- Sort the Gantt chart so the earlier-starting tasks are higher and later ones are lower. Break ties with finish time. Do this sorting within boundaries created by world branches.
 - Remove the pure stub code (for example, `src/fluxx/visualization/gantt.py` and similar code) from the codebase. We don't use it and it tends not to be used in implementing the features. We'll need to remove the stub tests as well as the original code.
 - Make ticket ordering deterministic based on "rank". When extracting Jira issues, also extract `rank`.
     - Rank will be an optional field
