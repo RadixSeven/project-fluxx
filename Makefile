@@ -54,29 +54,22 @@ test:
 	# The QT_QPA_PLATFORM=offscreen keeps the tests
 	# from crashing in restricted sandboxes like those
 	# used by `claude` and `codex`
-	QT_QPA_PLATFORM=offscreen pytest $(TEST_DIR) \
-		--cov=$(SRC_DIR) \
-		--cov-report=term \
-		--cov-report=html \
-		--cov-report=json \
-		-v
+	QT_QPA_PLATFORM=offscreen ./pants test \
+		--use-coverage ::
 
 coverage:
 	@echo "==> Coverage report (showing files not at 100%)..."
 	# The QT_QPA_PLATFORM=offscreen keeps the tests
 	# from crashing in restricted sandboxes like those
 	# used by `claude` and `codex`
-	@QT_QPA_PLATFORM=offscreen pytest $(TEST_DIR) \
-		--cov=$(SRC_DIR) \
-		--cov-report=term-missing \
-		--cov-report=json \
-		--quiet --quiet 2>/dev/null || true
+	@QT_QPA_PLATFORM=offscreen ./pants test \
+		  --use-coverage :: || true
 	@echo ""
 	@echo "Files with incomplete coverage:"
 	@$(PYTHON) -c "import json; data = json.load(open('coverage.json')); files = data['files']; incomplete = {k: v for k, v in files.items() if v['summary']['percent_covered'] < 100}; [print(f'  {file:60s} {info[\"summary\"][\"percent_covered\"]:6.2f}% ({len(info[\"missing_lines\"])} lines missing)') for file, info in sorted(incomplete.items())] if incomplete else print('  All files have 100% coverage! ✓')"
 	@echo ""
 
-verify-coverage:
+verify-coverage: coverage
 	@echo "==> Verifying coverage thresholds and policy exception list..."
 	@if [ -f dont_commit_waiting_for_review ]; then \
 		echo "  [BYPASS] dont_commit_waiting_for_review exists - skipping verification"; \
@@ -147,7 +140,7 @@ type-check:
 	@echo "==> Running mypy type checker..."
 	mypy --strict $(SRC_DIR) $(TEST_DIR)
 
-all_checks: format lint type-check test coverage verify-coverage
+all_checks: format lint type-check verify-coverage
 	@echo ""
 	@echo "========================================="
 	@echo "All checks completed!"
