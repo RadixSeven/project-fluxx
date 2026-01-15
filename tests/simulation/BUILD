@@ -1,0 +1,9 @@
+python_tests(
+    dependencies=[
+        "//:reqs#PySide6",
+        "//:reqs#pyomo",
+        "//:reqs#highspy",
+        "tests/simulation/fixtures",
+        "tests/simulation/fixtures:json_fixtures",
+    ],
+)

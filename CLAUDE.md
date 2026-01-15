@@ -32,6 +32,38 @@ make install
 
 **Important**: Always use `QT_QPA_PLATFORM=offscreen` when running pytest to prevent GUI crashes in sandboxed environments.
 
+### Running Tests with Pants (Incremental)
+
+Pants provides incremental testing - only tests affected by changed files are re-run:
+
+```bash
+# Run all tests (incremental - only affected tests run)
+./pants test ::
+
+# Run a single test file
+./pants test tests/test_models.py
+
+# Run tests in a module
+./pants test tests/simulation::
+
+# Run tests with coverage (generates dist/coverage/python/coverage.json)
+./pants test --test-use-coverage ::
+```
+
+**Regenerating the lockfile**: If you update dependencies in `pyproject.toml`, regenerate the lockfile:
+```bash
+. venv/bin/activate && pex3 lock create \
+  --target-system linux \
+  --interpreter-constraint "CPython>=3.13,<3.14" \
+  --pip-version 24.2 \
+  --style universal \
+  --manylinux manylinux_2_28 \
+  -o locks/default.lock \
+  $(python -c "import tomllib; t=tomllib.load(open('pyproject.toml','rb')); print(' '.join(f'\"{d}\"' for d in t['project']['dependencies'] + t['project']['optional-dependencies']['dev']))")
+```
+
+Note: The lockfile targets Linux only (PySide6 doesn't have universal wheels). Add `"PySide6>=6.6.0,<6.10"` constraint to ensure manylinux_2_28 compatibility.
+
 ### Code Quality
 ```bash
 # Run all checks (format, lint, type-check, test, coverage)

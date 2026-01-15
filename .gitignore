@@ -209,3 +209,8 @@ coverage.json
 
 # Claude Code hooks state
 .claude/hooks/.last_check_state
+
+# Pants build system
+.pants.d/
+.pids/
+dist/
