@@ -300,10 +300,10 @@ def test_group_and_sort_variants_single_world() -> None:
 
     sorted_variants, dividers = _group_and_sort_variants(schedules)
 
-    # Should be sorted by start time within the single world
+    # Should be sorted by start time (reversed so earlier tasks appear at top of chart)
     assert len(sorted_variants) == 2
-    assert sorted_variants[0][0] == task2  # Earlier start
-    assert sorted_variants[1][0] == task1  # Later start
+    assert sorted_variants[0][0] == task1  # Later start (bottom of chart)
+    assert sorted_variants[1][0] == task2  # Earlier start (top of chart)
 
     # No dividers for single world
     assert dividers == []
@@ -362,11 +362,11 @@ def test_group_and_sort_variants_multiple_worlds() -> None:
     # Should have 4 variants
     assert len(sorted_variants) == 4
 
-    # First 2 should be base world, sorted by start time
+    # First 2 should be base world, sorted by start time (reversed for chart display)
     assert sorted_variants[0][0].world_sequence == empty_seq
-    assert sorted_variants[0][0] == task2_base  # Earlier start in base world
+    assert sorted_variants[0][0] == task1_base  # Later start (bottom of chart)
     assert sorted_variants[1][0].world_sequence == empty_seq
-    assert sorted_variants[1][0] == task1_base  # Later start in base world
+    assert sorted_variants[1][0] == task2_base  # Earlier start (top of chart)
 
     # Third should be world_a (earlier start than world_b)
     assert sorted_variants[2][0].world_sequence == world_a
@@ -416,11 +416,11 @@ def test_group_and_sort_variants_tiebreak_by_end_time() -> None:
 
     sorted_variants, dividers = _group_and_sort_variants(schedules)
 
-    # Should be sorted by end time when start times are equal
+    # Should be sorted by end time when start times are equal (reversed for chart)
     assert len(sorted_variants) == 3
-    assert sorted_variants[0][0] == task2  # Earliest end (1hr)
+    assert sorted_variants[0][0] == task1  # Latest end (3hr, bottom of chart)
     assert sorted_variants[1][0] == task3  # Middle end (2hr)
-    assert sorted_variants[2][0] == task1  # Latest end (3hr)
+    assert sorted_variants[2][0] == task2  # Earliest end (1hr, top of chart)
     assert dividers == []
 
 
@@ -461,10 +461,11 @@ def test_group_and_sort_variants_tiebreak_by_title() -> None:
     sorted_variants, dividers = _group_and_sort_variants(schedules)
 
     # Should be sorted alphabetically by title when start and end times are equal
+    # (reversed for chart display, so Z at bottom, A at top)
     assert len(sorted_variants) == 3
-    assert sorted_variants[0][0] == task2  # "Alpha Task"
+    assert sorted_variants[0][0] == task1  # "Zebra Task" (bottom of chart)
     assert sorted_variants[1][0] == task3  # "Middle Task"
-    assert sorted_variants[2][0] == task1  # "Zebra Task"
+    assert sorted_variants[2][0] == task2  # "Alpha Task" (top of chart)
     assert dividers == []
 
 

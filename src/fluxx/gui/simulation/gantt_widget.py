@@ -144,9 +144,11 @@ def _group_and_sort_variants(
         )
 
     # Sort each group by start time, then end time, then title (for determinism)
+    # Reverse so earlier tasks appear at top of chart (higher y-index in matplotlib)
     for world_seq in variants_by_world_seq:
         variants_by_world_seq[world_seq].sort(
-            key=lambda item: (item[1].start_time, item[1].end_time, item[1].task_title)
+            key=lambda item: (item[1].start_time, item[1].end_time, item[1].task_title),
+            reverse=True,
         )
 
     # Flatten into final sorted list and track divider positions
