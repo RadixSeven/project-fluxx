@@ -233,16 +233,23 @@ class TestGetVenvEnv:
             assert "PYTHONHOME" not in env
 
 
+def test_returns_existing_venv_path(tmp_path: Path) -> None:
+    """Should return venv path if it already exists."""
+    expected_venv_path = tmp_path / "venv"
+    bin_path = expected_venv_path / "bin"
+    activate_path = bin_path / "activate"
+    expected_venv_path.mkdir()
+    bin_path.mkdir()
+    activate_path.touch()
+
+    # Assuming venv exists in the test environment
+    assert expected_venv_path.exists()
+    venv_path = stop_check.ensure_venv(tmp_path)
+    assert venv_path == expected_venv_path
+
+
 class TestEnsureVenv:
     """Test ensure_venv function."""
-
-    def test_returns_existing_venv_path(self) -> None:
-        """Should return venv path if it already exists."""
-        project_dir = stop_check.get_project_dir()
-        # Assuming venv exists in the test environment
-        if (project_dir / "venv").exists():
-            venv_path = stop_check.ensure_venv(project_dir)
-            assert venv_path == project_dir / "venv"
 
     def test_creates_venv_if_missing(self) -> None:
         """Should attempt to create venv if missing."""

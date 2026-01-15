@@ -66,7 +66,7 @@ coverage:
 		  --use-coverage :: || true
 	@echo ""
 	@echo "Files with incomplete coverage:"
-	@$(PYTHON) -c "import json; data = json.load(open('dist/coverage/python/coverage.json')); files = data['files']; incomplete = {k: v for k, v in files.items() if v['summary']['percent_covered'] < 100}; [print(f'  {file:60s} {info[\"summary\"][\"percent_covered\"]:6.2f}% ({len(info[\"missing_lines\"])} lines missing)') for file, info in sorted(incomplete.items())] if incomplete else print('  All files have 100% coverage! ✓')"
+	@$(PYTHON) -c "import json; data = json.load(open('dist/coverage/python/coverage.json')); files = data['files']; incomplete = {k: v for k, v in files.items() if v['summary']['percent_covered'] < 100}; [print(f'  {file:60s} {info[\"summary\"][\"percent_covered\"]:6.2f}% ({len(info[\"missing_lines\"])} lines missing)\n          {info[\"missing_lines\"]}') for file, info in sorted(incomplete.items())] if incomplete else print('  All files have 100% coverage! ✓')"
 	@echo ""
 
 verify-coverage: coverage
